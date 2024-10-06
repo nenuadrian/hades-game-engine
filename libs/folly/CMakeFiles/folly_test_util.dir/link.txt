@@ -1,2 +1,0 @@
-/usr/bin/ar qc libfolly_test_util.a CMakeFiles/folly_test_util.dir/folly/test/DeterministicSchedule.cpp.o CMakeFiles/folly_test_util.dir/folly/json/JsonTestUtil.cpp.o
-/usr/bin/ranlib libfolly_test_util.a

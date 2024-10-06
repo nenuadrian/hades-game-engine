@@ -1,6 +1,6 @@
-# Hades - Light C++ 3D Game Engine 
+# Hades - Light C++ 3D Game Engine
 
-A compact game engine written in C++, which has the ability to handle 3D graphics, sound, entity management, and game mechanics using scripts. It currently supports the OpenGL rendering system, but there are plans to include Vulkan as a renderer in the future. The build system used for this engine is cmake.
+A game engine written in C++, which has the ability to handle 3D graphics, sound, entity management, and game mechanics using scripts. It currently supports the OpenGL rendering system, but there are plans to include Vulkan as a renderer in the future. The build system used for this engine is cmake.
 
 The purpose is educational and experimental in nature to explore the intriguing world of game engine development.
 
@@ -43,7 +43,9 @@ Not maintained or supported.
 ./scripts/tests
 ```
 
-## docs 
+## setup
 
-https://github.com/nenuadrian/game-engine/wiki
+```
+export PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig"
+```
 

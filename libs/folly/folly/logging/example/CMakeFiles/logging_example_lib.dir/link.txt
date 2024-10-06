@@ -1,2 +1,0 @@
-/usr/bin/ar qc liblogging_example_lib.a CMakeFiles/logging_example_lib.dir/lib.cpp.o
-/usr/bin/ranlib liblogging_example_lib.a

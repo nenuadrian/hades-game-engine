@@ -1,2 +1,0 @@
-/usr/bin/ar qc libfolly_exception_tracer_base.a CMakeFiles/folly_exception_tracer_base.dir/ExceptionTracer.cpp.o CMakeFiles/folly_exception_tracer_base.dir/StackTrace.cpp.o
-/usr/bin/ranlib libfolly_exception_tracer_base.a
