@@ -52,6 +52,8 @@ add_executable(hades_tests src/tests/test.cpp)
 if(WIN32)
   # Link against static gtest on Windows
   target_link_libraries(hades_tests gtest gtest_main)
+  target_compile_definitions(hades_tests PRIVATE GTEST_LINKED_AS_SHARED_LIBRARY=0)
+
 else()
   # Link against gtest dynamically on Linux/macOS
   target_link_libraries(hades_tests gtest gtest_main)

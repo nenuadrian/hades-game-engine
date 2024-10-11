@@ -6,20 +6,12 @@
 #include <iostream>
 #include <CLI/CLI.hpp>
 
-int main(int argc, char *argv[])
+void init()
 {
-
-  CLI::App app{"My Program"};
-
-  std::string filename;
-  app.add_option("-f,--file", filename, "File name");
-
-  CLI11_PARSE(app, argc, argv);
-
   if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_GAMECONTROLLER) != 0)
   {
     std::cerr << "Error: " << SDL_GetError() << std::endl;
-    return -1;
+    return;
   }
 
   // Set OpenGL attributes
@@ -42,7 +34,7 @@ int main(int argc, char *argv[])
   {
     std::cerr << "Error: " << SDL_GetError() << std::endl;
     SDL_Quit();
-    return -1;
+    return;
   }
 
   SDL_GLContext gl_context = SDL_GL_CreateContext(window);
@@ -104,6 +96,18 @@ int main(int argc, char *argv[])
   SDL_GL_DeleteContext(gl_context);
   SDL_DestroyWindow(window);
   SDL_Quit();
+}
+
+int main(int argc, char *argv[])
+{
+  CLI::App app{"My Program"};
+
+  std::string filename;
+  app.add_option("-f,--file", filename, "File name");
+
+  CLI11_PARSE(app, argc, argv);
+
+  init();
 
   return 0;
 }
