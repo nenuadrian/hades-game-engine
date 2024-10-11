@@ -11,42 +11,28 @@ set(SOURCES
     ${CMAKE_SOURCE_DIR}/lib/imgui/imgui_widgets.cpp
     ${CMAKE_SOURCE_DIR}/lib/imgui/imgui_tables.cpp
     ${CMAKE_SOURCE_DIR}/lib/imgui/backends/imgui_impl_sdl2.cpp
-    ${CMAKE_SOURCE_DIR}/lib/imgui/backends/imgui_impl_opengl3.cpp
-)
+    ${CMAKE_SOURCE_DIR}/lib/imgui/backends/imgui_impl_opengl3.cpp)
 
 # Create the executable
 add_executable(${PROJECT_NAME} ${SOURCES})
 
-# Platform-specific configuration for SDL and ImGui
+
+add_subdirectory(lib/SDL2)
+
 if(WIN32)
-    # Windows-specific settings
-    set(SDL2_PATH "${CMAKE_SOURCE_DIR}/lib/SDL2")
+  target_link_libraries(${PROJECT_NAME} SDL2-static SDL2main) # On Windows
+else()
+  # Link against OpenGL
+  find_library(OpenGL_LIBRARY OpenGL REQUIRED)
+  target_link_libraries(${PROJECT_NAME} ${OpenGL_LIBRARY})
 
-    # Include SDL2 directories for headers and link libraries
-    include_directories("${SDL2_PATH}/include")
-    target_link_libraries(${PROJECT_NAME} "${SDL2_PATH}/lib/x64/SDL2.lib" opengl32)
-
-    # Copy the SDL2 DLL to the build output directory
-    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${SDL2_PATH}/lib/x64/SDL2.dll"
-        $<TARGET_FILE_DIR:${PROJECT_NAME}>)
-
-elseif(APPLE)
-    # macOS-specific settings
-    find_package(SDL2 REQUIRED)
-
-    if(SDL2_FOUND)
-        include_directories(${SDL2_INCLUDE_DIRS})
-        target_link_libraries(${PROJECT_NAME} ${SDL2_LIBRARIES})
-    else()
-        message(FATAL_ERROR "SDL2 not found on macOS. Please install SDL2 using Homebrew.")
-    endif()
-
-    # Link against OpenGL
-    find_library(OpenGL_LIBRARY OpenGL REQUIRED)
-    target_link_libraries(${PROJECT_NAME} ${OpenGL_LIBRARY})
+  # Link ImGui and SDL dependencies
+  target_link_libraries(${PROJECT_NAME} "-framework Cocoa" "-framework IOKit"
+                        "-framework CoreVideo")
+  target_link_libraries(${PROJECT_NAME} SDL2 SDL2main) # On Linux/macOS
 endif()
+
+target_include_directories(${PROJECT_NAME} PRIVATE lib/SDL2/include)
 
 # Include ImGui directories
 include_directories(${CMAKE_SOURCE_DIR}/lib/imgui)
@@ -54,17 +40,8 @@ include_directories(${CMAKE_SOURCE_DIR}/lib/imgui/backends)
 
 include_directories(${CMAKE_SOURCE_DIR}/lib/CLI11/include)
 
-# Link ImGui and SDL dependencies
-target_link_libraries(${PROJECT_NAME}
-    "-framework Cocoa"
-    "-framework IOKit"
-    "-framework CoreVideo"
-)
-
-
 # Add GoogleTest subdirectory
 add_subdirectory(lib/googletest)
-
 
 # Add your test executable
 add_executable(my_project_tests src/tests/test.cpp)
