@@ -25,7 +25,7 @@ void init()
   SDL_GL_SetAttribute(SDL_GL_ACCELERATED_VISUAL, 1);
 
   // Create SDL window with OpenGL context
-  SDL_Window *window = SDL_CreateWindow("Cross-Platform SDL ImGui App",
+  SDL_Window *window = SDL_CreateWindow("Hades Game Engine",
                                         SDL_WINDOWPOS_CENTERED,
                                         SDL_WINDOWPOS_CENTERED,
                                         1280, 720,
