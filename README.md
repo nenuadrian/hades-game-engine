@@ -55,6 +55,16 @@ cd build
 ./CrossPlatformSDLImGuiApp
 ```
 
+### Test
+
+```
+mkdir build
+cd build
+cmake ..
+make
+ctest --output-on-failure
+```
+
 ## setup
 
 ```

@@ -60,3 +60,17 @@ target_link_libraries(${PROJECT_NAME}
     "-framework IOKit"
     "-framework CoreVideo"
 )
+
+
+# Add GoogleTest subdirectory
+add_subdirectory(lib/googletest)
+
+
+# Add your test executable
+add_executable(my_project_tests src/tests/test.cpp)
+target_link_libraries(my_project_tests gtest gtest_main)
+enable_testing()
+
+# Discover and register tests
+include(GoogleTest)
+gtest_discover_tests(my_project_tests)
