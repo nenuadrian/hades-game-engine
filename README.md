@@ -54,7 +54,7 @@ make
 
 ```
 cd build
-./CrossPlatformSDLImGuiApp
+./HadesGameEngine
 ```
 
 ### Test

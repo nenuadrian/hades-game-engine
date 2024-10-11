@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(CrossPlatformSDLImGuiApp)
+project(HadesGameEngine)
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -47,10 +47,18 @@ include_directories(${CMAKE_SOURCE_DIR}/lib/CLI11/include)
 add_subdirectory(lib/googletest)
 
 # Add your test executable
-add_executable(my_project_tests src/tests/test.cpp)
-target_link_libraries(my_project_tests gtest gtest_main)
+add_executable(hades_tests src/tests/test.cpp)
+
+if(WIN32)
+  # Link against static gtest on Windows
+  target_link_libraries(hades_tests gtest gtest_main)
+else()
+  # Link against gtest dynamically on Linux/macOS
+  target_link_libraries(hades_tests gtest gtest_main)
+endif()
+
 enable_testing()
 
 # Discover and register tests
 include(GoogleTest)
-gtest_discover_tests(my_project_tests)
+gtest_discover_tests(hades_tests)
