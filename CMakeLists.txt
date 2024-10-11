@@ -50,10 +50,6 @@ add_subdirectory(lib/googletest)
 add_executable(hades_tests src/tests/test.cpp)
 
 if(WIN32)
-  if(MSVC)
-    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MD")
-    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MDd")
-  endif()
   # Link against static gtest on Windows
   target_link_libraries(hades_tests gtest gtest_main)
   target_compile_definitions(hades_tests
@@ -62,6 +58,13 @@ if(WIN32)
 else()
   # Link against gtest dynamically on Linux/macOS
   target_link_libraries(hades_tests gtest gtest_main)
+endif()
+
+
+if(MSVC)
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MD")
+    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MDd")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /NODEFAULTLIB:LIBCMT")
 endif()
 
 enable_testing()
