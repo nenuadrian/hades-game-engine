@@ -16,7 +16,6 @@ set(SOURCES
 # Create the executable
 add_executable(${PROJECT_NAME} ${SOURCES})
 
-
 add_subdirectory(lib/SDL2)
 
 if(WIN32)
@@ -26,10 +25,14 @@ else()
   find_library(OpenGL_LIBRARY OpenGL REQUIRED)
   target_link_libraries(${PROJECT_NAME} ${OpenGL_LIBRARY})
 
-  # Link ImGui and SDL dependencies
-  target_link_libraries(${PROJECT_NAME} "-framework Cocoa" "-framework IOKit"
-                        "-framework CoreVideo")
   target_link_libraries(${PROJECT_NAME} SDL2 SDL2main) # On Linux/macOS
+
+  if(APPLE)
+    # Link ImGui and SDL dependencies
+    target_link_libraries(${PROJECT_NAME} "-framework Cocoa" "-framework IOKit"
+                          "-framework CoreVideo")
+  endif()
+
 endif()
 
 target_include_directories(${PROJECT_NAME} PRIVATE lib/SDL2/include)
