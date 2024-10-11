@@ -6,12 +6,12 @@ set(CMAKE_CXX_STANDARD 17)
 # Add source files
 set(SOURCES
     src/main.cpp
-    ${CMAKE_SOURCE_DIR}/imgui/imgui.cpp
-    ${CMAKE_SOURCE_DIR}/imgui/imgui_draw.cpp
-    ${CMAKE_SOURCE_DIR}/imgui/imgui_widgets.cpp
-    ${CMAKE_SOURCE_DIR}/imgui/imgui_tables.cpp
-    ${CMAKE_SOURCE_DIR}/imgui/backends/imgui_impl_sdl2.cpp
-    ${CMAKE_SOURCE_DIR}/imgui/backends/imgui_impl_opengl3.cpp
+    ${CMAKE_SOURCE_DIR}/lib/imgui/imgui.cpp
+    ${CMAKE_SOURCE_DIR}/lib/imgui/imgui_draw.cpp
+    ${CMAKE_SOURCE_DIR}/lib/imgui/imgui_widgets.cpp
+    ${CMAKE_SOURCE_DIR}/lib/imgui/imgui_tables.cpp
+    ${CMAKE_SOURCE_DIR}/lib/imgui/backends/imgui_impl_sdl2.cpp
+    ${CMAKE_SOURCE_DIR}/lib/imgui/backends/imgui_impl_opengl3.cpp
 )
 
 # Create the executable
@@ -20,7 +20,7 @@ add_executable(${PROJECT_NAME} ${SOURCES})
 # Platform-specific configuration for SDL and ImGui
 if(WIN32)
     # Windows-specific settings
-    set(SDL2_PATH "${CMAKE_SOURCE_DIR}/SDL2")
+    set(SDL2_PATH "${CMAKE_SOURCE_DIR}/lib/SDL2")
 
     # Include SDL2 directories for headers and link libraries
     include_directories("${SDL2_PATH}/include")
@@ -49,8 +49,10 @@ elseif(APPLE)
 endif()
 
 # Include ImGui directories
-include_directories(${CMAKE_SOURCE_DIR}/imgui)
-include_directories(${CMAKE_SOURCE_DIR}/imgui/backends)
+include_directories(${CMAKE_SOURCE_DIR}/lib/imgui)
+include_directories(${CMAKE_SOURCE_DIR}/lib/imgui/backends)
+
+include_directories(${CMAKE_SOURCE_DIR}/lib/CLI11/include)
 
 # Link ImGui and SDL dependencies
 target_link_libraries(${PROJECT_NAME}

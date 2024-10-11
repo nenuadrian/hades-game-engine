@@ -11,15 +11,15 @@ Not maintained or supported.
 ## goals
  * develop C++ software engineering skills
  * understand graphics 2D and 3D rendering pipelines with OpenGL and other frameworks
- * build a usable engine for making a small game 
+ * build a usable engine for making a small game
 
 ## features
 
  * entity management, with camera and model features
  * save / load project from JSON
  * model loading using assimp and stb
- * sound 
- * tests 
+ * sound
+ * tests
  * generating shaders dynamically
 
 ## libraries
@@ -37,10 +37,22 @@ Not maintained or supported.
  * json
  * entt
 
-## tests
+## Build & Run
+
+### Build
 
 ```
-./scripts/tests
+mkdir build
+cd build
+cmake ..
+make
+```
+
+### Run
+
+```
+cd build
+./CrossPlatformSDLImGuiApp
 ```
 
 ## setup
