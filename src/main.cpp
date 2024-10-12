@@ -69,7 +69,6 @@ void init()
   // Register systems
   auto movementSystem = systemManager.registerSystem<MovementSystem>();
 
-
   Editor editor;
   // Create an entity
   Entity::Id entity = entityManager.createEntity();
@@ -95,31 +94,36 @@ void init()
       {
         running = false;
       }
-      auto currentTime = std::chrono::high_resolution_clock::now();
 
-      // Calculate delta time (time between frames in seconds)
-      std::chrono::duration<float> deltaTime = currentTime - previousTime;
-      previousTime = currentTime;
-
-      // Convert delta time to seconds
-      float dt = deltaTime.count();
-      systemManager.updateSystems(dt, componentManager);
       ImGui_ImplSDL2_ProcessEvent(&event);
     }
+
+    auto currentTime = std::chrono::high_resolution_clock::now();
+
+    // Calculate delta time (time between frames in seconds)
+    std::chrono::duration<float> deltaTime = currentTime - previousTime;
+    previousTime = currentTime;
+
+    // Convert delta time to seconds
+    float dt = deltaTime.count();
+    systemManager.updateSystems(dt, componentManager);
 
     // Start ImGui frame
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplSDL2_NewFrame();
     ImGui::NewFrame();
 
-    editor.render();
 
     // Rendering
     ImGui::Render();
     SDL_GL_MakeCurrent(window, gl_context);
+
+    editor.render(dt);
+
     glViewport(0, 0, (int)io.DisplaySize.x, (int)io.DisplaySize.y);
     glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
+
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
     SDL_GL_SwapWindow(window);

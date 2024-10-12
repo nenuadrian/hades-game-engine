@@ -3,6 +3,8 @@
 
 #include "entity.hpp"
 #include "component_array.hpp"
+#include <memory>
+#include <unordered_map>
 
 class ComponentManager
 {

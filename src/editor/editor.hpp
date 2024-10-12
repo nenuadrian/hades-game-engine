@@ -12,7 +12,7 @@ class Editor
 public:
   Editor() {}
 
-  void render()
+  void render(float deltaTime)
   {
     // Create ImGui window
     ImGui::Begin("Hello, ImGui!");
@@ -21,7 +21,7 @@ public:
 
     menu();
     entities();
-    debug();
+    debug(deltaTime);
   }
 
 private:
@@ -79,7 +79,7 @@ private:
   {
   }
 
-  void debug()
+  void debug(float deltaTime)
   {
     if (!state.showDebugInfo)
     {
@@ -87,6 +87,7 @@ private:
     }
 
     ImGui::Begin("Debug Window");
+    ImGui::Text("FPS: %f", 1 / deltaTime);
     ImGui::End();
   }
 };
