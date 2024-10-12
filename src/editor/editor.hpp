@@ -1,6 +1,9 @@
 #include "imgui.h"
 
 #include "types.h"
+#include "../engine/core/ecs/component_manager.hpp"
+#include "../engine/core/ecs/entity_manager.hpp"
+#include "../engine/core/ecs/transform_hierarchy_component.hpp"
 
 class Editor
 {
@@ -10,7 +13,7 @@ public:
 
   Editor() {}
 
-  void render(float deltaTime)
+  void render(float deltaTime, EntityManager &entityManager, ComponentManager &componentManager)
   {
     // Create ImGui window
     ImGui::Begin("Hello, ImGui!");
@@ -18,7 +21,7 @@ public:
     ImGui::End();
 
     menu();
-    entities();
+    entities(entityManager, componentManager);
     debug(deltaTime);
   }
 
@@ -63,7 +66,7 @@ private:
       // Debugging Menu
       if (ImGui::BeginMenu("Debug"))
       {
-        if (ImGui::MenuItem("Show Debug Window", nullptr, state.showDebugInfo))
+        if (ImGui::MenuItem("Show Debug Info", nullptr, state.showDebugInfo))
         {
           state.showDebugInfo = !state.showDebugInfo;
         }
@@ -74,8 +77,47 @@ private:
     }
   }
 
-  void entities()
+  void entities(EntityManager &entityManager, ComponentManager &componentManager)
   {
+    printAllHierarchies(entityManager, componentManager);
+  }
+
+  void printHierarchy(Entity::Id entity, ComponentManager &componentManager, int depth = 0)
+  {
+    // Get the hierarchy component of the entity
+    if (!componentManager.hasComponent<TransformHierarchyComponent>(entity))
+    {
+      return; // No hierarchy component, so skip this entity
+    }
+
+    const auto &hierarchy = componentManager.getComponent<TransformHierarchyComponent>(entity);
+
+    // Print the entity, indented based on its depth in the hierarchy
+    // std::cout << std::string(depth * 2, ' ') << "Entity " << entity << std::endl;
+
+    // Recursively print each child entity
+    for (const auto &child : hierarchy.children)
+    {
+      printHierarchy(child, componentManager, depth + 1);
+    }
+  }
+
+  void printAllHierarchies(EntityManager &entityManager, ComponentManager &componentManager)
+  {
+    // Assuming you have a way to iterate over all entities in the scene
+    for (Entity::Id entity : entityManager.getAllEntities())
+    {
+      if (!componentManager.hasComponent<TransformHierarchyComponent>(entity))
+      {
+        continue;
+      }
+      const auto &hierarchy = componentManager.getComponent<TransformHierarchyComponent>(entity);
+      // Only print entities that are "roots" (i.e., have no parent)
+      if (!hierarchy.hasParent())
+      {
+        printHierarchy(entity, componentManager, 0);
+      }
+    }
   }
 
   void debug(float deltaTime)

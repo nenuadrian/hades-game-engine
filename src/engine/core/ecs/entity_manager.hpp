@@ -1,3 +1,6 @@
+#ifndef ENTITY_MANAGER_H
+#define ENTITY_MANAGER_H
+
 #include "constants.h"
 #include "entity.hpp"
 #include <bitset>
@@ -44,4 +47,11 @@ public:
   {
     return entityComponentSignatures.at(entity);
   }
+
+  std::vector<Entity::Id> getAllEntities()
+  {
+    return activeEntities;
+  }
 };
+
+#endif
