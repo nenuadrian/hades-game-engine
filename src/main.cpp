@@ -5,6 +5,12 @@
 #include "backends/imgui_impl_opengl3.h"
 #include <iostream>
 #include <CLI/CLI.hpp>
+#include "engine/core/ecs/system_manager.hpp"
+#include "engine/core/ecs/component_manager.hpp"
+#include "engine/core/ecs/entity_manager.hpp"
+#include "engine/core/ecs/entity.hpp"
+#include <chrono>
+#include "engine/core/ecs/constants.h"
 
 void init()
 {
@@ -54,6 +60,28 @@ void init()
   ImGui_ImplOpenGL3_Init("#version 330");
 
   // Main loop
+
+  EntityManager entityManager;
+  ComponentManager componentManager;
+  SystemManager systemManager;
+
+  // Register systems
+  auto movementSystem = systemManager.registerSystem<MovementSystem>();
+
+  // Create an entity
+  Entity::Id entity = entityManager.createEntity();
+
+  // Add components to the entity
+  // componentManager.addComponent<Transform>(entity, {Vec3(0, 0, 0)});
+  // componentManager.addComponent<Velocity>(entity, {Vec3(1, 0, 0)});
+
+  // Set the entity signature to include both Transform and Velocity
+  std::bitset<MAX_COMPONENTS> signature;
+  // signature.set(getComponentTypeId<Transform>());
+  // signature.set(getComponentTypeId<Velocity>());
+  entityManager.setComponentSignature(entity, signature);
+
+  auto previousTime = std::chrono::high_resolution_clock::now();
   bool running = true;
   SDL_Event event;
   while (running)
@@ -64,6 +92,15 @@ void init()
       {
         running = false;
       }
+      auto currentTime = std::chrono::high_resolution_clock::now();
+
+      // Calculate delta time (time between frames in seconds)
+      std::chrono::duration<float> deltaTime = currentTime - previousTime;
+      previousTime = currentTime;
+
+      // Convert delta time to seconds
+      float dt = deltaTime.count();
+      systemManager.updateSystems(dt, componentManager);
       ImGui_ImplSDL2_ProcessEvent(&event);
     }
 
@@ -100,10 +137,7 @@ void init()
 
 int main(int argc, char *argv[])
 {
-  CLI::App app{"My Program"};
-
-  std::string filename;
-  app.add_option("-f,--file", filename, "File name");
+  CLI::App app{"Hades"};
 
   CLI11_PARSE(app, argc, argv);
 

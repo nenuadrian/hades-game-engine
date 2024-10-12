@@ -3,9 +3,19 @@ project(HadesGameEngine)
 
 set(CMAKE_CXX_STANDARD 17)
 
+# Define the source directory
+set(SRC_DIR "${CMAKE_SOURCE_DIR}/src/engine")
+
+# Automatically find all .cpp, .h, and .hpp files in the src directory
+file(GLOB_RECURSE SRC_FILES
+    "${SRC_DIR}/*.cpp"
+    "${SRC_DIR}/*.h"
+    "${SRC_DIR}/*.hpp")
+
 # Add source files
 set(SOURCES
-    src/main.cpp
+    ${SRC_FILES}
+    ${CMAKE_SOURCE_DIR}/src/main.cpp
     ${CMAKE_SOURCE_DIR}/lib/imgui/imgui.cpp
     ${CMAKE_SOURCE_DIR}/lib/imgui/imgui_draw.cpp
     ${CMAKE_SOURCE_DIR}/lib/imgui/imgui_widgets.cpp
