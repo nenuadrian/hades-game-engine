@@ -11,6 +11,7 @@
 #include "engine/core/ecs/entity.hpp"
 #include <chrono>
 #include "engine/core/ecs/constants.h"
+#include "editor/types.h"
 #include "editor/editor.hpp"
 
 void init()
@@ -98,6 +99,16 @@ void init()
       ImGui_ImplSDL2_ProcessEvent(&event);
     }
 
+    while (!editor.state.events.empty())
+    {
+      EDITOR_EventType event = editor.state.events.front();
+      editor.state.events.pop();
+      if (event == EDITOR_EventType::EDITOR_QUIT)
+      {
+        running = false;
+      }
+    }
+
     auto currentTime = std::chrono::high_resolution_clock::now();
 
     // Calculate delta time (time between frames in seconds)
@@ -112,13 +123,11 @@ void init()
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplSDL2_NewFrame();
     ImGui::NewFrame();
-
+    editor.render(dt);
 
     // Rendering
     ImGui::Render();
     SDL_GL_MakeCurrent(window, gl_context);
-
-    editor.render(dt);
 
     glViewport(0, 0, (int)io.DisplaySize.x, (int)io.DisplaySize.y);
     glClearColor(0.1f, 0.1f, 0.1f, 1.0f);

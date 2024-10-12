@@ -1,15 +1,13 @@
 #include "imgui.h"
 
-struct EditorState
-{
-  bool showDebugInfo = false;
-};
+#include "types.h"
 
 class Editor
 {
-  EditorState state;
 
 public:
+  EditorState state;
+
   Editor() {}
 
   void render(float deltaTime)
@@ -57,6 +55,7 @@ private:
         {
           // Exit the application
           // This can be a flag to trigger exit
+          state.events.emplace(EDITOR_EventType::EDITOR_QUIT);
         }
         ImGui::EndMenu();
       }
