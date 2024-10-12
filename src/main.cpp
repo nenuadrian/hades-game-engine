@@ -11,6 +11,7 @@
 #include "engine/core/ecs/entity.hpp"
 #include <chrono>
 #include "engine/core/ecs/constants.h"
+#include "editor/editor.hpp"
 
 void init()
 {
@@ -68,6 +69,8 @@ void init()
   // Register systems
   auto movementSystem = systemManager.registerSystem<MovementSystem>();
 
+
+  Editor editor;
   // Create an entity
   Entity::Id entity = entityManager.createEntity();
 
@@ -109,10 +112,7 @@ void init()
     ImGui_ImplSDL2_NewFrame();
     ImGui::NewFrame();
 
-    // Create ImGui window
-    ImGui::Begin("Hello, ImGui!");
-    ImGui::Text("This is a cross-platform ImGui window with SDL and OpenGL.");
-    ImGui::End();
+    editor.render();
 
     // Rendering
     ImGui::Render();
