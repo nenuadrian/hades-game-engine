@@ -26,25 +26,25 @@ public:
   }
 
   template <typename T>
-  void addComponent(Entity::Id entity, T component)
+  void addComponent(Entity::EntityId entity, T component)
   {
     getComponentArray<T>()->insert(entity, component);
   }
 
   template <typename T>
-  void removeComponent(Entity::Id entity)
+  void removeComponent(Entity::EntityId entity)
   {
     getComponentArray<T>()->remove(entity);
   }
 
   template <typename T>
-  T &getComponent(Entity::Id entity)
+  T &getComponent(Entity::EntityId entity)
   {
     return getComponentArray<T>()->get(entity);
   }
 
   template <typename T>
-  bool hasComponent(Entity::Id entity)
+  bool hasComponent(Entity::EntityId entity)
   {
     return getComponentArray<T>()->has(entity);
   }

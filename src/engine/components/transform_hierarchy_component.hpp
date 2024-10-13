@@ -3,25 +3,25 @@
 
 #include <vector>
 #include <optional>
-#include "entity.hpp"
+#include "../core/ecs/entity.hpp"
 
 class TransformHierarchyComponent
 {
 public:
-  std::optional<Entity::Id> parent; // The parent entity, if it exists
-  std::vector<Entity::Id> children; // List of child entities
+  std::optional<Entity::EntityId> parent; // The parent entity, if it exists
+  std::vector<Entity::EntityId> children; // List of child entities
 
-  void addChild(Entity::Id child)
+  void addChild(Entity::EntityId child)
   {
     children.push_back(child);
   }
 
-  void removeChild(Entity::Id child)
+  void removeChild(Entity::EntityId child)
   {
     children.erase(std::remove(children.begin(), children.end(), child), children.end());
   }
 
-  void setParent(Entity::Id newParent)
+  void setParent(Entity::EntityId newParent)
   {
     parent = newParent;
   }

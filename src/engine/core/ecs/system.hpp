@@ -6,7 +6,7 @@
 class System
 {
 public:
-  std::vector<Entity::Id> entities;
+  std::vector<Entity::EntityId> entities;
 
   virtual void update(float deltaTime, ComponentManager &componentManager) = 0;
 };

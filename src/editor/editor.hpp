@@ -3,7 +3,7 @@
 #include "types.h"
 #include "../engine/core/ecs/component_manager.hpp"
 #include "../engine/core/ecs/entity_manager.hpp"
-#include "../engine/core/ecs/transform_hierarchy_component.hpp"
+#include "../engine/components/transform_hierarchy_component.hpp"
 
 class Editor
 {
@@ -85,7 +85,7 @@ private:
     ImGui::End();
   }
 
-  void printHierarchy(Entity::Id entity, ComponentManager &componentManager, int depth = 0)
+  void printHierarchy(Entity::EntityId entity, ComponentManager &componentManager, int depth = 0)
   {
     // Get the hierarchy component of the entity
     if (!componentManager.hasComponent<TransformHierarchyComponent>(entity))
@@ -109,7 +109,7 @@ private:
   void printAllHierarchies(EntityManager &entityManager, ComponentManager &componentManager)
   {
     // Assuming you have a way to iterate over all entities in the scene
-    for (Entity::Id entity : entityManager.getAllEntities())
+    for (Entity::EntityId entity : entityManager.getAllEntities())
     {
       if (!componentManager.hasComponent<TransformHierarchyComponent>(entity))
       {

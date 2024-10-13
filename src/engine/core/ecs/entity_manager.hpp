@@ -11,14 +11,14 @@
 class EntityManager
 {
 private:
-  std::vector<Entity::Id> activeEntities;
-  std::queue<Entity::Id> availableEntities;
-  std::unordered_map<Entity::Id, std::bitset<MAX_COMPONENTS>> entityComponentSignatures;
+  std::vector<Entity::EntityId> activeEntities;
+  std::queue<Entity::EntityId> availableEntities;
+  std::unordered_map<Entity::EntityId, std::bitset<MAX_COMPONENTS>> entityComponentSignatures;
 
 public:
-  Entity::Id createEntity()
+  Entity::EntityId createEntity()
   {
-    Entity::Id id;
+    Entity::EntityId id;
     if (!availableEntities.empty())
     {
       id = availableEntities.front();
@@ -33,23 +33,23 @@ public:
     return id;
   }
 
-  void destroyEntity(Entity::Id entity)
+  void destroyEntity(Entity::EntityId entity)
   {
     availableEntities.push(entity);
     entityComponentSignatures.erase(entity);
   }
 
-  void setComponentSignature(Entity::Id entity, std::bitset<MAX_COMPONENTS> signature)
+  void setComponentSignature(Entity::EntityId entity, std::bitset<MAX_COMPONENTS> signature)
   {
     entityComponentSignatures[entity] = signature;
   }
 
-  const std::bitset<MAX_COMPONENTS> &getComponentSignature(Entity::Id entity) const
+  const std::bitset<MAX_COMPONENTS> &getComponentSignature(Entity::EntityId entity) const
   {
     return entityComponentSignatures.at(entity);
   }
 
-  std::vector<Entity::Id> getAllEntities()
+  std::vector<Entity::EntityId> getAllEntities()
   {
     return activeEntities;
   }

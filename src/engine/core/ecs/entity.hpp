@@ -7,17 +7,17 @@
 class Entity
 {
 public:
-  using Id = uint32_t;
-  static const Id INVALID = std::numeric_limits<Id>::max();
+  using EntityId = uint32_t;
+
+  static const EntityId INVALID = std::numeric_limits<EntityId>::max();
 
 private:
-  Id id;
-  // Other properties (if necessary)
+  EntityId id;
 
 public:
-  Entity(Id id) : id(id) {}
+  Entity(EntityId id) : id(id) {}
 
-  Id getId() const { return id; }
+  EntityId getId() const { return id; }
 };
 
 #endif
