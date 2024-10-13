@@ -27,8 +27,9 @@ public:
     else
     {
       id = activeEntities.size();
-      activeEntities.push_back(id);
     }
+    activeEntities.push_back(id);
+
     return id;
   }
 

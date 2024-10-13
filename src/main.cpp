@@ -71,19 +71,6 @@ void init()
   auto movementSystem = systemManager.registerSystem<MovementSystem>();
 
   Editor editor;
-  // Create an entity
-  Entity::Id entity = entityManager.createEntity();
-
-  // Add components to the entity
-  // componentManager.addComponent<Transform>(entity, {Vec3(0, 0, 0)});
-  // componentManager.addComponent<Velocity>(entity, {Vec3(1, 0, 0)});
-
-  // Set the entity signature to include both Transform and Velocity
-  std::bitset<MAX_COMPONENTS> signature;
-  // signature.set(getComponentTypeId<Transform>());
-  // signature.set(getComponentTypeId<Velocity>());
-  entityManager.setComponentSignature(entity, signature);
-
   auto previousTime = std::chrono::high_resolution_clock::now();
   bool running = true;
   SDL_Event event;

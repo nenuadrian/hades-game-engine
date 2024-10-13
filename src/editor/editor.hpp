@@ -15,10 +15,11 @@ public:
 
   void render(float deltaTime, EntityManager &entityManager, ComponentManager &componentManager)
   {
-    // Create ImGui window
-    ImGui::Begin("Hello, ImGui!");
-    ImGui::Text("This is a cross-platform ImGui window with SDL and OpenGL.");
-    ImGui::End();
+    if (entityManager.getAllEntities().empty())
+    {
+      const auto id = entityManager.createEntity();
+      componentManager.addComponent(id, TransformHierarchyComponent());
+    }
 
     menu();
     entities(entityManager, componentManager);
@@ -79,7 +80,9 @@ private:
 
   void entities(EntityManager &entityManager, ComponentManager &componentManager)
   {
+    ImGui::Begin("Entities");
     printAllHierarchies(entityManager, componentManager);
+    ImGui::End();
   }
 
   void printHierarchy(Entity::Id entity, ComponentManager &componentManager, int depth = 0)
@@ -94,6 +97,7 @@ private:
 
     // Print the entity, indented based on its depth in the hierarchy
     // std::cout << std::string(depth * 2, ' ') << "Entity " << entity << std::endl;
+    ImGui::Text("%d", entity);
 
     // Recursively print each child entity
     for (const auto &child : hierarchy.children)
@@ -111,6 +115,7 @@ private:
       {
         continue;
       }
+
       const auto &hierarchy = componentManager.getComponent<TransformHierarchyComponent>(entity);
       // Only print entities that are "roots" (i.e., have no parent)
       if (!hierarchy.hasParent())
