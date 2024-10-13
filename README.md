@@ -24,22 +24,23 @@ Not maintained or supported.
  * tests
  * generating shaders dynamically
 
-## libraries
+## Libraries
 
- * assimp
- * glad
- * glew
+ * SDL2
  * glfw
- * glm
+ * OpenGL
  * imgui
- * nativefiledialog
- * stb
- * catch2
- * soloud
- * json
- * entt
+ * googletest
+ * bgfx
 
-## Build & Run
+## Entity-Component-System (ECS)
+
+Custom built to build up a natural understanding of the pattern. For example, it is not an Entity-Component System, made from entity and components, but one made out of three parts, the system being an essential component of the triad, acting on entities with specific components.
+
+### Example
+
+
+## Build & Run & Test
 
 ### Build
 
@@ -67,9 +68,4 @@ make
 ctest --output-on-failure
 ```
 
-## setup
-
-```
-export PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig"
-```
 
