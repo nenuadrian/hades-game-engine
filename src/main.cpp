@@ -1,6 +1,7 @@
-#include <SDL.h>
-#include <SDL_opengl.h>
+#include "SDL_opengl.h"
+#include "SDL.h"
 #include "imgui.h"
+#include "bgfx/bgfx.h"
 #include "backends/imgui_impl_sdl2.h"
 #include "backends/imgui_impl_opengl3.h"
 #include <iostream>
@@ -8,7 +9,6 @@
 #include "engine/core/ecs/system_manager.hpp"
 #include "engine/core/ecs/component_manager.hpp"
 #include "engine/core/ecs/entity_manager.hpp"
-#include "engine/core/ecs/entity.hpp"
 #include <chrono>
 #include "engine/core/ecs/constants.h"
 #include "editor/types.h"
@@ -69,6 +69,14 @@ void init()
 
   // Register systems
   auto movementSystem = systemManager.registerSystem<MovementSystem>();
+
+  // bgfx
+  bgfx::Init init;
+  init.type = bgfx::RendererType::Count; // Auto-detect renderer
+  init.resolution.width = 1280;
+  init.resolution.height = 720;
+  init.resolution.reset = BGFX_RESET_VSYNC;
+  bgfx::init(init);
 
   Editor editor;
   auto previousTime = std::chrono::high_resolution_clock::now();
