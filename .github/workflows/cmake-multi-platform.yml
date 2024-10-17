@@ -59,8 +59,15 @@ jobs:
           # Use PowerShell to download the Vulkan SDK installer
           powershell -Command "Invoke-WebRequest -Uri 'https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-sdk.exe' -OutFile 'vulkan-sdk.exe'"
 
-          # Install the Vulkan SDK silently
+          # Run the Vulkan SDK installer silently
           ./vulkan-sdk.exe /S /D=C:\VulkanSDK
+          $exitCode = $?
+
+          # Check if the installation succeeded
+          if ($exitCode -ne 0) {
+              Write-Host "Error: Vulkan SDK installation failed with exit code $exitCode."
+              exit 1
+          }
 
           # Wait for the Vulkan SDK folder to be created
           $maxRetries = 10
@@ -71,7 +78,7 @@ jobs:
           }
 
           if (-Not (Test-Path 'C:\VulkanSDK')) {
-              Write-Host "Error: Vulkan SDK installation failed or folder not created."
+              Write-Host "Error: Vulkan SDK folder not created after installation."
               exit 1
           }
 
