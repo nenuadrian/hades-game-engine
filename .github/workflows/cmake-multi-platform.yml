@@ -2,9 +2,9 @@ name: CMake on multiple platforms with Vulkan support
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 jobs:
   build:
@@ -35,52 +35,61 @@ jobs:
             c_compiler: cl
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    # Install dependencies and Vulkan SDK on Ubuntu
-    - name: Install dependencies and Vulkan (Ubuntu)
-      if: matrix.os == 'ubuntu-latest'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-        libglu1-mesa-dev freeglut3-dev mesa-common-dev \
-        xorg-dev libvulkan-dev vulkan-tools
+      # Install dependencies and Vulkan SDK on Ubuntu
+      - name: Install dependencies and Vulkan (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+          libglu1-mesa-dev freeglut3-dev mesa-common-dev \
+          xorg-dev libvulkan-dev vulkan-tools
 
-        # Optionally, download the Vulkan SDK from LunarG (replace with the latest version)
-        wget -qO vulkansdk.tar.gz https://sdk.lunarg.com/sdk/download/latest/linux/vulkan-sdk.tar.gz
-        mkdir -p $HOME/vulkan-sdk
-        tar -xzf vulkansdk.tar.gz -C $HOME/vulkan-sdk --strip-components=1
-        source $HOME/vulkan-sdk/setup-env.sh
+          # Optionally, download the Vulkan SDK from LunarG (replace with the latest version)
+          wget -qO vulkansdk.tar.gz https://sdk.lunarg.com/sdk/download/latest/linux/vulkan-sdk.tar.gz
+          mkdir -p $HOME/vulkan-sdk
+          tar -xzf vulkansdk.tar.gz -C $HOME/vulkan-sdk --strip-components=1
+          source $HOME/vulkan-sdk/setup-env.sh
 
-    # Install Vulkan SDK on Windows
-    - name: Install Vulkan SDK (Windows)
-      if: matrix.os == 'windows-latest'
-      run: |
-        # Download and install the Vulkan SDK (replace with the latest version)
-        wget https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-sdk.exe
-        ./vulkan-sdk.exe /S /D=C:\VulkanSDK
-        setx VULKAN_SDK C:\VulkanSDK\1.x.x.x
-        set PATH=%PATH%;%VULKAN_SDK%\Bin
+      # Install Vulkan SDK on Windows
+      - name: Install Vulkan SDK (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          # Use PowerShell to download the Vulkan SDK installer
+          powershell -Command "Invoke-WebRequest -Uri 'https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-sdk.exe' -OutFile 'vulkan-sdk.exe'"
 
-    - name: Set reusable strings
-      id: strings
-      shell: bash
-      run: |
-        echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
+          # Install the Vulkan SDK silently
+          ./vulkan-sdk.exe /S /D=C:\VulkanSDK
 
-    - name: Configure CMake
-      run: |
-        cmake -B ${{ steps.strings.outputs.build-output-dir }}
-        -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
-        -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
-        -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-        -DVulkan_INCLUDE_DIR=$VULKAN_SDK/Include
-        -DVulkan_LIBRARY=$VULKAN_SDK/Lib
-        -S ${{ github.workspace }}
+          # Automatically detect the Vulkan SDK version (assuming it's in C:\VulkanSDK)
+          $vulkanVersion = Get-ChildItem 'C:\VulkanSDK' | Sort-Object Name -Descending | Select-Object -First 1 | ForEach-Object { $_.Name }
 
-    - name: Build
-      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }}
+          # Set the Vulkan SDK environment variable using the detected version
+          echo "VULKAN_SDK=C:\VulkanSDK\$vulkanVersion" >> $GITHUB_ENV
 
-    - name: Test
-      working-directory: ${{ steps.strings.outputs.build-output-dir }}
-      run: ctest --build-config ${{ matrix.build_type }}
+          # Add Vulkan SDK's Bin directory to the PATH
+          echo "C:\VulkanSDK\$vulkanVersion\Bin" >> $GITHUB_PATH
+
+      - name: Set reusable strings
+        id: strings
+        shell: bash
+        run: |
+          echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
+
+      - name: Configure CMake
+        run: |
+          cmake -B ${{ steps.strings.outputs.build-output-dir }}
+          -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
+          -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DVulkan_INCLUDE_DIR=$VULKAN_SDK/Include
+          -DVulkan_LIBRARY=$VULKAN_SDK/Lib
+          -S ${{ github.workspace }}
+
+      - name: Build
+        run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }}
+
+      - name: Test
+        working-directory: ${{ steps.strings.outputs.build-output-dir }}
+        run: ctest --build-config ${{ matrix.build_type }}
