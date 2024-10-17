@@ -8,7 +8,7 @@ typedef enum EDITOR_EventType
   EDITOR_FIRSTEVENT = 0, /**< Unused (do not remove) */
 
   EDITOR_QUIT = 0x100,
-};
+} EditorEventType;
 
 struct EditorState
 {
