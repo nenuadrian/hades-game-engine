@@ -1,6 +1,7 @@
 #include "imgui.h"
 
 #include <iostream>
+#include <memory>
 
 #include "types.h"
 #include "../engine/core/ecs/component_manager.hpp"
@@ -8,14 +9,23 @@
 #include "../engine/components/transform_hierarchy_component.hpp"
 #include "../engine/components/render_component.hpp"
 #include "tiny_obj_loader.h"
+#include "../engine/gui/imgui.hpp"
+#include "../engine/gui/gui.hpp"
 
 class Editor
 {
 
 public:
   EditorState state;
+  std::unique_ptr<GUI> gui = std::make_unique<ImGui_GUI>();
 
-  Editor() {}
+  Editor()
+  {
+    auto file = MenuBarItem{.title = "File"};
+    auto exit = MenuBarItem{.title = "Exit"};
+    file.children_menu_items.push_back(exit);
+    gui->menu_bar_items.push_back(file);
+  }
 
   void render(float deltaTime, EntityManager &entityManager, ComponentManager &componentManager)
   {
@@ -74,88 +84,37 @@ public:
           indices.push_back(static_cast<uint16_t>(indices.size()));
         }
       }
-/*
-      if (!vertices.empty() && !indices.empty())
-      {
-        // Create vertex buffer
-        bgfx::VertexBufferHandle vbh = bgfx::createVertexBuffer(
-            bgfx::makeRef(vertices.data(), sizeof(float) * vertices.size()), vertexLayout);
+      /*
+            if (!vertices.empty() && !indices.empty())
+            {
+              // Create vertex buffer
+              bgfx::VertexBufferHandle vbh = bgfx::createVertexBuffer(
+                  bgfx::makeRef(vertices.data(), sizeof(float) * vertices.size()), vertexLayout);
 
-        // Create index buffer
-        bgfx::IndexBufferHandle ibh = bgfx::createIndexBuffer(
-            bgfx::makeRef(indices.data(), sizeof(uint16_t) * indices.size()));
+              // Create index buffer
+              bgfx::IndexBufferHandle ibh = bgfx::createIndexBuffer(
+                  bgfx::makeRef(indices.data(), sizeof(uint16_t) * indices.size()));
 
-        componentManager.addComponent(id, RenderComponent());
-        componentManager.getComponent<RenderComponent>(id).vbh = vbh;
-        componentManager.getComponent<RenderComponent>(id).ibh = ibh;
-      }*/
+              componentManager.addComponent(id, RenderComponent());
+              componentManager.getComponent<RenderComponent>(id).vbh = vbh;
+              componentManager.getComponent<RenderComponent>(id).ibh = ibh;
+            }*/
     }
 
-    menu();
+    gui.get()->render_frame();
     entities(entityManager, componentManager);
     debug(deltaTime);
   }
 
 private:
-  void menu()
-  {
-
-    if (ImGui::BeginMainMenuBar())
-    {
-
-      // File Menu
-      if (ImGui::BeginMenu("File"))
-      {
-        if (ImGui::MenuItem("New", "Ctrl+N"))
-        {
-        }
-        if (ImGui::MenuItem("Open...", "Ctrl+O"))
-        {
-          // Handle file opening logic
-          // Example: Open a file dialog, load a scene
-        }
-        if (ImGui::MenuItem("Save", "Ctrl+S"))
-        {
-          // Handle file saving logic
-          // Example: Save current file
-        }
-        if (ImGui::MenuItem("Save As..."))
-        {
-          // Handle "Save As" logic
-          // Example: Open a file dialog to save under a new name
-        }
-        ImGui::Separator();
-        if (ImGui::MenuItem("Exit", "Alt+F4"))
-        {
-          // Exit the application
-          // This can be a flag to trigger exit
-          state.events.emplace(EDITOR_EventType::EDITOR_QUIT);
-        }
-        ImGui::EndMenu();
-      }
-
-      // Debugging Menu
-      if (ImGui::BeginMenu("Debug"))
-      {
-        if (ImGui::MenuItem("Show Debug Info", nullptr, state.showDebugInfo))
-        {
-          state.showDebugInfo = !state.showDebugInfo;
-        }
-        ImGui::EndMenu();
-      }
-
-      ImGui::EndMainMenuBar();
-    }
-  }
-
   void entities(EntityManager &entityManager, ComponentManager &componentManager)
   {
     ImGui::Begin("Entities");
-    printAllHierarchies(entityManager, componentManager);
+    render_hierarchies(entityManager, componentManager);
     ImGui::End();
   }
 
-  void printHierarchy(Entity::EntityId entity, ComponentManager &componentManager, int depth = 0)
+  void render_hierarchy(Entity::EntityId entity, ComponentManager &componentManager, int depth = 0)
   {
     // Get the hierarchy component of the entity
     if (!componentManager.hasComponent<TransformHierarchyComponent>(entity))
@@ -172,11 +131,11 @@ private:
     // Recursively print each child entity
     for (const auto &child : hierarchy.children)
     {
-      printHierarchy(child, componentManager, depth + 1);
+      render_hierarchy(child, componentManager, depth + 1);
     }
   }
 
-  void printAllHierarchies(EntityManager &entityManager, ComponentManager &componentManager)
+  void render_hierarchies(EntityManager &entityManager, ComponentManager &componentManager)
   {
     // Assuming you have a way to iterate over all entities in the scene
     for (Entity::EntityId entity : entityManager.getAllEntities())
@@ -190,7 +149,7 @@ private:
       // Only print entities that are "roots" (i.e., have no parent)
       if (!hierarchy.hasParent())
       {
-        printHierarchy(entity, componentManager, 0);
+        render_hierarchy(entity, componentManager, 0);
       }
     }
   }
