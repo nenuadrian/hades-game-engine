@@ -5,30 +5,32 @@
 
 #include "gui.hpp"
 
-class ImGui_GUI : public GUI
+namespace hades
 {
-
-  void render_frame()
+  class ImGui_GUI : public GUI
   {
-    if (ImGui::BeginMainMenuBar())
+
+    void render_frame()
     {
-      for (const auto &item : menu_bar_items)
+      if (ImGui::BeginMainMenuBar())
       {
-        if (ImGui::BeginMenu(item.title.c_str()))
+        for (const auto &item : menu_bar_items)
         {
-          for (const auto &child_item : item.children_menu_items)
+          if (ImGui::BeginMenu(item.title.c_str()))
           {
-            if (ImGui::MenuItem(child_item.title.c_str()))
+            for (const auto &child_item : item.children_menu_items)
             {
+              if (ImGui::MenuItem(child_item.title.c_str()))
+              {
+              }
+              ImGui::EndMenu();
             }
-            ImGui::EndMenu();
           }
         }
+
+        ImGui::EndMainMenuBar();
       }
-
-      ImGui::EndMainMenuBar();
     }
-  }
-};
-
+  };
+}
 #endif

@@ -8,51 +8,53 @@
 #include <vector>
 #include <unordered_map>
 
-class EntityManager
+namespace hades
 {
-private:
-  std::vector<Entity::EntityId> activeEntities;
-  std::queue<Entity::EntityId> availableEntities;
-  std::unordered_map<Entity::EntityId, std::bitset<MAX_COMPONENTS>> entityComponentSignatures;
-
-public:
-  Entity::EntityId createEntity()
+  class EntityManager
   {
-    Entity::EntityId id;
-    if (!availableEntities.empty())
+  private:
+    std::vector<Entity::EntityId> activeEntities;
+    std::queue<Entity::EntityId> availableEntities;
+    std::unordered_map<Entity::EntityId, std::bitset<MAX_COMPONENTS>> entityComponentSignatures;
+
+  public:
+    Entity::EntityId createEntity()
     {
-      id = availableEntities.front();
-      availableEntities.pop();
+      Entity::EntityId id;
+      if (!availableEntities.empty())
+      {
+        id = availableEntities.front();
+        availableEntities.pop();
+      }
+      else
+      {
+        id = activeEntities.size();
+      }
+      activeEntities.push_back(id);
+
+      return id;
     }
-    else
+
+    void destroyEntity(Entity::EntityId entity)
     {
-      id = activeEntities.size();
+      availableEntities.push(entity);
+      entityComponentSignatures.erase(entity);
     }
-    activeEntities.push_back(id);
 
-    return id;
-  }
+    void setComponentSignature(Entity::EntityId entity, std::bitset<MAX_COMPONENTS> signature)
+    {
+      entityComponentSignatures[entity] = signature;
+    }
 
-  void destroyEntity(Entity::EntityId entity)
-  {
-    availableEntities.push(entity);
-    entityComponentSignatures.erase(entity);
-  }
+    const std::bitset<MAX_COMPONENTS> &getComponentSignature(Entity::EntityId entity) const
+    {
+      return entityComponentSignatures.at(entity);
+    }
 
-  void setComponentSignature(Entity::EntityId entity, std::bitset<MAX_COMPONENTS> signature)
-  {
-    entityComponentSignatures[entity] = signature;
-  }
-
-  const std::bitset<MAX_COMPONENTS> &getComponentSignature(Entity::EntityId entity) const
-  {
-    return entityComponentSignatures.at(entity);
-  }
-
-  std::vector<Entity::EntityId> getAllEntities()
-  {
-    return activeEntities;
-  }
-};
-
+    std::vector<Entity::EntityId> getAllEntities()
+    {
+      return activeEntities;
+    }
+  };
+}
 #endif

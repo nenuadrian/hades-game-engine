@@ -6,48 +6,50 @@
 #include <memory>
 #include <unordered_map>
 
-class ComponentManager
+namespace hades
 {
-private:
-  std::unordered_map<const char *, std::shared_ptr<void>> componentArrays;
-
-public:
-  template <typename T>
-  std::shared_ptr<ComponentArray<T>> getComponentArray()
+  class ComponentManager
   {
-    const char *typeName = typeid(T).name();
+  private:
+    std::unordered_map<const char *, std::shared_ptr<void>> componentArrays;
 
-    if (componentArrays.find(typeName) == componentArrays.end())
+  public:
+    template <typename T>
+    std::shared_ptr<ComponentArray<T>> getComponentArray()
     {
-      componentArrays[typeName] = std::make_shared<ComponentArray<T>>();
+      const char *typeName = typeid(T).name();
+
+      if (componentArrays.find(typeName) == componentArrays.end())
+      {
+        componentArrays[typeName] = std::make_shared<ComponentArray<T>>();
+      }
+
+      return std::static_pointer_cast<ComponentArray<T>>(componentArrays[typeName]);
     }
 
-    return std::static_pointer_cast<ComponentArray<T>>(componentArrays[typeName]);
-  }
+    template <typename T>
+    void addComponent(Entity::EntityId entity, T component)
+    {
+      getComponentArray<T>()->insert(entity, component);
+    }
 
-  template <typename T>
-  void addComponent(Entity::EntityId entity, T component)
-  {
-    getComponentArray<T>()->insert(entity, component);
-  }
+    template <typename T>
+    void removeComponent(Entity::EntityId entity)
+    {
+      getComponentArray<T>()->remove(entity);
+    }
 
-  template <typename T>
-  void removeComponent(Entity::EntityId entity)
-  {
-    getComponentArray<T>()->remove(entity);
-  }
+    template <typename T>
+    T &getComponent(Entity::EntityId entity)
+    {
+      return getComponentArray<T>()->get(entity);
+    }
 
-  template <typename T>
-  T &getComponent(Entity::EntityId entity)
-  {
-    return getComponentArray<T>()->get(entity);
-  }
-
-  template <typename T>
-  bool hasComponent(Entity::EntityId entity)
-  {
-    return getComponentArray<T>()->has(entity);
-  }
-};
-
+    template <typename T>
+    bool hasComponent(Entity::EntityId entity)
+    {
+      return getComponentArray<T>()->has(entity);
+    }
+  };
+}
 #endif

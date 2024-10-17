@@ -3,27 +3,30 @@
 #include "entity_manager.hpp"
 #include <memory>
 
-class SystemManager
+namespace hades
 {
-private:
-  std::unordered_map<const char *, std::shared_ptr<System>> systems;
-
-public:
-  template <typename T>
-  std::shared_ptr<T> registerSystem()
+  class SystemManager
   {
-    const char *typeName = typeid(T).name();
+  private:
+    std::unordered_map<const char *, std::shared_ptr<System>> systems;
 
-    auto system = std::make_shared<T>();
-    systems[typeName] = system;
-    return system;
-  }
-
-  void updateSystems(float deltaTime, ComponentManager &componentManager, EntityManager &entityManager)
-  {
-    for (auto &system : systems)
+  public:
+    template <typename T>
+    std::shared_ptr<T> registerSystem()
     {
-      system.second->update(deltaTime, componentManager, entityManager);
+      const char *typeName = typeid(T).name();
+
+      auto system = std::make_shared<T>();
+      systems[typeName] = system;
+      return system;
     }
-  }
-};
+
+    void updateSystems(float deltaTime, ComponentManager &componentManager, EntityManager &entityManager)
+    {
+      for (auto &system : systems)
+      {
+        system.second->update(deltaTime, componentManager, entityManager);
+      }
+    }
+  };
+}

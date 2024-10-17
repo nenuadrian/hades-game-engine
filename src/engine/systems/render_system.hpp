@@ -6,24 +6,25 @@
 #include "../core/ecs/component_manager.hpp"
 #include "../core/ecs/entity_manager.hpp"
 
-class RenderSystem : public System
+namespace hades
 {
-public:
-  void update(float deltaTime, ComponentManager &componentManager, EntityManager &entityManager) override
+  class RenderSystem : public System
   {
-    // Iterate over entities and update their position based on velocity
-    for (auto entity : entityManager.getAllEntities())
+  public:
+    void update(float deltaTime, ComponentManager &componentManager, EntityManager &entityManager) override
     {
-      if (componentManager.hasComponent<RenderComponent>(entity))
+      // Iterate over entities and update their position based on velocity
+      for (auto entity : entityManager.getAllEntities())
       {
-        auto &renderComp = componentManager.getComponent<RenderComponent>(entity);
+        if (componentManager.hasComponent<RenderComponent>(entity))
+        {
+          auto &renderComp = componentManager.getComponent<RenderComponent>(entity);
+        }
 
+        // Submit the draw call
+        //  bgfx::submit(0, renderComp.program); // 'program' is the bgfx shader program
       }
-
-      // Submit the draw call
-      //  bgfx::submit(0, renderComp.program); // 'program' is the bgfx shader program
     }
-  }
-};
-
+  };
+}
 #endif

@@ -5,36 +5,39 @@
 #include <optional>
 #include "../core/ecs/entity.hpp"
 
-class TransformHierarchyComponent
+namespace hades
 {
-public:
-  std::optional<Entity::EntityId> parent; // The parent entity, if it exists
-  std::vector<Entity::EntityId> children; // List of child entities
-
-  void addChild(Entity::EntityId child)
+  class TransformHierarchyComponent
   {
-    children.push_back(child);
-  }
+  public:
+    std::optional<Entity::EntityId> parent; // The parent entity, if it exists
+    std::vector<Entity::EntityId> children; // List of child entities
 
-  void removeChild(Entity::EntityId child)
-  {
-    children.erase(std::remove(children.begin(), children.end(), child), children.end());
-  }
+    void addChild(Entity::EntityId child)
+    {
+      children.push_back(child);
+    }
 
-  void setParent(Entity::EntityId newParent)
-  {
-    parent = newParent;
-  }
+    void removeChild(Entity::EntityId child)
+    {
+      children.erase(std::remove(children.begin(), children.end(), child), children.end());
+    }
 
-  void clearParent()
-  {
-    parent.reset();
-  }
+    void setParent(Entity::EntityId newParent)
+    {
+      parent = newParent;
+    }
 
-  bool hasParent() const
-  {
-    return parent.has_value();
-  }
-};
+    void clearParent()
+    {
+      parent.reset();
+    }
+
+    bool hasParent() const
+    {
+      return parent.has_value();
+    }
+  };
+}
 
 #endif

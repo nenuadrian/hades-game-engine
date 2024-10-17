@@ -5,49 +5,52 @@
 #include <unordered_map>
 #include <vector>
 
-template <typename T>
-class ComponentArray
+namespace hades
 {
-private:
-  std::vector<T> components;
-  std::unordered_map<Entity::EntityId, size_t> entityToIndex;
-  std::unordered_map<size_t, Entity::EntityId> indexToEntity;
-
-public:
-  void insert(Entity::EntityId entity, T component)
+  template <typename T>
+  class ComponentArray
   {
-    entityToIndex[entity] = components.size();
-    indexToEntity[components.size()] = entity;
-    components.push_back(component);
-  }
+  private:
+    std::vector<T> components;
+    std::unordered_map<Entity::EntityId, size_t> entityToIndex;
+    std::unordered_map<size_t, Entity::EntityId> indexToEntity;
 
-  void remove(Entity::EntityId entity)
-  {
-    size_t index = entityToIndex[entity];
-    size_t lastIndex = components.size() - 1;
+  public:
+    void insert(Entity::EntityId entity, T component)
+    {
+      entityToIndex[entity] = components.size();
+      indexToEntity[components.size()] = entity;
+      components.push_back(component);
+    }
 
-    // Move the last element to the removed position
-    components[index] = components[lastIndex];
-    Entity::EntityId lastEntity = indexToEntity[lastIndex];
+    void remove(Entity::EntityId entity)
+    {
+      size_t index = entityToIndex[entity];
+      size_t lastIndex = components.size() - 1;
 
-    // Update maps
-    entityToIndex[lastEntity] = index;
-    indexToEntity[index] = lastEntity;
+      // Move the last element to the removed position
+      components[index] = components[lastIndex];
+      Entity::EntityId lastEntity = indexToEntity[lastIndex];
 
-    entityToIndex.erase(entity);
-    indexToEntity.erase(lastIndex);
-    components.pop_back();
-  }
+      // Update maps
+      entityToIndex[lastEntity] = index;
+      indexToEntity[index] = lastEntity;
 
-  T &get(Entity::EntityId entity)
-  {
-    return components[entityToIndex[entity]];
-  }
+      entityToIndex.erase(entity);
+      indexToEntity.erase(lastIndex);
+      components.pop_back();
+    }
 
-  bool has(Entity::EntityId entity)
-  {
-    return entityToIndex.find(entity) != entityToIndex.end();
-  }
-};
+    T &get(Entity::EntityId entity)
+    {
+      return components[entityToIndex[entity]];
+    }
+
+    bool has(Entity::EntityId entity)
+    {
+      return entityToIndex.find(entity) != entityToIndex.end();
+    }
+  };
+}
 
 #endif
