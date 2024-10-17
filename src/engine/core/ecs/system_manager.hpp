@@ -1,5 +1,6 @@
 #include "system.hpp"
 #include "component_manager.hpp"
+#include "entity_manager.hpp"
 #include <memory>
 
 class SystemManager
@@ -18,11 +19,11 @@ public:
     return system;
   }
 
-  void updateSystems(float deltaTime, ComponentManager &componentManager)
+  void updateSystems(float deltaTime, ComponentManager &componentManager, EntityManager &entityManager)
   {
     for (auto &system : systems)
     {
-      system.second->update(deltaTime, componentManager);
+      system.second->update(deltaTime, componentManager, entityManager);
     }
   }
 };

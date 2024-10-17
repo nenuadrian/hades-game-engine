@@ -16,7 +16,9 @@ set(IMGUI_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/imgui_tables.cpp
     # ${CMAKE_CURRENT_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/backends/imgui_impl_sdl2.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp
+    # ${CMAKE_CURRENT_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
+    )
 
 add_subdirectory(lib/SDL2)
 
@@ -30,19 +32,22 @@ target_include_directories(
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/backends)
 include_directories(${CMAKE_SOURCE_DIR}/lib/SDL2/include)
 
+find_package(Vulkan REQUIRED)
+
+
 if(WIN32)
-  target_link_libraries(${PROJECT_NAME} SDL2-static SDL2main) # On Windows
+  target_link_libraries(${PROJECT_NAME} SDL2-static SDL2main  Vulkan::Vulkan) # On Windows
 else()
   # Link against OpenGL
   find_library(OpenGL_LIBRARY OpenGL REQUIRED)
   target_link_libraries(ImGui ${OpenGL_LIBRARY})
 
-  target_link_libraries(ImGui SDL2 SDL2main) # On Linux/macOS
+  target_link_libraries(ImGui SDL2 SDL2main Vulkan::Vulkan) # On Linux/macOS
 
   if(APPLE)
     # Link ImGui and SDL dependencies
     target_link_libraries(ImGui "-framework Cocoa" "-framework IOKit"
-                          "-framework CoreVideo" "-framework Metal" "-framework QuartzCore")
+                          "-framework CoreVideo" "-framework QuartzCore")
   endif()
 
 endif()

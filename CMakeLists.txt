@@ -16,24 +16,23 @@ set(SOURCES ${SRC_FILES} ${CMAKE_SOURCE_DIR}/src/main.cpp)
 # Create the executable
 add_executable(${PROJECT_NAME} ${SOURCES})
 
-add_subdirectory(lib/bgfx)
 add_subdirectory(lib/imgui)
+add_subdirectory(lib/tinyobjloader)
 #add_subdirectory(lib/SDL2)
 
-include_directories(${CMAKE_SOURCE_DIR}/lib/bgfx/include)
 include_directories(${CMAKE_SOURCE_DIR}/lib/imgui)
 include_directories(${CMAKE_SOURCE_DIR}/lib/imgui/backends)
 include_directories(${CMAKE_SOURCE_DIR}/lib/CLI11/include)
 include_directories(${CMAKE_SOURCE_DIR}/lib/SDL2/include)
+include_directories(${CMAKE_SOURCE_DIR}/lib/tinyobjloader)
+
+find_package(Vulkan REQUIRED)
+
 
 if(WIN32)
-  target_link_libraries(${PROJECT_NAME} SDL2-static SDL2main ImGui bgfx) # On Windows
+  target_link_libraries(${PROJECT_NAME} SDL2-static SDL2main ImGui tinyobjloader Vulkan::Vulkan) # On Windows
 else()
-  # Link against OpenGL
-  find_library(OpenGL_LIBRARY OpenGL REQUIRED)
-  target_link_libraries(${PROJECT_NAME} ${OpenGL_LIBRARY})
-
-  target_link_libraries(${PROJECT_NAME} SDL2 SDL2main ImGui bgfx) # On Linux/macOS
+  target_link_libraries(${PROJECT_NAME} SDL2 SDL2main ImGui tinyobjloader Vulkan::Vulkan) # On Linux/macOS
 
   if(APPLE)
     # Link ImGui and SDL dependencies

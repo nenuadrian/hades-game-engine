@@ -1,9 +1,13 @@
 #include "imgui.h"
 
+#include <iostream>
+
 #include "types.h"
 #include "../engine/core/ecs/component_manager.hpp"
 #include "../engine/core/ecs/entity_manager.hpp"
 #include "../engine/components/transform_hierarchy_component.hpp"
+#include "../engine/components/render_component.hpp"
+#include "tiny_obj_loader.h"
 
 class Editor
 {
@@ -19,6 +23,72 @@ public:
     {
       const auto id = entityManager.createEntity();
       componentManager.addComponent(id, TransformHierarchyComponent());
+
+      tinyobj::attrib_t attrib;
+      std::vector<tinyobj::shape_t> shapes;
+      std::vector<tinyobj::material_t> materials;
+      std::string warn;
+      std::string err;
+      bool ret = tinyobj::LoadObj(
+          &attrib,
+          &shapes,
+          &materials,
+          &warn, // Add this line
+          &err,
+          "/Users/adriannenu/Desktop/projects/hades-game-engine/src/tests/backpack/12305_backpack_v2_l3.obj",
+          "/Users/adriannenu/Desktop/projects/hades-game-engine/src/tests/backpack/", // Set material directory to NULL if not used
+          true,                                                                       // triangulate the mesh
+          true                                                                        // default vertex color fallback
+      );
+
+      if (!warn.empty())
+      {
+        std::cout << "WARN: " << warn << std::endl;
+      }
+      if (!err.empty())
+      {
+        std::cerr << "ERR: " << err << std::endl;
+      }
+
+      // Load vertices and indices from the .obj file
+      std::vector<float> vertices;
+      std::vector<uint16_t> indices;
+      for (const auto &shape : shapes)
+      {
+        for (const auto &index : shape.mesh.indices)
+        {
+          // Fill the vertex data (position, texture coords, etc.)
+          vertices.push_back(attrib.vertices[3 * index.vertex_index + 0]);
+          vertices.push_back(attrib.vertices[3 * index.vertex_index + 1]);
+          vertices.push_back(attrib.vertices[3 * index.vertex_index + 2]);
+          if (!attrib.texcoords.empty())
+          {
+            vertices.push_back(attrib.texcoords[2 * index.texcoord_index + 0]);
+            vertices.push_back(attrib.texcoords[2 * index.texcoord_index + 1]);
+          }
+          else
+          {
+            vertices.push_back(0.0f); // No texcoord, default to 0
+            vertices.push_back(0.0f);
+          }
+          indices.push_back(static_cast<uint16_t>(indices.size()));
+        }
+      }
+/*
+      if (!vertices.empty() && !indices.empty())
+      {
+        // Create vertex buffer
+        bgfx::VertexBufferHandle vbh = bgfx::createVertexBuffer(
+            bgfx::makeRef(vertices.data(), sizeof(float) * vertices.size()), vertexLayout);
+
+        // Create index buffer
+        bgfx::IndexBufferHandle ibh = bgfx::createIndexBuffer(
+            bgfx::makeRef(indices.data(), sizeof(uint16_t) * indices.size()));
+
+        componentManager.addComponent(id, RenderComponent());
+        componentManager.getComponent<RenderComponent>(id).vbh = vbh;
+        componentManager.getComponent<RenderComponent>(id).ibh = ibh;
+      }*/
     }
 
     menu();
