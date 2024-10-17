@@ -2,6 +2,7 @@
 #include <vulkan/vulkan.h>
 #include <_string.h>
 #include "imgui.h"
+#include "imgui_impl_vulkan.h"
 
 // #define APP_USE_UNLIMITED_FRAME_RATE
 #ifdef _DEBUG
@@ -104,7 +105,7 @@ public:
     uint32_t gpu_count;
     VkResult err = vkEnumeratePhysicalDevices(g_Instance, &gpu_count, nullptr);
     check_vk_result(err);
-    IM_ASSERT(gpu_count > 0);
+    assert(gpu_count > 0);
 
     ImVector<VkPhysicalDevice> gpus;
     gpus.resize(gpu_count);
@@ -179,7 +180,7 @@ public:
       // Setup the debug report callback
 #ifdef APP_USE_VULKAN_DEBUG_REPORT
       auto f_vkCreateDebugReportCallbackEXT = (PFN_vkCreateDebugReportCallbackEXT)vkGetInstanceProcAddr(g_Instance, "vkCreateDebugReportCallbackEXT");
-      IM_ASSERT(f_vkCreateDebugReportCallbackEXT != nullptr);
+      assert(f_vkCreateDebugReportCallbackEXT != nullptr);
       VkDebugReportCallbackCreateInfoEXT debug_report_ci = {};
       debug_report_ci.sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT;
       debug_report_ci.flags = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT | VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT;
@@ -206,7 +207,7 @@ public:
           break;
         }
       free(queues);
-      IM_ASSERT(g_QueueFamily != (uint32_t)-1);
+      assert(g_QueueFamily != (uint32_t)-1);
     }
 
     // Create Logical Device (with 1 queue)
@@ -263,8 +264,8 @@ public:
 
   VkSurfaceFormatKHR VulkanH_SelectSurfaceFormat(VkPhysicalDevice physical_device, VkSurfaceKHR surface, const VkFormat *request_formats, int request_formats_count, VkColorSpaceKHR request_color_space)
   {
-    IM_ASSERT(request_formats != nullptr);
-    IM_ASSERT(request_formats_count > 0);
+    assert(request_formats != nullptr);
+    assert(request_formats_count > 0);
 
     // Per Spec Format and View Format are expected to be the same unless VK_IMAGE_CREATE_MUTABLE_BIT was set at image creation
     // Assuming that the default behavior is without setting this bit, there is no need for separate Swapchain image and image view format
@@ -307,8 +308,8 @@ public:
 
   VkPresentModeKHR VulkanH_SelectPresentMode(VkPhysicalDevice physical_device, VkSurfaceKHR surface, const VkPresentModeKHR *request_modes, int request_modes_count)
   {
-    IM_ASSERT(request_modes != nullptr);
-    IM_ASSERT(request_modes_count > 0);
+    assert(request_modes != nullptr);
+    assert(request_modes_count > 0);
 
     // Request a certain mode and confirm that it is available. If not use VK_PRESENT_MODE_FIFO_KHR which is mandatory
     uint32_t avail_count = 0;
@@ -355,7 +356,7 @@ public:
     // printf("[vulkan] Selected PresentMode = %d\n", g_MainWindowData.PresentMode);
 
     // Create SwapChain, RenderPass, Framebuffer, etc.
-    IM_ASSERT(g_MinImageCount >= 2);
+    assert(g_MinImageCount >= 2);
     VulkanH_CreateOrResizeWindow(g_Instance, g_PhysicalDevice, g_Device, g_QueueFamily, g_Allocator, width, height, g_MinImageCount);
   }
 
@@ -469,7 +470,7 @@ public:
 
   void VulkanH_CreateWindowCommandBuffers(VkPhysicalDevice physical_device, VkDevice device, uint32_t queue_family, const VkAllocationCallbacks *allocator)
   {
-    IM_ASSERT(physical_device != VK_NULL_HANDLE && device != VK_NULL_HANDLE);
+    assert(physical_device != VK_NULL_HANDLE && device != VK_NULL_HANDLE);
     IM_UNUSED(physical_device);
 
     // Create Command Buffers
@@ -525,7 +526,7 @@ public:
       return 2;
     if (present_mode == VK_PRESENT_MODE_IMMEDIATE_KHR)
       return 1;
-    IM_ASSERT(0);
+    assert(0);
     return 1;
   }
 
@@ -597,12 +598,11 @@ public:
       err = vkGetSwapchainImagesKHR(device, g_MainWindowData.Swapchain, &g_MainWindowData.ImageCount, nullptr);
       check_vk_result(err);
       VkImage backbuffers[16] = {};
-      IM_ASSERT(g_MainWindowData.ImageCount >= min_image_count);
-      IM_ASSERT(g_MainWindowData.ImageCount < IM_ARRAYSIZE(backbuffers));
+      assert(g_MainWindowData.ImageCount >= min_image_count);
       err = vkGetSwapchainImagesKHR(device, g_MainWindowData.Swapchain, &g_MainWindowData.ImageCount, backbuffers);
       check_vk_result(err);
 
-      IM_ASSERT(g_MainWindowData.Frames == nullptr && g_MainWindowData.FrameSemaphores == nullptr);
+      assert(g_MainWindowData.Frames == nullptr && g_MainWindowData.FrameSemaphores == nullptr);
       g_MainWindowData.SemaphoreCount = g_MainWindowData.ImageCount + 1;
       g_MainWindowData.Frames = (Vulkan_Frame *)IM_ALLOC(sizeof(Vulkan_Frame) * g_MainWindowData.ImageCount);
       g_MainWindowData.FrameSemaphores = (Vulkan_FrameSemaphores *)IM_ALLOC(sizeof(Vulkan_FrameSemaphores) * g_MainWindowData.SemaphoreCount);
@@ -709,8 +709,8 @@ public:
 
   void VulkanH_DestroyWindow(VkInstance instance, VkDevice device, const VkAllocationCallbacks *allocator)
   {
-    vkDeviceWaitIdle(device); // FIXME: We could wait on the Queue if we had the queue in g_MainWindowData. (otherwise VulkanH functions can't use globals)
-    // vkQueueWaitIdle(bd->Queue);
+    vkDeviceWaitIdle(device);
+    vkQueueWaitIdle(g_Queue);
 
     for (uint32_t i = 0; i < g_MainWindowData.ImageCount; i++)
       VulkanH_DestroyFrame(device, &g_MainWindowData.Frames[i], allocator);

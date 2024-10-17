@@ -1,11 +1,12 @@
-#include <iostream>
-#include <chrono>
 #include <CLI/CLI.hpp>
 #include "editor/window_manager.hpp"
 
-// Main code
-int main(int, char **)
+int main(int argc, char **argv)
 {
+  CLI::App app{"Hades"};
+
+  CLI11_PARSE(app, argc, argv);
+
   WindowManager window_manager;
   window_manager.init();
 
