@@ -62,8 +62,26 @@ jobs:
           # Install the Vulkan SDK silently
           ./vulkan-sdk.exe /S /D=C:\VulkanSDK
 
-          # Automatically detect the Vulkan SDK version (assuming it's in C:\VulkanSDK)
+          # Wait for the Vulkan SDK folder to be created
+          $maxRetries = 10
+          $retryCount = 0
+          while (-Not (Test-Path 'C:\VulkanSDK') -and $retryCount -lt $maxRetries) {
+              Start-Sleep -Seconds 5
+              $retryCount++
+          }
+
+          if (-Not (Test-Path 'C:\VulkanSDK')) {
+              Write-Host "Error: Vulkan SDK installation failed or folder not created."
+              exit 1
+          }
+
+          # Automatically detect the Vulkan SDK version
           $vulkanVersion = Get-ChildItem 'C:\VulkanSDK' | Sort-Object Name -Descending | Select-Object -First 1 | ForEach-Object { $_.Name }
+
+          if (-Not $vulkanVersion) {
+              Write-Host "Error: Vulkan SDK version detection failed."
+              exit 1
+          }
 
           # Set the Vulkan SDK environment variable using the detected version
           echo "VULKAN_SDK=C:\VulkanSDK\$vulkanVersion" >> $GITHUB_ENV
