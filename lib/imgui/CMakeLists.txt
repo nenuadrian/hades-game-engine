@@ -10,14 +10,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Add your ImGui source files here
 set(IMGUI_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/imgui.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/imgui_demo.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/imgui_draw.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/imgui_widgets.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/imgui_tables.cpp
-    # ${CMAKE_CURRENT_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/backends/imgui_impl_sdl2.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp
-    # ${CMAKE_CURRENT_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
     )
 
 add_subdirectory(lib/SDL2)
