@@ -1,9 +1,8 @@
 #include "imgui.h"
 #include "imgui_impl_sdl2.h"
 #include "imgui_impl_vulkan.h"
-#include <stdio.h> // printf, fprintf
+#include <stdio.h>
 #include <SDL.h>
-#include <SDL_vulkan.h>
 
 #include "../engine/systems/render_system.hpp"
 #include "../engine/systems/movement_system.hpp"
@@ -32,7 +31,6 @@ namespace hades
 
     int render_frame()
     {
-      ImGuiIO &io = ImGui::GetIO();
 
       // Poll and handle events (inputs, window resize, etc.)
       // You can read the io.WantCaptureMouse, io.WantCaptureKeyboard flags to tell if dear imgui wants to use your inputs.
@@ -61,6 +59,8 @@ namespace hades
       ImGui_ImplVulkan_NewFrame();
       ImGui_ImplSDL2_NewFrame();
       ImGui::NewFrame();
+
+      ImGuiIO &io = ImGui::GetIO();
 
       editor.render(io.DeltaTime, entityManager, componentManager);
 
@@ -98,27 +98,8 @@ namespace hades
         return -1;
       }
 
-      ImVector<const char *> extensions;
-      uint32_t extensions_count = 0;
-      SDL_Vulkan_GetInstanceExtensions(window, &extensions_count, nullptr);
-      extensions.resize(extensions_count);
-      SDL_Vulkan_GetInstanceExtensions(window, &extensions_count, extensions.Data);
-      renderer.SetupVulkan(extensions);
-
-      // Create Window Surface
-      VkSurfaceKHR surface;
-      VkResult err;
-      if (SDL_Vulkan_CreateSurface(window, renderer.g_Instance, &surface) == 0)
-      {
-        printf("Failed to create Vulkan surface.\n");
-        return 1;
-      }
-
-      // Create Framebuffers
-      int w, h;
-      SDL_GetWindowSize(window, &w, &h);
-
-      renderer.SetupVulkanWindow(surface, w, h);
+      renderer.setup_vulkan(window);
+      renderer.setup_window(window);
 
       // Setup Dear ImGui context
       IMGUI_CHECKVERSION();

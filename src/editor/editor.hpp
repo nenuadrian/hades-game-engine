@@ -45,7 +45,7 @@ namespace hades
             &attrib,
             &shapes,
             &materials,
-            &warn, // Add this line
+            &warn,
             &err,
             "/Users/adriannenu/Desktop/projects/hades-game-engine/src/tests/backpack/12305_backpack_v2_l3.obj",
             "/Users/adriannenu/Desktop/projects/hades-game-engine/src/tests/backpack/", // Set material directory to NULL if not used

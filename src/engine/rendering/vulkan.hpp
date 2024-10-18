@@ -3,6 +3,8 @@
 #include <_string.h>
 #include "imgui.h"
 #include "imgui_impl_vulkan.h"
+#include "lib/SDL2/include/SDL_video.h"
+#include <SDL_vulkan.h>
 
 // #define APP_USE_UNLIMITED_FRAME_RATE
 #ifdef _DEBUG
@@ -132,8 +134,14 @@ namespace hades
       return VK_NULL_HANDLE;
     }
 
-    void SetupVulkan(ImVector<const char *> instance_extensions)
+    void setup_vulkan(SDL_Window *window)
     {
+      ImVector<const char *> instance_extensions;
+      uint32_t extensions_count = 0;
+      SDL_Vulkan_GetInstanceExtensions(window, &extensions_count, nullptr);
+      instance_extensions.resize(extensions_count);
+      SDL_Vulkan_GetInstanceExtensions(window, &extensions_count, instance_extensions.Data);
+
       VkResult err;
 #ifdef IMGUI_IMPL_VULKAN_USE_VOLK
       volkInitialize();
@@ -331,8 +339,20 @@ namespace hades
       return VK_PRESENT_MODE_FIFO_KHR; // Always available
     }
 
-    void SetupVulkanWindow(VkSurfaceKHR surface, int width, int height)
+    void setup_window(SDL_Window *window)
     {
+      int width, height;
+      SDL_GetWindowSize(window, &width, &height);
+
+      // Create Window Surface
+      VkSurfaceKHR surface;
+      VkResult err;
+      if (SDL_Vulkan_CreateSurface(window, g_Instance, &surface) == 0)
+      {
+        printf("Failed to create Vulkan surface.\n");
+        return;
+      }
+
       g_MainWindowData.Surface = surface;
 
       // Check for WSI support
