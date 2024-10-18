@@ -11,6 +11,7 @@
 #include "../engine/core/ecs/entity_manager.hpp"
 #include "../engine/core/ecs/constants.h"
 #include "editor.hpp"
+#include "../engine/rendering/renderer.hpp"
 #include "../engine/rendering/vulkan.hpp"
 
 namespace hades
@@ -19,19 +20,17 @@ namespace hades
   {
   private:
     SDL_Window *window;
-
     EntityManager entityManager;
     ComponentManager componentManager;
     SystemManager systemManager;
     Editor editor;
-    VulkanRenderer renderer;
+    std::unique_ptr<Renderer> renderer = std::make_unique<VulkanRenderer>();
 
   public:
     bool running = true;
 
     int render_frame()
     {
-
       // Poll and handle events (inputs, window resize, etc.)
       // You can read the io.WantCaptureMouse, io.WantCaptureKeyboard flags to tell if dear imgui wants to use your inputs.
       // - When io.WantCaptureMouse is true, do not dispatch mouse input data to your main application, or clear/overwrite your copy of the mouse data.
@@ -51,9 +50,8 @@ namespace hades
         SDL_Delay(10);
         return 10;
       }
-      int fb_width, fb_height;
-      SDL_GetWindowSize(window, &fb_width, &fb_height);
-      renderer.new_frame(fb_width, fb_height);
+
+      renderer.get()->render_frame(window);
 
       // Start the Dear ImGui frame
       ImGui_ImplVulkan_NewFrame();
@@ -70,7 +68,7 @@ namespace hades
       const bool is_minimized = (draw_data->DisplaySize.x <= 0.0f || draw_data->DisplaySize.y <= 0.0f);
       if (!is_minimized)
       {
-        renderer.render_imgui(draw_data);
+        renderer.get()->render_imgui(draw_data);
       }
       return 0;
     }
@@ -98,39 +96,9 @@ namespace hades
         return -1;
       }
 
-      renderer.setup_vulkan(window);
-      renderer.setup_window(window);
+      renderer.get()->init(window);
 
-      // Setup Dear ImGui context
-      IMGUI_CHECKVERSION();
-      ImGui::CreateContext();
-      ImGuiIO &io = ImGui::GetIO();
-      (void)io;
-      io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
-      io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;  // Enable Gamepad Controls
 
-      // Setup Dear ImGui style
-      ImGui::StyleColorsDark();
-      // ImGui::StyleColorsLight();
-
-      // Setup Platform/Renderer backends
-      ImGui_ImplSDL2_InitForVulkan(window);
-      ImGui_ImplVulkan_InitInfo init_info = {};
-      init_info.Instance = renderer.g_Instance;
-      init_info.PhysicalDevice = renderer.g_PhysicalDevice;
-      init_info.Device = renderer.g_Device;
-      init_info.QueueFamily = renderer.g_QueueFamily;
-      init_info.Queue = renderer.g_Queue;
-      init_info.PipelineCache = renderer.g_PipelineCache;
-      init_info.DescriptorPool = renderer.g_DescriptorPool;
-      init_info.RenderPass = renderer.g_MainWindowData.RenderPass;
-      init_info.Subpass = 0;
-      init_info.MinImageCount = renderer.g_MinImageCount;
-      init_info.ImageCount = renderer.g_MainWindowData.ImageCount;
-      init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
-      init_info.Allocator = renderer.g_Allocator;
-      init_info.CheckVkResultFn = check_vk_result;
-      ImGui_ImplVulkan_Init(&init_info);
 
       // Register systems
       auto movementSystem = systemManager.registerSystem<MovementSystem>();
@@ -141,12 +109,12 @@ namespace hades
 
     int cleanup()
     {
-      vkDeviceWaitIdle(renderer.g_Device);
+      // vkDeviceWaitIdle(renderer.g_Device);
       ImGui_ImplVulkan_Shutdown();
       ImGui_ImplSDL2_Shutdown();
       ImGui::DestroyContext();
 
-      renderer.cleanup();
+      renderer.get()->cleanup();
 
       SDL_DestroyWindow(window);
       SDL_Quit();

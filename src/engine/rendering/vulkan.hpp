@@ -2,9 +2,11 @@
 #include <vulkan/vulkan.h>
 #include <_string.h>
 #include "imgui.h"
+#include "imgui_impl_sdl2.h"
 #include "imgui_impl_vulkan.h"
 #include "lib/SDL2/include/SDL_video.h"
 #include <SDL_vulkan.h>
+#include "renderer.hpp"
 
 // #define APP_USE_UNLIMITED_FRAME_RATE
 #ifdef _DEBUG
@@ -60,7 +62,7 @@ namespace hades
     }
   };
 
-  class VulkanRenderer
+  class VulkanRenderer : public Renderer
   {
   public:
     VkAllocationCallbacks *g_Allocator = nullptr;
@@ -771,8 +773,45 @@ namespace hades
       fsd->ImageAcquiredSemaphore = fsd->RenderCompleteSemaphore = VK_NULL_HANDLE;
     }
 
-    void new_frame(int fb_width, int fb_height)
+    void init(SDL_Window *window)
     {
+      setup_vulkan(window);
+      setup_window(window);
+
+      // Setup Dear ImGui context
+      IMGUI_CHECKVERSION();
+      ImGui::CreateContext();
+      ImGuiIO &io = ImGui::GetIO();
+      (void)io;
+      io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
+      io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;  // Enable Gamepad Controls
+
+      ImGui::StyleColorsDark();
+
+      ImGui_ImplSDL2_InitForVulkan(window);
+      ImGui_ImplVulkan_InitInfo init_info = {};
+      init_info.Instance = g_Instance;
+      init_info.PhysicalDevice = g_PhysicalDevice;
+      init_info.Device = g_Device;
+      init_info.QueueFamily = g_QueueFamily;
+      init_info.Queue = g_Queue;
+      init_info.PipelineCache = g_PipelineCache;
+      init_info.DescriptorPool = g_DescriptorPool;
+      init_info.RenderPass = g_MainWindowData.RenderPass;
+      init_info.Subpass = 0;
+      init_info.MinImageCount = g_MinImageCount;
+      init_info.ImageCount = g_MainWindowData.ImageCount;
+      init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+      init_info.Allocator = g_Allocator;
+      init_info.CheckVkResultFn = check_vk_result;
+      ImGui_ImplVulkan_Init(&init_info);
+    }
+
+    void render_frame(SDL_Window *window)
+    {
+      int fb_width, fb_height;
+      SDL_GetWindowSize(window, &fb_width, &fb_height);
+
       // Resize swap chain?
 
       if (fb_width > 0 && fb_height > 0 && (g_SwapChainRebuild || g_MainWindowData.Width != fb_width || g_MainWindowData.Height != fb_height))
