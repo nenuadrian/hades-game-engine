@@ -68,4 +68,8 @@ make
 ctest --output-on-failure
 ```
 
+# Previous version
+
+Multiple versions overrode each other in this repository, going through Metal, Vulkan and Open GL (https://github.com/nenuadrian/hades-game-engine/tree/507e1d5c3bece7e09d78d668d4e3d652be0b2431).
+
 
