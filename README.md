@@ -16,6 +16,7 @@
     - [Build](#build)
     - [Run](#run)
     - [Test](#test)
+  - [Documentation (MkDocs Material)](#documentation-mkdocs-material)
   - [Previous version](#previous-version)
 
 ## overview
@@ -85,6 +86,16 @@ cmake ..
 make
 ctest --output-on-failure
 ```
+
+## Documentation (MkDocs Material)
+
+```bash
+python3 -m pip install -r requirements-docs.txt
+python3 scripts/generate_class_diagram.py
+mkdocs serve
+```
+
+Deployments to GitHub Pages are automated by `.github/workflows/docs-pages.yml` on pushes to `main`.
 
 ## Previous version
 

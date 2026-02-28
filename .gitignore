@@ -6,3 +6,5 @@ imgui.ini
 CMakeFiles/**
 **/CMakeFiles/**
 CMakeCache.txt
+site/**
+__pycache__/**
