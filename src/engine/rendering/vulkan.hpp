@@ -66,7 +66,40 @@ namespace hades
 
   class VulkanRenderer : public Renderer
   {
+  private:
+    bool vulkan_initialized = false;
+    bool window_initialized = false;
+    bool imgui_backend_initialized = false;
+
+    void destroy()
+    {
+      shutdown_imgui_backend();
+
+      if (g_Device != VK_NULL_HANDLE)
+      {
+        VkResult err = vkDeviceWaitIdle(g_Device);
+        check_vk_result(err);
+      }
+
+      if (window_initialized)
+      {
+        CleanupVulkanWindow();
+        window_initialized = false;
+      }
+
+      if (vulkan_initialized)
+      {
+        CleanupVulkan();
+        vulkan_initialized = false;
+      }
+    }
+
   public:
+    ~VulkanRenderer() override
+    {
+      destroy();
+    }
+
     VkAllocationCallbacks *g_Allocator = nullptr;
     VkInstance g_Instance = VK_NULL_HANDLE;
     VkPhysicalDevice g_PhysicalDevice = VK_NULL_HANDLE;
@@ -343,7 +376,7 @@ namespace hades
       return VK_PRESENT_MODE_FIFO_KHR; // Always available
     }
 
-    void setup_window(SDL_Window *window)
+    bool setup_window(SDL_Window *window)
     {
       int width, height;
       SDL_GetWindowSize(window, &width, &height);
@@ -353,8 +386,8 @@ namespace hades
       VkResult err;
       if (SDL_Vulkan_CreateSurface(window, g_Instance, &surface) == 0)
       {
-        printf("Failed to create Vulkan surface.\n");
-        return;
+        fprintf(stderr, "Failed to create Vulkan surface: %s\n", SDL_GetError());
+        return false;
       }
 
       g_MainWindowData.Surface = surface;
@@ -365,7 +398,7 @@ namespace hades
       if (res != VK_TRUE)
       {
         fprintf(stderr, "Error no WSI support on physical device 0\n");
-        exit(-1);
+        return false;
       }
 
       // Select Surface Format
@@ -385,24 +418,47 @@ namespace hades
       // Create SwapChain, RenderPass, Framebuffer, etc.
       assert(g_MinImageCount >= 2);
       VulkanH_CreateOrResizeWindow(g_Instance, g_PhysicalDevice, g_Device, g_QueueFamily, g_Allocator, width, height, g_MinImageCount);
+      return true;
     }
 
     void CleanupVulkan()
     {
-      vkDestroyDescriptorPool(g_Device, g_DescriptorPool, g_Allocator);
+      if (g_DescriptorPool != VK_NULL_HANDLE && g_Device != VK_NULL_HANDLE)
+        vkDestroyDescriptorPool(g_Device, g_DescriptorPool, g_Allocator);
+      g_DescriptorPool = VK_NULL_HANDLE;
 
 #ifdef APP_USE_VULKAN_DEBUG_REPORT
       // Remove the debug report callback
-      auto f_vkDestroyDebugReportCallbackEXT = (PFN_vkDestroyDebugReportCallbackEXT)vkGetInstanceProcAddr(g_Instance, "vkDestroyDebugReportCallbackEXT");
-      f_vkDestroyDebugReportCallbackEXT(g_Instance, g_DebugReport, g_Allocator);
+      if (g_DebugReport != VK_NULL_HANDLE && g_Instance != VK_NULL_HANDLE)
+      {
+        auto f_vkDestroyDebugReportCallbackEXT = (PFN_vkDestroyDebugReportCallbackEXT)vkGetInstanceProcAddr(g_Instance, "vkDestroyDebugReportCallbackEXT");
+        if (f_vkDestroyDebugReportCallbackEXT != nullptr)
+          f_vkDestroyDebugReportCallbackEXT(g_Instance, g_DebugReport, g_Allocator);
+      }
+      g_DebugReport = VK_NULL_HANDLE;
 #endif // APP_USE_VULKAN_DEBUG_REPORT
 
-      vkDestroyDevice(g_Device, g_Allocator);
-      vkDestroyInstance(g_Instance, g_Allocator);
+      if (g_Device != VK_NULL_HANDLE)
+        vkDestroyDevice(g_Device, g_Allocator);
+      if (g_Instance != VK_NULL_HANDLE)
+        vkDestroyInstance(g_Instance, g_Allocator);
+
+      g_Instance = VK_NULL_HANDLE;
+      g_PhysicalDevice = VK_NULL_HANDLE;
+      g_Device = VK_NULL_HANDLE;
+      g_QueueFamily = (uint32_t)-1;
+      g_Queue = VK_NULL_HANDLE;
+      g_PipelineCache = VK_NULL_HANDLE;
+      g_SwapChainRebuild = false;
     }
 
     void CleanupVulkanWindow()
     {
+      if (g_Instance == VK_NULL_HANDLE || g_Device == VK_NULL_HANDLE)
+        return;
+      if (g_MainWindowData.Surface == VK_NULL_HANDLE && g_MainWindowData.Swapchain == VK_NULL_HANDLE)
+        return;
+
       VulkanH_DestroyWindow(g_Instance, g_Device, g_Allocator);
     }
 
@@ -775,23 +831,27 @@ namespace hades
       fsd->ImageAcquiredSemaphore = fsd->RenderCompleteSemaphore = VK_NULL_HANDLE;
     }
 
-    void init(SDL_Window *window)
+    bool init(SDL_Window *window) override
     {
       setup_vulkan(window);
-      setup_window(window);
+      vulkan_initialized = true;
 
-      // Setup Dear ImGui context
-      IMGUI_CHECKVERSION();
-      ImGui::CreateContext();
-      ImGuiIO &io = ImGui::GetIO();
-      (void)io;
-      io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
-      io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;  // Enable Gamepad Controls
-      io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;     // Enable docking
+      if (!setup_window(window))
+      {
+        CleanupVulkan();
+        vulkan_initialized = false;
+        return false;
+      }
 
-      ImGui::StyleColorsDark();
+      window_initialized = true;
+      return true;
+    }
 
-      ImGui_ImplSDL2_InitForVulkan(window);
+    void init_imgui_backend() override
+    {
+      if (imgui_backend_initialized)
+        return;
+
       ImGui_ImplVulkan_InitInfo init_info = {};
       init_info.Instance = g_Instance;
       init_info.PhysicalDevice = g_PhysicalDevice;
@@ -808,9 +868,16 @@ namespace hades
       init_info.Allocator = g_Allocator;
       init_info.CheckVkResultFn = check_vk_result;
       ImGui_ImplVulkan_Init(&init_info);
+      imgui_backend_initialized = true;
     }
 
-    void render_frame(SDL_Window *window)
+    void start_imgui_frame() override
+    {
+      if (imgui_backend_initialized)
+        ImGui_ImplVulkan_NewFrame();
+    }
+
+    void render_frame(SDL_Window *window) override
     {
       int fb_width, fb_height;
       SDL_GetWindowSize(window, &fb_width, &fb_height);
@@ -826,7 +893,7 @@ namespace hades
       }
     }
 
-    void render_imgui(ImDrawData *draw_data)
+    void render_imgui(ImDrawData *draw_data) override
     {
       ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
 
@@ -838,12 +905,13 @@ namespace hades
       FramePresent();
     }
 
-    void cleanup()
+    void shutdown_imgui_backend() override
     {
-      VkResult err = vkDeviceWaitIdle(g_Device);
-      check_vk_result(err);
-      CleanupVulkanWindow();
-      CleanupVulkan();
+      if (!imgui_backend_initialized)
+        return;
+
+      ImGui_ImplVulkan_Shutdown();
+      imgui_backend_initialized = false;
     }
   };
 

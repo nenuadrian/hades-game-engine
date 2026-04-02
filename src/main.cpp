@@ -8,14 +8,5 @@ int main(int argc, char **argv)
   CLI11_PARSE(app, argc, argv);
 
   hades::WindowManager window_manager;
-  window_manager.init();
-
-  while (window_manager.running)
-  {
-    window_manager.render_frame();
-  }
-
-  window_manager.cleanup();
-
-  return 0;
+  return window_manager.run();
 }
