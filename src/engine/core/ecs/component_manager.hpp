@@ -4,6 +4,7 @@
 #include "entity.hpp"
 #include "component_array.hpp"
 #include <memory>
+#include <typeinfo>
 #include <unordered_map>
 
 namespace hades

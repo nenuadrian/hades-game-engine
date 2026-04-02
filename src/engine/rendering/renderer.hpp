@@ -1,8 +1,9 @@
 #ifndef RENDERER_H
 #define RENDERER_H
 
-#include <SDL_video.h>
-#include <imgui.h>
+struct SDL_Window;
+struct ImDrawData;
+
 namespace hades
 {
   class Renderer

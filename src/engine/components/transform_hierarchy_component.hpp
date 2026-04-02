@@ -1,8 +1,9 @@
 #ifndef TRANSFORM_HIERARCHY_COMPONENT_H
 #define TRANSFORM_HIERARCHY_COMPONENT_H
 
-#include <vector>
+#include <algorithm>
 #include <optional>
+#include <vector>
 #include "../core/ecs/entity.hpp"
 
 namespace hades

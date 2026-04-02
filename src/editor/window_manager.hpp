@@ -1,3 +1,6 @@
+#ifndef HADES_EDITOR_WINDOW_MANAGER_HPP
+#define HADES_EDITOR_WINDOW_MANAGER_HPP
+
 #include "imgui.h"
 #include "imgui_impl_sdl2.h"
 #include <SDL.h>
@@ -5,15 +8,14 @@
 #include <cstdlib>
 #include <memory>
 
-#include "../engine/systems/render_system.hpp"
-#include "../engine/systems/movement_system.hpp"
-#include "../engine/core/ecs/system_manager.hpp"
 #include "../engine/core/ecs/component_manager.hpp"
 #include "../engine/core/ecs/entity_manager.hpp"
-#include "../engine/core/ecs/constants.h"
-#include "editor.hpp"
+#include "../engine/core/ecs/system_manager.hpp"
 #include "../engine/rendering/renderer.hpp"
 #include "../engine/rendering/vulkan.hpp"
+#include "../engine/systems/movement_system.hpp"
+#include "../engine/systems/render_system.hpp"
+#include "editor.hpp"
 
 namespace hades
 {
@@ -150,6 +152,15 @@ namespace hades
     bool initialized = false;
     bool running = false;
 
+    void request_quit()
+    {
+      running = false;
+
+      SDL_Event quit_event{};
+      quit_event.type = SDL_QUIT;
+      SDL_PushEvent(&quit_event);
+    }
+
     void process_editor_events()
     {
       while (!editor.state.events.empty())
@@ -159,7 +170,7 @@ namespace hades
 
         if (event == EDITOR_QUIT)
         {
-          running = false;
+          request_quit();
         }
       }
     }
@@ -217,6 +228,8 @@ namespace hades
       ImGuiIO &io = ImGui::GetIO();
       editor.render(io.DeltaTime, entityManager, componentManager);
       process_editor_events();
+      if (!running)
+        return;
       imgui_session.render();
     }
 
@@ -236,3 +249,5 @@ namespace hades
     }
   };
 }
+
+#endif

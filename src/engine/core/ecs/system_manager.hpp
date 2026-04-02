@@ -1,10 +1,16 @@
+#ifndef HADES_ENGINE_CORE_ECS_SYSTEM_MANAGER_HPP
+#define HADES_ENGINE_CORE_ECS_SYSTEM_MANAGER_HPP
+
 #include "system.hpp"
-#include "component_manager.hpp"
-#include "entity_manager.hpp"
 #include <memory>
+#include <typeinfo>
+#include <unordered_map>
 
 namespace hades
 {
+  class ComponentManager;
+  class EntityManager;
+
   class SystemManager
   {
   private:
@@ -30,3 +36,5 @@ namespace hades
     }
   };
 }
+
+#endif

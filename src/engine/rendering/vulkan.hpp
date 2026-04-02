@@ -1,3 +1,6 @@
+#ifndef HADES_ENGINE_RENDERING_VULKAN_HPP
+#define HADES_ENGINE_RENDERING_VULKAN_HPP
+
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
@@ -916,3 +919,5 @@ namespace hades
   };
 
 }
+
+#endif

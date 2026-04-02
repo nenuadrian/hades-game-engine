@@ -1,16 +1,21 @@
+#ifndef HADES_EDITOR_EDITOR_HPP
+#define HADES_EDITOR_EDITOR_HPP
+
 #include "imgui.h"
 
+#include <cstdint>
 #include <iostream>
 #include <memory>
+#include <string>
+#include <vector>
 
 #include "types.h"
+#include "../engine/components/transform_hierarchy_component.hpp"
 #include "../engine/core/ecs/component_manager.hpp"
 #include "../engine/core/ecs/entity_manager.hpp"
-#include "../engine/components/transform_hierarchy_component.hpp"
-#include "../engine/components/render_component.hpp"
-#include "tiny_obj_loader.h"
 #include "../engine/gui/imgui.hpp"
 #include "../engine/gui/gui.hpp"
+#include "tiny_obj_loader.h"
 
 namespace hades
 {
@@ -23,14 +28,16 @@ namespace hades
 
     Editor()
     {
-      auto file = MenuBarItem{.title = "File"};
-      auto exit = MenuBarItem{
-          .title = "Exit",
-          .on_activate =
-              [this]()
-          {
-            state.events.push(EDITOR_QUIT);
-          }};
+      MenuBarItem file;
+      file.title = "File";
+
+      MenuBarItem exit;
+      exit.title = "Exit";
+      exit.on_activate = [this]()
+      {
+        state.events.push(EDITOR_QUIT);
+      };
+
       file.children_menu_items.push_back(exit);
       gui->menu_bar_items.push_back(file);
     }
@@ -161,3 +168,5 @@ namespace hades
   };
 
 }
+
+#endif
