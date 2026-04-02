@@ -33,6 +33,7 @@ namespace hades
         const std::filesystem::path &parentDirectory,
         std::string_view workspaceName,
         std::string *errorMessage = nullptr);
+    bool prune_missing_recent_workspaces(std::string *errorMessage = nullptr);
 
     bool has_current_workspace() const;
     const std::optional<WorkspaceEntry> &current_workspace() const;

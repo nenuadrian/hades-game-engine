@@ -7,12 +7,12 @@ small managed host process that exchanges entity state with the native engine.
 ## Editor Workflow
 
 1. Select an entity in the editor.
-2. In the `Properties` panel, click `Add Script Component`.
-3. Add one or more script attachments.
-4. For each attachment, set:
+2. In the `Components` panel, click `Add Script Component`.
+3. Add one or more script components to the entity.
+4. Expand each script component and set:
    - `Script Path`: path to a `.cs` file
    - `Class Name`: the C# class to instantiate
-   - `Enabled`: whether that attachment should run
+   - `Enabled`: whether that script component should run
 5. Press `Play`.
 
 If `Class Name` is left empty, the editor can derive it from the file name. If
@@ -101,16 +101,4 @@ The current implementation is intentionally narrow:
 - scripts can only drive entities that have `PositionComponent3D`
 - script output is limited to writing back position values
 - compilation happens when play starts; there is no hot reload
-- scripts are loaded from file paths relative to the engine process working
-  directory unless absolute paths are used
 - a local `dotnet` SDK is required to compile and run scripts
-
-## Relevant Engine Files
-
-- `src/engine/components/script_component.hpp`
-- `src/engine/runtime/script_runtime.hpp`
-- `src/engine/runtime/script_runtime.cpp`
-- `src/engine/runtime/subprocess.hpp`
-- `src/engine/runtime/subprocess.cpp`
-- `src/editor/editor.cpp`
-- `src/editor/window_manager.cpp`

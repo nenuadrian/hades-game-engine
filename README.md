@@ -88,7 +88,7 @@ ctest --test-dir build --output-on-failure
 
 ## Scripting
 
-For the scripting workflow, runtime behavior, and the current limitations, see
+For C# scripting workflow, runtime behavior, and the current limitations, see
 [SCRIPTS.md](SCRIPTS.md).
 
 ## Documentation

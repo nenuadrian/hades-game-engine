@@ -835,6 +835,12 @@ namespace hades
     }
     else
     {
+      std::string pruneError;
+      if (!workspaceManager.prune_missing_recent_workspaces(&pruneError) && workspaceStatusMessage.empty())
+      {
+        workspaceStatusMessage = pruneError;
+      }
+
       ImGui::InputText("Workspace Folder", openWorkspacePathBuffer.data(), openWorkspacePathBuffer.size());
 
       if (ImGui::Button("Browse Existing..."))

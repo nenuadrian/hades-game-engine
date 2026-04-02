@@ -81,6 +81,25 @@ namespace hades
       EXPECT_EQ(reloadedManager.recent_workspaces().front().path, createdWorkspace->path);
     }
 
+    TEST(WorkspaceManagerTest, CreateWorkspaceBuildsMissingParentDirectories)
+    {
+      const std::filesystem::path testRoot = unique_test_directory("hades-workspace-create-nested");
+      ScopedDirectoryCleanup cleanup(testRoot);
+
+      const std::filesystem::path parentDirectory = testRoot / "projects" / "gameplay" / "levels";
+      const std::filesystem::path storagePath = testRoot / "prefs" / "recent_workspaces.txt";
+
+      WorkspaceManager manager(storagePath);
+      std::string errorMessage;
+      const auto createdWorkspace = manager.create_workspace(parentDirectory, "Sandbox", &errorMessage);
+
+      ASSERT_TRUE(createdWorkspace.has_value()) << errorMessage;
+      EXPECT_TRUE(std::filesystem::exists(parentDirectory));
+      EXPECT_TRUE(std::filesystem::exists(createdWorkspace->path));
+      EXPECT_TRUE(std::filesystem::is_directory(createdWorkspace->path));
+      EXPECT_EQ(createdWorkspace->path, std::filesystem::weakly_canonical(parentDirectory / "Sandbox"));
+    }
+
     TEST(WorkspaceManagerTest, ReopeningWorkspaceMovesItToFrontWithoutDuplicates)
     {
       const std::filesystem::path testRoot = unique_test_directory("hades-workspace-reopen");
@@ -130,6 +149,35 @@ namespace hades
       ASSERT_EQ(manager.recent_workspaces().size(), 1U);
       EXPECT_EQ(manager.recent_workspaces().front().name, "Playable");
       EXPECT_EQ(manager.recent_workspaces().front().path, std::filesystem::weakly_canonical(existingWorkspace));
+    }
+
+    TEST(WorkspaceManagerTest, PruneMissingRecentWorkspacesRemovesDeletedFolders)
+    {
+      const std::filesystem::path testRoot = unique_test_directory("hades-workspace-prune");
+      ScopedDirectoryCleanup cleanup(testRoot);
+
+      const std::filesystem::path storagePath = testRoot / "prefs" / "recent_workspaces.txt";
+      const std::filesystem::path alphaWorkspace = testRoot / "Alpha";
+      const std::filesystem::path betaWorkspace = testRoot / "Beta";
+      std::filesystem::create_directories(alphaWorkspace);
+      std::filesystem::create_directories(betaWorkspace);
+
+      WorkspaceManager manager(storagePath);
+      std::string errorMessage;
+      ASSERT_TRUE(manager.open_workspace(alphaWorkspace, &errorMessage).has_value()) << errorMessage;
+      ASSERT_TRUE(manager.open_workspace(betaWorkspace, &errorMessage).has_value()) << errorMessage;
+      ASSERT_EQ(manager.recent_workspaces().size(), 2U);
+
+      std::filesystem::remove_all(betaWorkspace);
+
+      EXPECT_TRUE(manager.prune_missing_recent_workspaces(&errorMessage)) << errorMessage;
+      ASSERT_EQ(manager.recent_workspaces().size(), 1U);
+      EXPECT_EQ(manager.recent_workspaces().front().path, std::filesystem::weakly_canonical(alphaWorkspace));
+
+      WorkspaceManager reloadedManager(storagePath);
+      EXPECT_TRUE(reloadedManager.load(&errorMessage)) << errorMessage;
+      ASSERT_EQ(reloadedManager.recent_workspaces().size(), 1U);
+      EXPECT_EQ(reloadedManager.recent_workspaces().front().path, std::filesystem::weakly_canonical(alphaWorkspace));
     }
 
     TEST(ModelImporterTest, ImportObjCollectsMeshAndMaterialMetadata)

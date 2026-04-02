@@ -111,6 +111,24 @@ namespace hades
       return normalizedPath;
     }
 
+    std::optional<std::filesystem::path> normalize_directory_path(
+        const std::filesystem::path &inputPath,
+        std::string *errorMessage)
+    {
+      std::error_code errorCode;
+      const std::filesystem::path absolutePath = std::filesystem::absolute(inputPath, errorCode);
+      if (errorCode)
+      {
+        set_error_message(
+            errorMessage,
+            "Unable to resolve workspace path '" + inputPath.string() + "': " + errorCode.message());
+        return std::nullopt;
+      }
+
+      clear_error_message(errorMessage);
+      return absolutePath.lexically_normal();
+    }
+
     std::optional<WorkspaceEntry> make_workspace_entry(
         const std::filesystem::path &workspacePath,
         std::string *errorMessage)
@@ -267,7 +285,7 @@ namespace hades
     }
 
     std::string parentError;
-    const auto normalizedParent = normalize_existing_directory(parentDirectory, &parentError);
+    const auto normalizedParent = normalize_directory_path(parentDirectory, &parentError);
     if (!normalizedParent.has_value())
     {
       set_error_message(
@@ -305,6 +323,37 @@ namespace hades
     }
 
     return open_workspace(workspaceDirectory, errorMessage);
+  }
+
+  bool WorkspaceManager::prune_missing_recent_workspaces(std::string *errorMessage)
+  {
+    const auto originalSize = recentWorkspaces_.size();
+
+    recentWorkspaces_.erase(
+        std::remove_if(
+            recentWorkspaces_.begin(),
+            recentWorkspaces_.end(),
+            [](const WorkspaceEntry &workspace)
+            {
+              std::error_code errorCode;
+              return !std::filesystem::exists(workspace.path, errorCode) ||
+                     !std::filesystem::is_directory(workspace.path, errorCode);
+            }),
+        recentWorkspaces_.end());
+
+    if (recentWorkspaces_.size() == originalSize)
+    {
+      clear_error_message(errorMessage);
+      return true;
+    }
+
+    if (!save(errorMessage))
+    {
+      return false;
+    }
+
+    clear_error_message(errorMessage);
+    return true;
   }
 
   bool WorkspaceManager::has_current_workspace() const

@@ -49,7 +49,7 @@ namespace hades
     std::string entity_label(Entity::EntityId entity, ComponentManager &componentManager) const;
     void entities(EntityManager &entityManager, ComponentManager &componentManager);
     void properties(EntityManager &entityManager, ComponentManager &componentManager);
-    void components(ComponentManager &componentManager);
+    void components(EntityManager &entityManager, ComponentManager &componentManager);
     void game(EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime);
     void render_hierarchy(Entity::EntityId entity, ComponentManager &componentManager);
     void render_hierarchies(EntityManager &entityManager, ComponentManager &componentManager);

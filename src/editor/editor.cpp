@@ -62,11 +62,6 @@ namespace hades
       ImGui::TextDisabled("%s", message);
     }
 
-    void render_component_entry(const char *label)
-    {
-      ImGui::BulletText("%s", label);
-    }
-
     Vec3 make_vec3(float x, float y, float z)
     {
       return Vec3{x, y, z};
@@ -130,6 +125,27 @@ namespace hades
           make_vec3(position.x + CUBE_HALF_EXTENT, position.y + CUBE_HALF_EXTENT, position.z + CUBE_HALF_EXTENT),
           make_vec3(position.x - CUBE_HALF_EXTENT, position.y + CUBE_HALF_EXTENT, position.z + CUBE_HALF_EXTENT),
       };
+    }
+
+    std::string script_component_label(const ScriptAttachment &attachment, std::size_t index)
+    {
+      std::string suffix;
+      if (!attachment.className.empty())
+      {
+        suffix = attachment.className;
+      }
+      else if (!attachment.scriptPath.empty())
+      {
+        suffix = std::filesystem::path(attachment.scriptPath).stem().string();
+      }
+
+      std::string label = "Script Component " + std::to_string(index + 1);
+      if (!suffix.empty())
+      {
+        label += ": " + suffix;
+      }
+
+      return label;
     }
   }
 
@@ -231,7 +247,7 @@ namespace hades
     handle_play_mode_requests(entityManager, componentManager, scriptRuntime);
     entities(entityManager, componentManager);
     properties(entityManager, componentManager);
-    components(componentManager);
+    components(entityManager, componentManager);
     game(entityManager, componentManager, scriptRuntime);
     debug(deltaTime);
   }
@@ -478,9 +494,112 @@ namespace hades
 
     const Entity::EntityId entity = *state.selectedEntity;
     ImGui::Text("Entity %u", entity);
+    if (componentManager.hasComponent<NameComponent>(entity))
+    {
+      ImGui::TextDisabled("%s", componentManager.getComponent<NameComponent>(entity).value.c_str());
+    }
     ImGui::Separator();
 
+    std::size_t componentTypeCount = 0;
+    componentTypeCount += componentManager.hasComponent<NameComponent>(entity) ? 1U : 0U;
+    componentTypeCount += componentManager.hasComponent<TransformHierarchyComponent>(entity) ? 1U : 0U;
+    componentTypeCount += componentManager.hasComponent<PositionComponent3D>(entity) ? 1U : 0U;
+    componentTypeCount += componentManager.hasComponent<CameraComponent>(entity) ? 1U : 0U;
+    componentTypeCount += componentManager.hasComponent<AudioListenerComponent>(entity) ? 1U : 0U;
+    componentTypeCount += componentManager.hasComponent<PrimitiveComponent>(entity) ? 1U : 0U;
+    componentTypeCount += componentManager.hasComponent<AudioSourceComponent>(entity) ? 1U : 0U;
+    componentTypeCount += componentManager.hasComponent<ModelComponent>(entity) ? 1U : 0U;
+    componentTypeCount += componentManager.hasComponent<RenderComponent>(entity) ? 1U : 0U;
+    componentTypeCount += componentManager.hasComponent<ScriptComponent>(entity) ? 1U : 0U;
+
+    ImGui::Text("Component Types: %zu", componentTypeCount);
+    if (componentManager.hasComponent<ScriptComponent>(entity))
+    {
+      const auto &scriptComponent = componentManager.getComponent<ScriptComponent>(entity);
+      ImGui::Text("Script Components: %zu", scriptComponent.attachments.size());
+    }
+
+    if (componentManager.hasComponent<TransformHierarchyComponent>(entity))
+    {
+      const auto &hierarchy = componentManager.getComponent<TransformHierarchyComponent>(entity);
+      ImGui::Separator();
+      ImGui::TextUnformatted("Hierarchy");
+
+      if (hierarchy.parent.has_value())
+      {
+        const Entity::EntityId parent = *hierarchy.parent;
+        if (ImGui::Selectable(entity_label(parent, componentManager).c_str(), false))
+        {
+          state.selectedEntity = parent;
+        }
+      }
+      else
+      {
+        ImGui::TextDisabled("Parent: Root");
+      }
+
+      if (hierarchy.children.empty())
+      {
+        ImGui::TextDisabled("No child entities.");
+      }
+      else
+      {
+        ImGui::Text("Children (%zu)", hierarchy.children.size());
+        for (const Entity::EntityId child : hierarchy.children)
+        {
+          if (ImGui::Selectable(entity_label(child, componentManager).c_str(), false))
+          {
+            state.selectedEntity = child;
+          }
+        }
+      }
+    }
+
+    ImGui::Separator();
+    ImGui::TextDisabled("Expand attached components in the Components panel to edit their details.");
+
+    ImGui::End();
+  }
+
+  void Editor::components(EntityManager &entityManager, ComponentManager &componentManager)
+  {
+    ImGui::Begin(COMPONENTS_WINDOW_TITLE);
+
+    if (!state.selectedEntity.has_value())
+    {
+      render_selection_hint("Select an entity to inspect its components.");
+      ImGui::End();
+      return;
+    }
+
+    const Entity::EntityId entity = *state.selectedEntity;
+
+    ImGui::Text("Entity %u", entity);
     if (componentManager.hasComponent<NameComponent>(entity))
+    {
+      ImGui::TextDisabled("%s", componentManager.getComponent<NameComponent>(entity).value.c_str());
+    }
+    ImGui::Separator();
+
+    if (ImGui::Button("Add Script Component"))
+    {
+      if (!componentManager.hasComponent<ScriptComponent>(entity))
+      {
+        ScriptComponent scriptComponent;
+        scriptComponent.attachments.push_back(ScriptAttachment());
+        componentManager.addComponent(entity, scriptComponent);
+      }
+      else
+      {
+        componentManager.getComponent<ScriptComponent>(entity).attachments.push_back(ScriptAttachment());
+      }
+    }
+
+    ImGui::SameLine();
+    ImGui::TextDisabled("Expand a component to inspect or edit it.");
+    ImGui::Separator();
+
+    if (componentManager.hasComponent<NameComponent>(entity) && ImGui::CollapsingHeader("Name"))
     {
       auto &name = componentManager.getComponent<NameComponent>(entity);
       std::array<char, 128> nameBuffer{};
@@ -491,20 +610,17 @@ namespace hades
       }
     }
 
-    if (componentManager.hasComponent<PositionComponent3D>(entity))
+    if (componentManager.hasComponent<PositionComponent3D>(entity) && ImGui::CollapsingHeader("Transform"))
     {
       auto &position = componentManager.getComponent<PositionComponent3D>(entity);
-      ImGui::TextUnformatted("Transform");
       ImGui::DragFloat3("Position", &position.x, 0.1f);
-      ImGui::Separator();
     }
 
-    if (componentManager.hasComponent<CameraComponent>(entity))
+    if (componentManager.hasComponent<CameraComponent>(entity) && ImGui::CollapsingHeader("Camera"))
     {
       auto &camera = componentManager.getComponent<CameraComponent>(entity);
       bool isMainCamera = camera.isMainCamera;
 
-      ImGui::TextUnformatted("Camera");
       if (ImGui::Checkbox("Main Camera", &isMainCamera))
       {
         if (isMainCamera)
@@ -539,27 +655,28 @@ namespace hades
       {
         camera.farClip = camera.nearClip + 0.001f;
       }
-
-      ImGui::Separator();
     }
 
-    if (componentManager.hasComponent<AudioListenerComponent>(entity))
+    if (componentManager.hasComponent<AudioListenerComponent>(entity) && ImGui::CollapsingHeader("Audio Listener"))
     {
       auto &listener = componentManager.getComponent<AudioListenerComponent>(entity);
-      ImGui::TextUnformatted("Audio Listener");
       ImGui::Checkbox("Listener Enabled", &listener.enabled);
       ImGui::DragFloat3("Listener Forward", &listener.forwardX, 0.01f, -1.0f, 1.0f);
       ImGui::DragFloat3("Listener Up", &listener.upX, 0.01f, -1.0f, 1.0f);
-      ImGui::Separator();
     }
 
-    if (componentManager.hasComponent<AudioSourceComponent>(entity))
+    if (componentManager.hasComponent<PrimitiveComponent>(entity) && ImGui::CollapsingHeader("Primitive"))
+    {
+      const auto &primitive = componentManager.getComponent<PrimitiveComponent>(entity);
+      ImGui::Text("Type: %s", primitive_type_label(primitive.type));
+    }
+
+    if (componentManager.hasComponent<AudioSourceComponent>(entity) && ImGui::CollapsingHeader("Audio Source"))
     {
       auto &source = componentManager.getComponent<AudioSourceComponent>(entity);
       std::array<char, 260> assetPathBuffer{};
       std::snprintf(assetPathBuffer.data(), assetPathBuffer.size(), "%s", source.assetPath.c_str());
 
-      ImGui::TextUnformatted("Audio Source");
       if (ImGui::InputText("Audio Clip", assetPathBuffer.data(), assetPathBuffer.size()))
       {
         source.assetPath = assetPathBuffer.data();
@@ -604,23 +721,13 @@ namespace hades
       }
 
       ImGui::TextDisabled("Audio paths resolve relative to the engine process working directory.");
-      ImGui::Separator();
     }
 
-    if (componentManager.hasComponent<PrimitiveComponent>(entity))
-    {
-      const auto &primitive = componentManager.getComponent<PrimitiveComponent>(entity);
-      ImGui::TextUnformatted("Primitive");
-      ImGui::Text("Type: %s", primitive_type_label(primitive.type));
-      ImGui::Separator();
-    }
-
-    if (componentManager.hasComponent<ModelComponent>(entity))
+    if (componentManager.hasComponent<ModelComponent>(entity) && ImGui::CollapsingHeader("Imported Model"))
     {
       const auto &modelComponent = componentManager.getComponent<ModelComponent>(entity);
       const auto &model = modelComponent.model;
 
-      ImGui::TextUnformatted("Imported Model");
       ImGui::TextWrapped("%s", model.sourcePath.c_str());
       ImGui::Text("Format: %s", model.formatHint.empty() ? "Unknown" : model.formatHint.c_str());
       ImGui::Text("Meshes: %zu", model.meshes.size());
@@ -628,7 +735,7 @@ namespace hades
       ImGui::Text("Vertices: %zu", model.totalVertexCount);
       ImGui::Text("Faces: %zu", model.totalFaceCount);
 
-      if (ImGui::CollapsingHeader("Mesh Details", ImGuiTreeNodeFlags_DefaultOpen))
+      if (ImGui::CollapsingHeader("Mesh Details"))
       {
         for (std::size_t meshIndex = 0; meshIndex < model.meshes.size(); ++meshIndex)
         {
@@ -649,142 +756,18 @@ namespace hades
           ImGui::BulletText("%s", material.name.c_str());
         }
       }
-
-      ImGui::Separator();
     }
 
-    if (!componentManager.hasComponent<ScriptComponent>(entity))
+    if (componentManager.hasComponent<RenderComponent>(entity) && ImGui::CollapsingHeader("Render"))
     {
-      if (ImGui::Button("Add Script Component"))
-      {
-        componentManager.addComponent(entity, ScriptComponent());
-      }
-    }
-    else
-    {
-      auto &scriptComponent = componentManager.getComponent<ScriptComponent>(entity);
-      ImGui::TextUnformatted("Scripts");
-
-      std::optional<std::size_t> removeAttachmentIndex;
-      for (std::size_t index = 0; index < scriptComponent.attachments.size(); ++index)
-      {
-        auto &attachment = scriptComponent.attachments[index];
-        ImGui::PushID(static_cast<int>(index));
-
-        std::array<char, 260> pathBuffer{};
-        std::snprintf(pathBuffer.data(), pathBuffer.size(), "%s", attachment.scriptPath.c_str());
-        std::array<char, 160> classBuffer{};
-        std::snprintf(classBuffer.data(), classBuffer.size(), "%s", attachment.className.c_str());
-
-        ImGui::SeparatorText(("Attachment " + std::to_string(index + 1)).c_str());
-        ImGui::Checkbox("Enabled", &attachment.enabled);
-        if (ImGui::InputText("Script Path", pathBuffer.data(), pathBuffer.size()))
-        {
-          attachment.scriptPath = pathBuffer.data();
-          if (attachment.className.empty() && !attachment.scriptPath.empty())
-          {
-            attachment.className = std::filesystem::path(attachment.scriptPath).stem().string();
-          }
-        }
-        if (ImGui::InputText("Class Name", classBuffer.data(), classBuffer.size()))
-        {
-          attachment.className = classBuffer.data();
-        }
-
-        if (ImGui::Button("Use File Name"))
-        {
-          attachment.className = std::filesystem::path(attachment.scriptPath).stem().string();
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Remove Attachment"))
-        {
-          removeAttachmentIndex = index;
-        }
-
-        ImGui::PopID();
-      }
-
-      if (removeAttachmentIndex.has_value())
-      {
-        scriptComponent.attachments.erase(scriptComponent.attachments.begin() + static_cast<std::ptrdiff_t>(*removeAttachmentIndex));
-      }
-
-      if (ImGui::Button("Add Script Attachment"))
-      {
-        scriptComponent.attachments.push_back(ScriptAttachment());
-      }
-
-      ImGui::TextDisabled("Scripts compile when Play starts using dotnet and must derive from Hades.Scripting.HadesScript.");
-      ImGui::TextDisabled("Relative script paths resolve from the engine process working directory.");
-      ImGui::Separator();
+      const auto &render = componentManager.getComponent<RenderComponent>(entity);
+      ImGui::Text("Program: %d", render.program);
     }
 
-    ImGui::End();
-  }
-
-  void Editor::components(ComponentManager &componentManager)
-  {
-    ImGui::Begin(COMPONENTS_WINDOW_TITLE);
-
-    if (!state.selectedEntity.has_value())
-    {
-      render_selection_hint("Select an entity to inspect its components.");
-      ImGui::End();
-      return;
-    }
-
-    const Entity::EntityId entity = *state.selectedEntity;
-
-    ImGui::Text("Entity %u", entity);
-    ImGui::Separator();
-    ImGui::TextUnformatted("Attached Components");
-
-    if (componentManager.hasComponent<NameComponent>(entity))
-    {
-      render_component_entry("Name");
-    }
-    if (componentManager.hasComponent<TransformHierarchyComponent>(entity))
-    {
-      render_component_entry("TransformHierarchy");
-    }
-    if (componentManager.hasComponent<PositionComponent3D>(entity))
-    {
-      render_component_entry("Position3D");
-    }
-    if (componentManager.hasComponent<CameraComponent>(entity))
-    {
-      render_component_entry("Camera");
-    }
-    if (componentManager.hasComponent<AudioListenerComponent>(entity))
-    {
-      render_component_entry("AudioListener");
-    }
-    if (componentManager.hasComponent<PrimitiveComponent>(entity))
-    {
-      render_component_entry("Primitive");
-    }
-    if (componentManager.hasComponent<AudioSourceComponent>(entity))
-    {
-      render_component_entry("AudioSource");
-    }
-    if (componentManager.hasComponent<ModelComponent>(entity))
-    {
-      render_component_entry("Model");
-    }
-    if (componentManager.hasComponent<RenderComponent>(entity))
-    {
-      render_component_entry("Render");
-    }
-    if (componentManager.hasComponent<ScriptComponent>(entity))
-    {
-      render_component_entry("Script");
-    }
-
-    if (componentManager.hasComponent<TransformHierarchyComponent>(entity))
+    if (componentManager.hasComponent<TransformHierarchyComponent>(entity) &&
+        ImGui::CollapsingHeader("Transform Hierarchy"))
     {
       const auto &hierarchy = componentManager.getComponent<TransformHierarchyComponent>(entity);
-      ImGui::Separator();
-      ImGui::TextUnformatted("Hierarchy");
 
       if (hierarchy.parent.has_value())
       {
@@ -814,6 +797,66 @@ namespace hades
           }
         }
       }
+    }
+
+    if (componentManager.hasComponent<ScriptComponent>(entity))
+    {
+      auto &scriptComponent = componentManager.getComponent<ScriptComponent>(entity);
+      std::optional<std::size_t> removeAttachmentIndex;
+
+      if (scriptComponent.attachments.empty() && ImGui::CollapsingHeader("Scripts"))
+      {
+        ImGui::TextDisabled("No script components attached.");
+      }
+
+      for (std::size_t index = 0; index < scriptComponent.attachments.size(); ++index)
+      {
+        auto &attachment = scriptComponent.attachments[index];
+        ImGui::PushID(static_cast<int>(index));
+
+        const std::string label = script_component_label(attachment, index);
+        if (ImGui::CollapsingHeader(label.c_str()))
+        {
+          std::array<char, 260> pathBuffer{};
+          std::snprintf(pathBuffer.data(), pathBuffer.size(), "%s", attachment.scriptPath.c_str());
+          std::array<char, 160> classBuffer{};
+          std::snprintf(classBuffer.data(), classBuffer.size(), "%s", attachment.className.c_str());
+
+          ImGui::Checkbox("Enabled", &attachment.enabled);
+          if (ImGui::InputText("Script Path", pathBuffer.data(), pathBuffer.size()))
+          {
+            attachment.scriptPath = pathBuffer.data();
+            if (attachment.className.empty() && !attachment.scriptPath.empty())
+            {
+              attachment.className = std::filesystem::path(attachment.scriptPath).stem().string();
+            }
+          }
+          if (ImGui::InputText("Class Name", classBuffer.data(), classBuffer.size()))
+          {
+            attachment.className = classBuffer.data();
+          }
+
+          if (ImGui::Button("Use File Name"))
+          {
+            attachment.className = std::filesystem::path(attachment.scriptPath).stem().string();
+          }
+          ImGui::SameLine();
+          if (ImGui::Button("Remove Script Component"))
+          {
+            removeAttachmentIndex = index;
+          }
+        }
+
+        ImGui::PopID();
+      }
+
+      if (removeAttachmentIndex.has_value())
+      {
+        scriptComponent.attachments.erase(scriptComponent.attachments.begin() + static_cast<std::ptrdiff_t>(*removeAttachmentIndex));
+      }
+
+      ImGui::TextDisabled("Scripts compile when Play starts using dotnet and must derive from Hades.Scripting.HadesScript.");
+      ImGui::TextDisabled("Relative script paths resolve from the engine process working directory.");
     }
 
     ImGui::End();
