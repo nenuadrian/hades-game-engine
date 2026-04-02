@@ -15,9 +15,11 @@ set(HADES_CLI11_TAG "v2.4.2" CACHE STRING "CLI11 git tag or branch.")
 set(HADES_GOOGLETEST_TAG "v1.15.2" CACHE STRING "GoogleTest git tag or branch.")
 # Docking APIs live on Dear ImGui's docking release branch.
 set(HADES_IMGUI_TAG "v1.91.4-docking" CACHE STRING "Dear ImGui git tag or branch.")
+set(HADES_MINIAUDIO_TAG "0.11.25" CACHE STRING "miniaudio git tag or branch.")
 # The vendored SDL snapshot is 2.31.0, which was a prerelease line.
 # Use the nearest stable release tag for on-demand downloads.
 set(HADES_SDL2_TAG "release-2.32.0" CACHE STRING "SDL2 git tag or branch.")
+set(HADES_ASSIMP_TAG "v6.0.4" CACHE STRING "Assimp git tag or branch.")
 set(HADES_TINYOBJLOADER_TAG "v2.0.0rc13" CACHE STRING "tinyobjloader git tag or branch.")
 
 function(hades_prefer_local_source fetch_name local_dir)
@@ -45,7 +47,9 @@ function(hades_configure_dependencies)
   hades_prefer_local_source(cli11 "${CMAKE_SOURCE_DIR}/lib/CLI11")
   hades_prefer_local_source(googletest "${CMAKE_SOURCE_DIR}/lib/googletest")
   hades_prefer_local_source(imgui "${CMAKE_SOURCE_DIR}/lib/imgui")
+  hades_prefer_local_source(miniaudio "${CMAKE_SOURCE_DIR}/lib/miniaudio")
   hades_prefer_local_source(sdl2 "${CMAKE_SOURCE_DIR}/lib/imgui/lib/SDL2")
+  hades_prefer_local_source(assimp "${CMAKE_SOURCE_DIR}/lib/assimp")
   hades_prefer_local_source(tinyobjloader "${CMAKE_SOURCE_DIR}/lib/tinyobjloader")
 
   set(CLI11_BUILD_DOCS OFF CACHE BOOL "" FORCE)
@@ -63,6 +67,18 @@ function(hades_configure_dependencies)
   set(SDL_TEST OFF CACHE BOOL "" FORCE)
   set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
   set(SDL_TESTS OFF CACHE BOOL "" FORCE)
+
+  set(MINIAUDIO_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+  set(MINIAUDIO_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  set(MINIAUDIO_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+  set(MINIAUDIO_INSTALL OFF CACHE BOOL "" FORCE)
+  set(MINIAUDIO_NO_EXTRA_NODES ON CACHE BOOL "" FORCE)
+
+  set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
+  set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
+  set(ASSIMP_WARNINGS_AS_ERRORS OFF CACHE BOOL "" FORCE)
+  set(ASSIMP_INJECT_DEBUG_POSTFIX OFF CACHE BOOL "" FORCE)
 
   set(TINYOBJLOADER_BUILD_TEST_LOADER OFF CACHE BOOL "" FORCE)
   set(TINYOBJLOADER_BUILD_OBJ_STICHER OFF CACHE BOOL "" FORCE)
@@ -84,9 +100,19 @@ function(hades_configure_dependencies)
     GIT_TAG ${HADES_IMGUI_TAG}
     GIT_SHALLOW TRUE)
   FetchContent_Declare(
+    miniaudio
+    GIT_REPOSITORY https://github.com/mackron/miniaudio.git
+    GIT_TAG ${HADES_MINIAUDIO_TAG}
+    GIT_SHALLOW TRUE)
+  FetchContent_Declare(
     sdl2
     GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
     GIT_TAG ${HADES_SDL2_TAG}
+    GIT_SHALLOW TRUE)
+  FetchContent_Declare(
+    assimp
+    GIT_REPOSITORY https://github.com/assimp/assimp.git
+    GIT_TAG ${HADES_ASSIMP_TAG}
     GIT_SHALLOW TRUE)
   FetchContent_Declare(
     tinyobjloader
@@ -94,7 +120,7 @@ function(hades_configure_dependencies)
     GIT_TAG ${HADES_TINYOBJLOADER_TAG}
     GIT_SHALLOW TRUE)
 
-  FetchContent_MakeAvailable(cli11 googletest sdl2 tinyobjloader)
+  FetchContent_MakeAvailable(cli11 googletest miniaudio sdl2 assimp tinyobjloader)
 
   FetchContent_GetProperties(imgui)
   if(NOT imgui_POPULATED)

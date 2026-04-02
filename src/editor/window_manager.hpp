@@ -13,6 +13,7 @@ struct SDL_Window;
 
 namespace hades
 {
+  class AudioEngine;
   class Renderer;
 
   class WindowManager
@@ -54,13 +55,15 @@ namespace hades
     ComponentManager componentManager;
     SystemManager systemManager;
     Editor editor;
-    // Keep destruction order: ImGui, then renderer, then SDL window, then SDL itself.
+    // Keep destruction order: ImGui, audio, renderer, SDL window, then SDL itself.
     SdlSession sdl_session;
     WindowPtr window{nullptr};
     std::unique_ptr<Renderer> renderer;
+    std::unique_ptr<AudioEngine> audio_engine;
     ImGuiSession imgui_session;
     bool initialized = false;
     bool running = false;
+    bool wasPlayingLastFrame = false;
 
     void request_quit();
     void process_editor_events();

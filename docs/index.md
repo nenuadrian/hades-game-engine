@@ -3,30 +3,26 @@ hide:
   - toc
 ---
 
-<section class="hero-panel">
-  <p class="hero-panel__eyebrow">C++ Engine Documentation</p>
-  <h1>Hades Game Engine</h1>
-  <p class="hero-panel__lead">
-    Architecture notes, engine internals, and generated class maps in a darker,
-    wider layout built for actual reading instead of a narrow default docs column.
-  </p>
-  <div class="hero-panel__actions">
-    <a class="md-button md-button--primary" href="architecture/">Explore architecture</a>
-    <a class="md-button" href="generated/class-relationships/">Open class relationships</a>
-  </div>
-</section>
+# Hades Game Engine
+
+`> source-first docs for the engine, editor, and generated type maps`
+
+## Jump In
+
+- [Architecture overview](architecture.md)
+- [Class relationships](generated/class-relationships.md)
 
 <div class="grid cards" markdown>
 
 -   ### Architecture overview
 
-    Get the high-level map of ECS, rendering, and editor modules before dropping
-    into source.
+    Start with the engine/editor boundaries, ECS flow, and rendering structure
+    before dropping into source.
 
 -   ### Generated class map
 
-    Open the auto-generated relationship diagram when you need the concrete
-    type-level links between systems.
+    Open the generated relationship map when you need the concrete type-level
+    links between systems.
 
 -   ### Local workflow
 
@@ -42,6 +38,6 @@ hide:
 
 ## What This Site Covers
 
-- engine/editor module boundaries
+- engine and editor module boundaries
 - generated class relationships from `src/**/*.h*`
-- the local docs workflow used for GitHub Pages
+- the GitHub Pages docs workflow

@@ -28,16 +28,34 @@ add_executable(${PROJECT_NAME} ${SOURCES})
 target_link_libraries(
   ${PROJECT_NAME}
   PRIVATE CLI11::CLI11
+          assimp
           hades_imgui
+          miniaudio
           tinyobjloader
           Vulkan::Vulkan)
+
+add_custom_command(
+  TARGET ${PROJECT_NAME}
+  POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>/assets"
+  COMMAND
+    ${CMAKE_COMMAND} -E copy_if_different
+    "${CMAKE_SOURCE_DIR}/assets/logo.bmp"
+    "$<TARGET_FILE_DIR:${PROJECT_NAME}>/assets/logo.bmp")
 
 if(TARGET SDL2::SDL2main)
   target_link_libraries(${PROJECT_NAME} PRIVATE SDL2::SDL2main)
 endif()
 
-add_executable(hades_tests src/tests/test.cpp)
-target_link_libraries(hades_tests PRIVATE gtest_main)
+set(TEST_SUPPORT_SOURCES
+  src/engine/assets/model_importer.cpp
+  src/engine/components/position_component_3d.cpp
+  src/engine/components/transform_hierarchy_component.cpp
+  src/engine/core/ecs/entity_factory.cpp
+  src/engine/core/ecs/entity_manager.cpp)
+
+add_executable(hades_tests src/tests/test.cpp ${TEST_SUPPORT_SOURCES})
+target_link_libraries(hades_tests PRIVATE assimp gtest_main)
 
 enable_testing()
 include(GoogleTest)

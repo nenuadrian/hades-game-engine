@@ -2,7 +2,7 @@
   <h1>Hades - Light C++ 3D Game Engine</h1>
 
 [![CMake on multiple platforms](https://github.com/nenuadrian/hades-game-engine/actions/workflows/cmake-multi-platform.yml/badge.svg)](https://github.com/nenuadrian/hades-game-engine/actions/workflows/cmake-multi-platform.yml)
-[![Docs (MkDocs Material)](https://github.com/nenuadrian/hades-game-engine/actions/workflows/docs-pages.yml/badge.svg)](https://github.com/nenuadrian/hades-game-engine/actions/workflows/docs-pages.yml)
+[![Docs](https://github.com/nenuadrian/hades-game-engine/actions/workflows/docs-pages.yml/badge.svg)](https://github.com/nenuadrian/hades-game-engine/actions/workflows/docs-pages.yml)
 [![Docker test image](https://github.com/nenuadrian/hades-game-engine/actions/workflows/docker-build.yml/badge.svg)](https://github.com/nenuadrian/hades-game-engine/actions/workflows/docker-build.yml)
 
 </p>
@@ -42,7 +42,7 @@ Not maintained or supported.
 - entity management, with camera and model features
 - save / load project from JSON
 - model loading using assimp and stb
-- sound
+- sound via miniaudio, with streaming, buses, and basic 3D spatial audio support
 - tests
 - generating shaders dynamically
 
@@ -85,7 +85,7 @@ ctest --test-dir build --output-on-failure
 ```bash
 python3 -m pip install -r requirements-docs.txt
 python3 scripts/generate_class_diagram.py
-mkdocs serve
+python3 -m mkdocs serve
 ```
 
 ## Previous version

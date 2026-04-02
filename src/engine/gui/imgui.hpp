@@ -8,7 +8,7 @@ namespace hades
   class ImGui_GUI : public GUI
   {
   public:
-    void render_frame() override;
+    std::uint32_t render_frame() override;
   };
 }
 #endif

@@ -4,9 +4,9 @@
 
 namespace hades
 {
-  void ImGui_GUI::render_frame()
+  std::uint32_t ImGui_GUI::render_frame()
   {
-    ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
+    const ImGuiID dockspaceId = ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
 
     if (ImGui::BeginMainMenuBar())
     {
@@ -30,5 +30,7 @@ namespace hades
 
       ImGui::EndMainMenuBar();
     }
+
+    return dockspaceId;
   }
 }

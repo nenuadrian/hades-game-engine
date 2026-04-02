@@ -1,4 +1,4 @@
-name: Docs (MkDocs Material)
+name: Docs
 
 on:
   push:
