@@ -1,10 +1,12 @@
+#include <cassert>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <vulkan/vulkan.h>
-#include <_string.h>
 #include "imgui.h"
 #include "imgui_impl_sdl2.h"
 #include "imgui_impl_vulkan.h"
-#include "lib/SDL2/include/SDL_video.h"
+#include <SDL_video.h>
 #include <SDL_vulkan.h>
 #include "renderer.hpp"
 
@@ -56,7 +58,7 @@ namespace hades
 
     Vulkan_Window()
     {
-      memset((void *)this, 0, sizeof(*this));
+      std::memset((void *)this, 0, sizeof(*this));
       PresentMode = (VkPresentModeKHR)~0; // Ensure we get an error if user doesn't set this.
       ClearEnable = true;
     }
@@ -102,7 +104,7 @@ namespace hades
     bool IsExtensionAvailable(const ImVector<VkExtensionProperties> &properties, const char *extension)
     {
       for (const VkExtensionProperties &p : properties)
-        if (strcmp(p.extensionName, extension) == 0)
+        if (std::strcmp(p.extensionName, extension) == 0)
           return true;
       return false;
     }
@@ -631,8 +633,8 @@ namespace hades
         g_MainWindowData.SemaphoreCount = g_MainWindowData.ImageCount + 1;
         g_MainWindowData.Frames = (Vulkan_Frame *)IM_ALLOC(sizeof(Vulkan_Frame) * g_MainWindowData.ImageCount);
         g_MainWindowData.FrameSemaphores = (Vulkan_FrameSemaphores *)IM_ALLOC(sizeof(Vulkan_FrameSemaphores) * g_MainWindowData.SemaphoreCount);
-        memset(g_MainWindowData.Frames, 0, sizeof(g_MainWindowData.Frames[0]) * g_MainWindowData.ImageCount);
-        memset(g_MainWindowData.FrameSemaphores, 0, sizeof(g_MainWindowData.FrameSemaphores[0]) * g_MainWindowData.SemaphoreCount);
+        std::memset(g_MainWindowData.Frames, 0, sizeof(g_MainWindowData.Frames[0]) * g_MainWindowData.ImageCount);
+        std::memset(g_MainWindowData.FrameSemaphores, 0, sizeof(g_MainWindowData.FrameSemaphores[0]) * g_MainWindowData.SemaphoreCount);
         for (uint32_t i = 0; i < g_MainWindowData.ImageCount; i++)
           g_MainWindowData.Frames[i].Backbuffer = backbuffers[i];
       }

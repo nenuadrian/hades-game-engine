@@ -1,72 +1,43 @@
-cmake_minimum_required(VERSION 3.10)
-project(HadesGameEngine)
+cmake_minimum_required(VERSION 3.16)
+project(HadesGameEngine LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Define the source directory
-set(SRC_DIR "${CMAKE_SOURCE_DIR}/src/engine")
-
-# Automatically find all .cpp, .h, and .hpp files in the src directory
-file(GLOB_RECURSE SRC_FILES "${SRC_DIR}/*.cpp" "${SRC_DIR}/*.h"
-     "${SRC_DIR}/*.hpp")
-
-# Add source files
-set(SOURCES ${SRC_FILES} ${CMAKE_SOURCE_DIR}/src/main.cpp)
-
-# Create the executable
-add_executable(${PROJECT_NAME} ${SOURCES})
-
-add_subdirectory(lib/imgui)
-add_subdirectory(lib/tinyobjloader)
-#add_subdirectory(lib/SDL2)
-
-include_directories(${CMAKE_SOURCE_DIR}/lib/imgui)
-include_directories(${CMAKE_SOURCE_DIR}/lib/imgui/backends)
-include_directories(${CMAKE_SOURCE_DIR}/lib/CLI11/include)
-include_directories(${CMAKE_SOURCE_DIR}/lib/SDL2/include)
-include_directories(${CMAKE_SOURCE_DIR}/lib/tinyobjloader)
+include(cmake/Dependencies.cmake)
 
 find_package(Vulkan REQUIRED)
+hades_configure_dependencies()
 
+# Define the source directory.
+set(SRC_DIR "${CMAKE_SOURCE_DIR}/src/engine")
 
-if(WIN32)
-  target_link_libraries(${PROJECT_NAME} SDL2-static SDL2main ImGui tinyobjloader Vulkan::Vulkan) # On Windows
-else()
-  target_link_libraries(${PROJECT_NAME} SDL2 SDL2main ImGui tinyobjloader Vulkan::Vulkan) # On Linux/macOS
+# Automatically find all engine source and header files.
+file(
+  GLOB_RECURSE SRC_FILES
+  CONFIGURE_DEPENDS
+  "${SRC_DIR}/*.cpp"
+  "${SRC_DIR}/*.h"
+  "${SRC_DIR}/*.hpp")
 
-  if(APPLE)
-    # Link ImGui and SDL dependencies
-    target_link_libraries(${PROJECT_NAME} "-framework Cocoa" "-framework IOKit"
-                          "-framework CoreVideo")
-  endif()
+set(SOURCES ${SRC_FILES} ${CMAKE_SOURCE_DIR}/src/main.cpp)
 
+add_executable(${PROJECT_NAME} ${SOURCES})
+target_link_libraries(
+  ${PROJECT_NAME}
+  PRIVATE CLI11::CLI11
+          hades_imgui
+          tinyobjloader
+          Vulkan::Vulkan)
+
+if(TARGET SDL2::SDL2main)
+  target_link_libraries(${PROJECT_NAME} PRIVATE SDL2::SDL2main)
 endif()
 
-# Add GoogleTest subdirectory
-add_subdirectory(lib/googletest)
-
-# Add your test executable
 add_executable(hades_tests src/tests/test.cpp)
-
-if(WIN32)
-  # Link against static gtest on Windows
-  target_link_libraries(hades_tests gtest gtest_main)
-  target_compile_definitions(hades_tests
-                             PRIVATE GTEST_LINKED_AS_SHARED_LIBRARY=0)
-
-else()
-  # Link against gtest dynamically on Linux/macOS
-  target_link_libraries(hades_tests gtest gtest_main)
-endif()
-
-if(MSVC)
-  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MD")
-  set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MDd")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /NODEFAULTLIB:LIBCMT")
-endif()
+target_link_libraries(hades_tests PRIVATE gtest_main)
 
 enable_testing()
-
-# Discover and register tests
 include(GoogleTest)
 gtest_discover_tests(hades_tests)

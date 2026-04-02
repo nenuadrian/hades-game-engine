@@ -47,12 +47,18 @@ Not maintained or supported.
 
 ## Libraries
 
+The build now supports two dependency modes:
+
+- Prefer bundled copies under `lib/` when they are present.
+- Download pinned sources into `build/_deps` during CMake configure when local copies are missing, or when you force downloads with `-DHADES_USE_BUNDLED_DEPS=OFF`.
+
+Current third-party libraries used by the build:
+
 - SDL2
-- glfw
-- OpenGL
-- imgui
+- Dear ImGui
+- CLI11
+- tinyobjloader
 - googletest
-- bgfx
 
 ## Entity-Component-System (ECS)
 
@@ -65,27 +71,29 @@ Custom built to build up a natural understanding of the pattern. For example, it
 ### Build
 
 ```bash
-mkdir build
-cd build
-cmake ..
-make
+cmake -S . -B build
+cmake --build build
+```
+
+To force fresh downloads instead of using `lib/`:
+
+```bash
+cmake -S . -B build -DHADES_USE_BUNDLED_DEPS=OFF
+cmake --build build
 ```
 
 ### Run
 
 ```bash
-cd build
-./HadesGameEngine
+./build/HadesGameEngine
 ```
 
 ### Test
 
 ```bash
-mkdir build
-cd build
-cmake ..
-make
-ctest --output-on-failure
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build --output-on-failure
 ```
 
 ## Documentation (MkDocs Material)

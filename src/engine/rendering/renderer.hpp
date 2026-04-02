@@ -1,7 +1,7 @@
 #ifndef RENDERER_H
 #define RENDERER_H
 
-#include "lib/SDL2/include/SDL_video.h"
+#include <SDL_video.h>
 #include <imgui.h>
 namespace hades
 {
