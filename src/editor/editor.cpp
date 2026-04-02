@@ -1,6 +1,7 @@
 #include "editor.hpp"
 
 #include <array>
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -32,6 +33,7 @@ namespace hades
   namespace
   {
     constexpr char ENTITY_WINDOW_TITLE[] = "Entities";
+    constexpr char WORKSPACE_WINDOW_TITLE[] = "Workspace";
     constexpr char PROPERTIES_WINDOW_TITLE[] = "Properties";
     constexpr char COMPONENTS_WINDOW_TITLE[] = "Components";
     constexpr char GAME_WINDOW_TITLE[] = "Game";
@@ -147,6 +149,106 @@ namespace hades
 
       return label;
     }
+
+    std::string path_display_name(const std::filesystem::path &path)
+    {
+      const std::string filename = path.filename().string();
+      return filename.empty() ? path.string() : filename;
+    }
+
+    std::string relative_workspace_path(const std::filesystem::path &workspacePath, const std::filesystem::path &path)
+    {
+      const std::filesystem::path relativePath = path.lexically_relative(workspacePath);
+      return relativePath.empty() ? path.generic_string() : relativePath.generic_string();
+    }
+
+    bool build_workspace_tree(
+        const std::filesystem::path &path,
+        const std::filesystem::path &workspacePath,
+        Editor::WorkspaceTreeNode &node,
+        std::vector<std::string> &scriptFiles,
+        std::string *errorMessage)
+    {
+      node.path = path;
+      node.directory = std::filesystem::is_directory(path);
+      node.children.clear();
+
+      if (!node.directory)
+      {
+        if (path.extension() == ".cs")
+        {
+          scriptFiles.push_back(relative_workspace_path(workspacePath, path));
+        }
+        return true;
+      }
+
+      std::error_code errorCode;
+      std::vector<std::filesystem::directory_entry> entries;
+      for (std::filesystem::directory_iterator iterator(path, errorCode); !errorCode && iterator != std::filesystem::directory_iterator(); iterator.increment(errorCode))
+      {
+        entries.push_back(*iterator);
+      }
+
+      if (errorCode)
+      {
+        if (errorMessage != nullptr && errorMessage->empty())
+        {
+          *errorMessage = "Unable to inspect workspace folder '" + path.string() + "': " + errorCode.message();
+        }
+        return false;
+      }
+
+      std::sort(
+          entries.begin(),
+          entries.end(),
+          [](const std::filesystem::directory_entry &lhs, const std::filesystem::directory_entry &rhs)
+          {
+            std::error_code lhsError;
+            std::error_code rhsError;
+            const bool lhsDirectory = lhs.is_directory(lhsError);
+            const bool rhsDirectory = rhs.is_directory(rhsError);
+            if (lhsDirectory != rhsDirectory)
+            {
+              return lhsDirectory > rhsDirectory;
+            }
+
+            return lhs.path().filename().string() < rhs.path().filename().string();
+          });
+
+      for (const auto &entry : entries)
+      {
+        Editor::WorkspaceTreeNode child;
+        build_workspace_tree(entry.path(), workspacePath, child, scriptFiles, errorMessage);
+        node.children.push_back(std::move(child));
+      }
+
+      return true;
+    }
+
+    void render_workspace_tree_node(const Editor::WorkspaceTreeNode &node)
+    {
+      const std::string label = path_display_name(node.path);
+      if (!node.directory)
+      {
+        ImGui::BulletText("%s", label.c_str());
+        return;
+      }
+
+      const ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick |
+                                       (node.children.empty() ? ImGuiTreeNodeFlags_Leaf : 0);
+      const bool open = ImGui::TreeNodeEx(label.c_str(), flags);
+      if (!open)
+      {
+        return;
+      }
+
+      for (const auto &child : node.children)
+      {
+        render_workspace_tree_node(child);
+      }
+
+      ImGui::TreePop();
+    }
   }
 
   Editor::Editor() : gui(std::make_unique<ImGui_GUI>())
@@ -237,14 +339,17 @@ namespace hades
 
   void Editor::render(
       float deltaTime,
+      const std::filesystem::path &workspacePath,
       EntityManager &entityManager,
       ComponentManager &componentManager,
       ScriptRuntime &scriptRuntime)
   {
     configure_default_dock_layout(gui->render_frame());
+    refresh_workspace_cache(deltaTime, workspacePath);
     handle_entity_creation_requests(entityManager, componentManager);
     import_model(entityManager, componentManager);
     handle_play_mode_requests(entityManager, componentManager, scriptRuntime);
+    workspace();
     entities(entityManager, componentManager);
     properties(entityManager, componentManager);
     components(entityManager, componentManager);
@@ -273,15 +378,77 @@ namespace hades
     ImGui::DockBuilderSetNodeSize(dockspaceId, ImGui::GetMainViewport()->WorkSize);
 
     ImGuiID mainDockId = dockspaceId;
-    const ImGuiID entitiesDockId = ImGui::DockBuilderSplitNode(mainDockId, ImGuiDir_Left, 0.22f, nullptr, &mainDockId);
+    ImGuiID workspaceDockId = ImGui::DockBuilderSplitNode(mainDockId, ImGuiDir_Left, 0.22f, nullptr, &mainDockId);
+    const ImGuiID entitiesDockId = ImGui::DockBuilderSplitNode(workspaceDockId, ImGuiDir_Down, 0.56f, nullptr, &workspaceDockId);
     ImGuiID inspectorDockId = ImGui::DockBuilderSplitNode(mainDockId, ImGuiDir_Right, 0.34f, nullptr, &mainDockId);
     const ImGuiID componentsDockId = ImGui::DockBuilderSplitNode(inspectorDockId, ImGuiDir_Right, 0.45f, nullptr, &inspectorDockId);
 
+    ImGui::DockBuilderDockWindow(WORKSPACE_WINDOW_TITLE, workspaceDockId);
     ImGui::DockBuilderDockWindow(ENTITY_WINDOW_TITLE, entitiesDockId);
     ImGui::DockBuilderDockWindow(PROPERTIES_WINDOW_TITLE, inspectorDockId);
     ImGui::DockBuilderDockWindow(COMPONENTS_WINDOW_TITLE, componentsDockId);
     ImGui::DockBuilderDockWindow(GAME_WINDOW_TITLE, mainDockId);
     ImGui::DockBuilderFinish(dockspaceId);
+  }
+
+  void Editor::refresh_workspace_cache(float deltaTime, const std::filesystem::path &workspacePath)
+  {
+    const double now = ImGui::GetTime();
+    if (workspacePath != activeWorkspacePath_)
+    {
+      activeWorkspacePath_ = workspacePath;
+      workspaceTreeRoot_.reset();
+      workspaceScriptFiles_.clear();
+      workspaceScanError_.clear();
+      nextWorkspaceScanTime_ = 0.0;
+    }
+
+    if (activeWorkspacePath_.empty() || (workspaceTreeRoot_.has_value() && now < nextWorkspaceScanTime_))
+    {
+      return;
+    }
+
+    WorkspaceTreeNode rootNode;
+    std::vector<std::string> scriptFiles;
+    std::string scanError;
+    build_workspace_tree(activeWorkspacePath_, activeWorkspacePath_, rootNode, scriptFiles, &scanError);
+    std::sort(scriptFiles.begin(), scriptFiles.end());
+    workspaceTreeRoot_ = std::move(rootNode);
+    workspaceScriptFiles_ = std::move(scriptFiles);
+    workspaceScanError_ = std::move(scanError);
+    nextWorkspaceScanTime_ = now + std::max(static_cast<double>(deltaTime), 1.0);
+  }
+
+  void Editor::workspace()
+  {
+    ImGui::Begin(WORKSPACE_WINDOW_TITLE);
+
+    if (activeWorkspacePath_.empty())
+    {
+      render_selection_hint("Open a workspace to browse its files.");
+      ImGui::End();
+      return;
+    }
+
+    ImGui::TextWrapped("%s", activeWorkspacePath_.string().c_str());
+    ImGui::Separator();
+
+    if (!workspaceScanError_.empty())
+    {
+      ImGui::TextColored(ImVec4(0.88f, 0.42f, 0.42f, 1.0f), "%s", workspaceScanError_.c_str());
+      ImGui::Separator();
+    }
+
+    if (!workspaceTreeRoot_.has_value())
+    {
+      render_selection_hint("Workspace files are not available yet.");
+      ImGui::End();
+      return;
+    }
+
+    ImGui::SetNextItemOpen(true, ImGuiCond_Once);
+    render_workspace_tree_node(*workspaceTreeRoot_);
+    ImGui::End();
   }
 
   void Editor::handle_entity_creation_requests(EntityManager &entityManager, ComponentManager &componentManager)
@@ -407,7 +574,7 @@ namespace hades
     }
 
     std::string scriptError;
-    if (!scriptRuntime.start(componentManager, entityManager, &scriptError))
+    if (!scriptRuntime.start(componentManager, entityManager, activeWorkspacePath_, &scriptError))
     {
       state.isPlaying = false;
       state.activeCamera.reset();
@@ -817,20 +984,65 @@ namespace hades
         const std::string label = script_component_label(attachment, index);
         if (ImGui::CollapsingHeader(label.c_str()))
         {
-          std::array<char, 260> pathBuffer{};
-          std::snprintf(pathBuffer.data(), pathBuffer.size(), "%s", attachment.scriptPath.c_str());
           std::array<char, 160> classBuffer{};
           std::snprintf(classBuffer.data(), classBuffer.size(), "%s", attachment.className.c_str());
 
           ImGui::Checkbox("Enabled", &attachment.enabled);
-          if (ImGui::InputText("Script Path", pathBuffer.data(), pathBuffer.size()))
+          std::vector<std::string> scriptOptions = workspaceScriptFiles_;
+          if (!attachment.scriptPath.empty() &&
+              std::find(scriptOptions.begin(), scriptOptions.end(), attachment.scriptPath) == scriptOptions.end())
           {
-            attachment.scriptPath = pathBuffer.data();
-            if (attachment.className.empty() && !attachment.scriptPath.empty())
+            scriptOptions.push_back(attachment.scriptPath);
+            std::sort(scriptOptions.begin(), scriptOptions.end());
+          }
+
+          const std::string previousScriptPath = attachment.scriptPath;
+          const std::string previewValue = attachment.scriptPath.empty() ? "<Select a workspace script>" : attachment.scriptPath;
+          if (ImGui::BeginCombo("Script", previewValue.c_str()))
+          {
+            const bool noneSelected = attachment.scriptPath.empty();
+            if (ImGui::Selectable("<None>", noneSelected))
+            {
+              attachment.scriptPath.clear();
+            }
+            if (noneSelected)
+            {
+              ImGui::SetItemDefaultFocus();
+            }
+
+            for (const auto &scriptPath : scriptOptions)
+            {
+              const bool selected = (attachment.scriptPath == scriptPath);
+              if (ImGui::Selectable(scriptPath.c_str(), selected))
+              {
+                attachment.scriptPath = scriptPath;
+              }
+              if (selected)
+              {
+                ImGui::SetItemDefaultFocus();
+              }
+            }
+            ImGui::EndCombo();
+          }
+
+          if (previousScriptPath != attachment.scriptPath)
+          {
+            const std::string previousStem = std::filesystem::path(previousScriptPath).stem().string();
+            if (attachment.className.empty() || attachment.className == previousStem)
             {
               attachment.className = std::filesystem::path(attachment.scriptPath).stem().string();
             }
           }
+
+          if (scriptOptions.empty())
+          {
+            ImGui::TextDisabled("No .cs scripts were found in the workspace.");
+          }
+          else if (!attachment.scriptPath.empty())
+          {
+            ImGui::TextDisabled("Workspace path: %s", attachment.scriptPath.c_str());
+          }
+
           if (ImGui::InputText("Class Name", classBuffer.data(), classBuffer.size()))
           {
             attachment.className = classBuffer.data();
@@ -856,7 +1068,7 @@ namespace hades
       }
 
       ImGui::TextDisabled("Scripts compile when Play starts using dotnet and must derive from Hades.Scripting.HadesScript.");
-      ImGui::TextDisabled("Relative script paths resolve from the engine process working directory.");
+      ImGui::TextDisabled("Relative script paths resolve from the active workspace folder.");
     }
 
     ImGui::End();

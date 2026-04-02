@@ -422,5 +422,41 @@ namespace hades
       EXPECT_TRUE(scriptRuntime.faulted());
       EXPECT_NE(errorMessage.find("Script file does not exist"), std::string::npos);
     }
+
+    TEST(ScriptRuntimeTest, StartResolvesRelativeScriptFileFromWorkspaceRoot)
+    {
+      const std::filesystem::path testRoot = unique_test_directory("hades-script-workspace");
+      ScopedDirectoryCleanup cleanup(testRoot);
+
+      const std::filesystem::path workspaceRoot = testRoot / "Workspace";
+      const std::filesystem::path scriptsDirectory = workspaceRoot / "Scripts";
+      std::filesystem::create_directories(scriptsDirectory);
+
+      const std::filesystem::path scriptPath = scriptsDirectory / "Mover.cs";
+      {
+        std::ofstream output(scriptPath);
+        output << "using Hades.Scripting;\n";
+        output << "public sealed class Mover : HadesScript {}\n";
+      }
+
+      EntityManager entityManager;
+      ComponentManager componentManager;
+      ScriptRuntime scriptRuntime;
+
+      const auto cube = EntityFactory::createCube(entityManager, componentManager);
+      ScriptComponent scriptComponent;
+      scriptComponent.attachments.push_back(ScriptAttachment{
+          "Scripts/Mover.cs",
+          "Mover",
+          true});
+      componentManager.addComponent(cube, scriptComponent);
+
+      std::string errorMessage;
+      const bool started = scriptRuntime.start(componentManager, entityManager, workspaceRoot, &errorMessage);
+      if (!started)
+      {
+        EXPECT_EQ(errorMessage.find("Script file does not exist"), std::string::npos);
+      }
+    }
   }
 }

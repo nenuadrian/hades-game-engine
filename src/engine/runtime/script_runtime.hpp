@@ -1,6 +1,7 @@
 #ifndef HADES_ENGINE_RUNTIME_SCRIPT_RUNTIME_HPP
 #define HADES_ENGINE_RUNTIME_SCRIPT_RUNTIME_HPP
 
+#include <filesystem>
 #include <memory>
 #include <string>
 
@@ -21,6 +22,12 @@ namespace hades
     bool start(
         ComponentManager &componentManager,
         EntityManager &entityManager,
+        std::string *errorMessage = nullptr);
+
+    bool start(
+        ComponentManager &componentManager,
+        EntityManager &entityManager,
+        const std::filesystem::path &workspaceRoot = {},
         std::string *errorMessage = nullptr);
 
     void update(float deltaTime, ComponentManager &componentManager, EntityManager &entityManager);

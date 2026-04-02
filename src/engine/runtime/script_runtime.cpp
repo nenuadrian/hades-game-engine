@@ -256,9 +256,28 @@ namespace hades
       return std::filesystem::path(scriptPath).stem().string();
     }
 
+    std::filesystem::path resolve_script_source_path(
+        const std::string &scriptPath,
+        const std::filesystem::path &workspaceRoot)
+    {
+      const std::filesystem::path rawPath(scriptPath);
+      if (rawPath.is_absolute())
+      {
+        return rawPath.lexically_normal();
+      }
+
+      if (!workspaceRoot.empty())
+      {
+        return (workspaceRoot / rawPath).lexically_normal();
+      }
+
+      return std::filesystem::absolute(rawPath).lexically_normal();
+    }
+
     bool collect_scripted_entities(
         ComponentManager &componentManager,
         EntityManager &entityManager,
+        const std::filesystem::path &workspaceRoot,
         std::vector<ScriptedEntity> &scriptedEntities,
         std::vector<std::filesystem::path> &uniqueSourceFiles,
         std::string *errorMessage)
@@ -323,7 +342,7 @@ namespace hades
             return false;
           }
 
-          const std::filesystem::path sourcePath = std::filesystem::absolute(std::filesystem::path(attachment.scriptPath));
+          const std::filesystem::path sourcePath = resolve_script_source_path(attachment.scriptPath, workspaceRoot);
           if (!std::filesystem::exists(sourcePath))
           {
             if (errorMessage != nullptr)
@@ -867,12 +886,21 @@ namespace Hades.Scripting
       EntityManager &entityManager,
       std::string *errorMessage)
   {
+    return start(componentManager, entityManager, std::filesystem::path(), errorMessage);
+  }
+
+  bool ScriptRuntime::start(
+      ComponentManager &componentManager,
+      EntityManager &entityManager,
+      const std::filesystem::path &workspaceRoot,
+      std::string *errorMessage)
+  {
     stop();
 
     std::vector<ScriptedEntity> scriptedEntities;
     std::vector<std::filesystem::path> sourceFiles;
     std::string localError;
-    if (!collect_scripted_entities(componentManager, entityManager, scriptedEntities, sourceFiles, &localError))
+    if (!collect_scripted_entities(componentManager, entityManager, workspaceRoot, scriptedEntities, sourceFiles, &localError))
     {
       impl_->lastError = localError;
       impl_->faulted = true;

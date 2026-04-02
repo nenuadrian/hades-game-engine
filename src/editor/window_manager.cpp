@@ -1100,7 +1100,7 @@ namespace hades
     }
     else
     {
-      editor.render(io.DeltaTime, entityManager, componentManager, scriptRuntime);
+      editor.render(io.DeltaTime, workspaceManager.current_workspace()->path, entityManager, componentManager, scriptRuntime);
       if (editor.state.isPlaying)
       {
         scriptRuntime.update(io.DeltaTime, componentManager, entityManager);
