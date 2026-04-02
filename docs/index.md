@@ -37,6 +37,9 @@ Not maintained or supported.
 - tests
 - generating shaders dynamically
 
+![editor](assets/editor.png)
+![workspace](assets/workspace.png)
+
 ## Entity-Component-System (ECS)
 
 Custom built to build up a natural understanding of the pattern. For example, it is not an Entity-Component System, made from entity and components, but one made out of three parts, the system being an essential component of the triad, acting on entities with specific components.

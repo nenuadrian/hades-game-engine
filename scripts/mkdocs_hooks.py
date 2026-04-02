@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+import subprocess
+import sys
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -18,6 +20,7 @@ GENERATED_COMMENT = (
     "<!-- Generated from {source} by scripts/mkdocs_hooks.py. Do not edit "
     "directly. -->\n\n"
 )
+CLASS_DIAGRAM_SCRIPT = REPO_ROOT / "scripts" / "generate_class_diagram.py"
 
 ROOT_DOC_TARGETS = {
     "README.md": "index.md",
@@ -106,6 +109,11 @@ def _generate_doc(
 
 
 def on_pre_build(config, **kwargs):  # noqa: ANN001
+    subprocess.run(
+        [sys.executable, str(CLASS_DIAGRAM_SCRIPT)],
+        check=True,
+        cwd=REPO_ROOT,
+    )
     _generate_doc(
         "README.md",
         "index.md",
