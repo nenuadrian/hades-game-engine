@@ -21,6 +21,7 @@
 #include "../components/script_component.hpp"
 #include "../core/ecs/component_manager.hpp"
 #include "../core/ecs/entity_manager.hpp"
+#include "../core/ecs/world_utils.hpp"
 #include "clr_host.hpp"
 #include "subprocess.hpp"
 
@@ -223,6 +224,7 @@ namespace hades
         ComponentManager &componentManager,
         EntityManager &entityManager,
         const std::filesystem::path &workspaceRoot,
+        std::optional<Entity::EntityId> worldRoot,
         std::vector<ScriptedEntity> &scriptedEntities,
         std::vector<std::filesystem::path> &uniqueSourceFiles,
         std::string *errorMessage)
@@ -234,6 +236,11 @@ namespace hades
 
       for (Entity::EntityId entity : entityManager.getAllEntities())
       {
+        if (worldRoot.has_value() && !entity_belongs_to_world(entity, *worldRoot, componentManager))
+        {
+          continue;
+        }
+
         if (!componentManager.hasComponent<ScriptComponent>(entity))
         {
           continue;
@@ -867,7 +874,7 @@ namespace Hades.Scripting
       EntityManager &entityManager,
       std::string *errorMessage)
   {
-    return start(componentManager, entityManager, std::filesystem::path(), errorMessage);
+    return start(componentManager, entityManager, std::filesystem::path(), std::nullopt, errorMessage);
   }
 
   bool ScriptRuntime::start(
@@ -876,12 +883,29 @@ namespace Hades.Scripting
       const std::filesystem::path &workspaceRoot,
       std::string *errorMessage)
   {
+    return start(componentManager, entityManager, workspaceRoot, std::nullopt, errorMessage);
+  }
+
+  bool ScriptRuntime::start(
+      ComponentManager &componentManager,
+      EntityManager &entityManager,
+      const std::filesystem::path &workspaceRoot,
+      std::optional<Entity::EntityId> worldRoot,
+      std::string *errorMessage)
+  {
     stop();
 
     std::vector<ScriptedEntity> scriptedEntities;
     std::vector<std::filesystem::path> sourceFiles;
     std::string localError;
-    if (!collect_scripted_entities(componentManager, entityManager, workspaceRoot, scriptedEntities, sourceFiles, &localError))
+    if (!collect_scripted_entities(
+            componentManager,
+            entityManager,
+            workspaceRoot,
+            worldRoot,
+            scriptedEntities,
+            sourceFiles,
+            &localError))
     {
       impl_->lastError = localError;
       impl_->faulted = true;

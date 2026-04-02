@@ -9,6 +9,7 @@
 #include "../components/position_component_3d.hpp"
 #include "../core/ecs/component_manager.hpp"
 #include "../core/ecs/entity_manager.hpp"
+#include "../core/ecs/world_utils.hpp"
 #include "../runtime/main_camera_selection.hpp"
 
 namespace hades
@@ -17,10 +18,16 @@ namespace hades
   {
     std::optional<Entity::EntityId> find_fallback_listener(
         EntityManager &entityManager,
-        ComponentManager &componentManager)
+        ComponentManager &componentManager,
+        std::optional<Entity::EntityId> activeWorld)
     {
       for (Entity::EntityId entity : entityManager.getAllEntities())
       {
+        if (activeWorld.has_value() && !entity_belongs_to_world(entity, *activeWorld, componentManager))
+        {
+          continue;
+        }
+
         if (!componentManager.hasComponent<AudioListenerComponent>(entity) ||
             !componentManager.hasComponent<PositionComponent3D>(entity))
         {
@@ -43,6 +50,11 @@ namespace hades
     audioEngine_ = audioEngine;
   }
 
+  void AudioSystem::set_active_world(std::optional<Entity::EntityId> activeWorld)
+  {
+    activeWorld_ = activeWorld;
+  }
+
   void AudioSystem::update(float deltaTime, ComponentManager &componentManager, EntityManager &entityManager)
   {
     (void)deltaTime;
@@ -53,7 +65,7 @@ namespace hades
     }
 
     std::optional<Entity::EntityId> listenerEntity;
-    const auto mainCamera = select_main_camera(entityManager, componentManager);
+    const auto mainCamera = select_main_camera(entityManager, componentManager, activeWorld_);
     if (mainCamera.status == MainCameraSelectionStatus::Ready && mainCamera.entity.has_value())
     {
       const Entity::EntityId entity = *mainCamera.entity;
@@ -67,7 +79,7 @@ namespace hades
 
     if (!listenerEntity.has_value())
     {
-      listenerEntity = find_fallback_listener(entityManager, componentManager);
+      listenerEntity = find_fallback_listener(entityManager, componentManager, activeWorld_);
     }
 
     if (listenerEntity.has_value())
@@ -80,6 +92,11 @@ namespace hades
     std::unordered_set<Entity::EntityId> activeSources;
     for (Entity::EntityId entity : entityManager.getAllEntities())
     {
+      if (activeWorld_.has_value() && !entity_belongs_to_world(entity, *activeWorld_, componentManager))
+      {
+        continue;
+      }
+
       if (!componentManager.hasComponent<AudioSourceComponent>(entity))
       {
         continue;

@@ -6,6 +6,7 @@
 #include "../components/camera_component.hpp"
 #include "../core/ecs/component_manager.hpp"
 #include "../core/ecs/entity_manager.hpp"
+#include "../core/ecs/world_utils.hpp"
 
 namespace hades
 {
@@ -30,23 +31,31 @@ namespace hades
     case MainCameraSelectionStatus::Ready:
       return "Ready";
     case MainCameraSelectionStatus::NoCameraPresent:
-      return "Play mode requires at least one camera in the scene.";
+      return "Play mode requires at least one camera in the active world.";
     case MainCameraSelectionStatus::NoMainCameraSelected:
-      return "Play mode requires one camera to be marked as Main Camera.";
+      return "Play mode requires one camera in the active world to be marked as Main Camera.";
     case MainCameraSelectionStatus::MultipleMainCamerasSelected:
-      return "Play mode requires exactly one Main Camera. Clear the extra main-camera flags.";
+      return "Play mode requires exactly one Main Camera in the active world. Clear the extra main-camera flags.";
     }
 
     return "Unknown main-camera state.";
   }
 
-  inline MainCameraSelection select_main_camera(EntityManager &entityManager, ComponentManager &componentManager)
+  inline MainCameraSelection select_main_camera(
+      EntityManager &entityManager,
+      ComponentManager &componentManager,
+      std::optional<Entity::EntityId> world = std::nullopt)
   {
     bool foundAnyCamera = false;
     std::optional<Entity::EntityId> mainCamera;
 
     for (Entity::EntityId entity : entityManager.getAllEntities())
     {
+      if (world.has_value() && !entity_belongs_to_world(entity, *world, componentManager))
+      {
+        continue;
+      }
+
       if (!componentManager.hasComponent<CameraComponent>(entity))
       {
         continue;

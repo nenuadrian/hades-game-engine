@@ -6,6 +6,7 @@
 #include <fstream>
 
 #include "../editor/workspace_manager.hpp"
+#include "../editor/workspace_file_operations.hpp"
 #include "../engine/assets/model_importer.hpp"
 #include "../engine/components/audio_listener_component.hpp"
 #include "../engine/components/audio_source_component.hpp"
@@ -16,9 +17,11 @@
 #include "../engine/components/primitive_component.hpp"
 #include "../engine/components/script_component.hpp"
 #include "../engine/components/transform_hierarchy_component.hpp"
+#include "../engine/components/world_component.hpp"
 #include "../engine/core/ecs/component_manager.hpp"
 #include "../engine/core/ecs/entity_factory.hpp"
 #include "../engine/core/ecs/entity_manager.hpp"
+#include "../engine/core/ecs/world_utils.hpp"
 #include "../engine/runtime/main_camera_selection.hpp"
 #include "../engine/runtime/script_runtime.hpp"
 
@@ -180,6 +183,139 @@ namespace hades
       EXPECT_EQ(reloadedManager.recent_workspaces().front().path, std::filesystem::weakly_canonical(alphaWorkspace));
     }
 
+    TEST(WorkspaceFileOperationsTest, CopyFileToDirectoryCopiesExternalFileIntoWorkspace)
+    {
+      const std::filesystem::path testRoot = unique_test_directory("hades-workspace-copy");
+      ScopedDirectoryCleanup cleanup(testRoot);
+
+      const std::filesystem::path workspaceRoot = testRoot / "Workspace";
+      const std::filesystem::path sourceRoot = testRoot / "External";
+      std::filesystem::create_directories(workspaceRoot);
+      std::filesystem::create_directories(sourceRoot);
+
+      const std::filesystem::path sourceFile = sourceRoot / "Settings.json";
+      {
+        std::ofstream output(sourceFile);
+        output << "{ \"volume\": 0.8 }\n";
+      }
+
+      std::filesystem::path copiedPath;
+      std::string errorMessage;
+      ASSERT_TRUE(copy_file_to_directory(sourceFile, workspaceRoot, &copiedPath, &errorMessage)) << errorMessage;
+
+      EXPECT_TRUE(std::filesystem::exists(sourceFile));
+      EXPECT_TRUE(std::filesystem::exists(copiedPath));
+      EXPECT_EQ(copiedPath, std::filesystem::weakly_canonical(workspaceRoot / "Settings.json"));
+
+      std::ifstream copiedInput(copiedPath);
+      std::string copiedContents;
+      std::getline(copiedInput, copiedContents);
+      EXPECT_EQ(copiedContents, "{ \"volume\": 0.8 }");
+    }
+
+    TEST(WorkspaceFileOperationsTest, DeleteWorkspaceItemRemovesDeletedScriptAssignments)
+    {
+      const std::filesystem::path testRoot = unique_test_directory("hades-workspace-delete-script");
+      ScopedDirectoryCleanup cleanup(testRoot);
+
+      const std::filesystem::path workspaceRoot = testRoot / "Workspace";
+      const std::filesystem::path scriptsDirectory = workspaceRoot / "Scripts";
+      std::filesystem::create_directories(scriptsDirectory);
+
+      const std::filesystem::path moverPath = scriptsDirectory / "Mover.cs";
+      {
+        std::ofstream output(moverPath);
+        output << "public sealed class Mover {}\n";
+      }
+
+      EntityManager entityManager;
+      ComponentManager componentManager;
+
+      const auto firstEntity = EntityFactory::createCube(entityManager, componentManager);
+      const auto secondEntity = EntityFactory::createCube(entityManager, componentManager);
+
+      ScriptComponent firstComponent;
+      firstComponent.attachments.push_back(ScriptAttachment{"Scripts/Mover.cs", "Mover", true});
+      componentManager.addComponent(firstEntity, firstComponent);
+
+      ScriptComponent secondComponent;
+      secondComponent.attachments.push_back(ScriptAttachment{"Scripts/Mover.cs", "Mover", true});
+      secondComponent.attachments.push_back(ScriptAttachment{"Scripts/Other.cs", "Other", true});
+      componentManager.addComponent(secondEntity, secondComponent);
+
+      WorkspaceDeleteResult deleteResult;
+      std::string errorMessage;
+      ASSERT_TRUE(delete_workspace_item(
+                      workspaceRoot,
+                      moverPath,
+                      entityManager,
+                      componentManager,
+                      &deleteResult,
+                      &errorMessage))
+          << errorMessage;
+
+      EXPECT_FALSE(std::filesystem::exists(moverPath));
+      ASSERT_EQ(deleteResult.removedScriptPaths.size(), 1U);
+      EXPECT_EQ(deleteResult.removedScriptPaths.front(), "Scripts/Mover.cs");
+      EXPECT_EQ(deleteResult.removedScriptAssignments, 2U);
+      EXPECT_EQ(deleteResult.affectedScriptComponents, 2U);
+
+      EXPECT_TRUE(componentManager.getComponent<ScriptComponent>(firstEntity).attachments.empty());
+
+      const auto &remainingAttachments = componentManager.getComponent<ScriptComponent>(secondEntity).attachments;
+      ASSERT_EQ(remainingAttachments.size(), 1U);
+      EXPECT_EQ(remainingAttachments.front().scriptPath, "Scripts/Other.cs");
+    }
+
+    TEST(WorkspaceFileOperationsTest, DeleteWorkspaceItemRemovesNestedScriptAssignments)
+    {
+      const std::filesystem::path testRoot = unique_test_directory("hades-workspace-delete-folder");
+      ScopedDirectoryCleanup cleanup(testRoot);
+
+      const std::filesystem::path workspaceRoot = testRoot / "Workspace";
+      const std::filesystem::path aiDirectory = workspaceRoot / "Scripts" / "AI";
+      std::filesystem::create_directories(aiDirectory);
+
+      {
+        std::ofstream output(aiDirectory / "Chaser.cs");
+        output << "public sealed class Chaser {}\n";
+      }
+      {
+        std::ofstream output(aiDirectory / "Lookout.cs");
+        output << "public sealed class Lookout {}\n";
+      }
+
+      EntityManager entityManager;
+      ComponentManager componentManager;
+
+      const auto entity = EntityFactory::createCube(entityManager, componentManager);
+      ScriptComponent scriptComponent;
+      scriptComponent.attachments.push_back(ScriptAttachment{"Scripts/AI/Chaser.cs", "Chaser", true});
+      scriptComponent.attachments.push_back(ScriptAttachment{"Scripts/AI/Lookout.cs", "Lookout", true});
+      scriptComponent.attachments.push_back(ScriptAttachment{"Scripts/Patrol.cs", "Patrol", true});
+      componentManager.addComponent(entity, scriptComponent);
+
+      WorkspaceDeleteResult deleteResult;
+      std::string errorMessage;
+      ASSERT_TRUE(delete_workspace_item(
+                      workspaceRoot,
+                      aiDirectory,
+                      entityManager,
+                      componentManager,
+                      &deleteResult,
+                      &errorMessage))
+          << errorMessage;
+
+      EXPECT_FALSE(std::filesystem::exists(aiDirectory));
+      EXPECT_EQ(deleteResult.removedScriptPaths.size(), 2U);
+      EXPECT_EQ(deleteResult.removedScriptAssignments, 2U);
+      EXPECT_EQ(deleteResult.affectedScriptComponents, 1U);
+
+      const auto &remainingAttachments = componentManager.getComponent<ScriptComponent>(entity).attachments;
+      ASSERT_EQ(remainingAttachments.size(), 1U);
+      EXPECT_EQ(remainingAttachments.front().scriptPath, "Scripts/Patrol.cs");
+    }
+
     TEST(ModelImporterTest, ImportObjCollectsMeshAndMaterialMetadata)
     {
       std::string errorMessage;
@@ -264,6 +400,22 @@ namespace hades
       EXPECT_TRUE(audioSource.spatialized);
     }
 
+    TEST(EntityFactoryTest, CreateWorldAddsWorldRootComponents)
+    {
+      EntityManager entityManager;
+      ComponentManager componentManager;
+
+      const auto world = EntityFactory::createWorld(entityManager, componentManager, "World1", true);
+
+      EXPECT_TRUE(componentManager.hasComponent<NameComponent>(world));
+      EXPECT_EQ(componentManager.getComponent<NameComponent>(world).value, "World1");
+      EXPECT_TRUE(componentManager.hasComponent<WorldComponent>(world));
+      EXPECT_TRUE(componentManager.getComponent<WorldComponent>(world).isDefault);
+      EXPECT_TRUE(componentManager.hasComponent<TransformHierarchyComponent>(world));
+      EXPECT_FALSE(componentManager.getComponent<TransformHierarchyComponent>(world).hasParent());
+      EXPECT_FALSE(componentManager.hasComponent<PositionComponent3D>(world));
+    }
+
     TEST(EntityFactoryTest, CreateChildEntityUpdatesParentAndChildHierarchy)
     {
       EntityManager entityManager;
@@ -327,6 +479,23 @@ namespace hades
       EXPECT_FALSE(model.materials.empty());
     }
 
+    TEST(EntityManagerTest, DestroyEntityRemovesItFromActiveList)
+    {
+      EntityManager entityManager;
+
+      const auto first = entityManager.createEntity();
+      const auto second = entityManager.createEntity();
+      const auto third = entityManager.createEntity();
+
+      entityManager.destroyEntity(second);
+
+      const auto remainingEntities = entityManager.getAllEntities();
+      EXPECT_EQ(remainingEntities.size(), 2U);
+      EXPECT_NE(std::find(remainingEntities.begin(), remainingEntities.end(), first), remainingEntities.end());
+      EXPECT_EQ(std::find(remainingEntities.begin(), remainingEntities.end(), second), remainingEntities.end());
+      EXPECT_NE(std::find(remainingEntities.begin(), remainingEntities.end(), third), remainingEntities.end());
+    }
+
     TEST(MainCameraSelectionTest, RejectsScenesWithoutAnyCamera)
     {
       EntityManager entityManager;
@@ -385,6 +554,33 @@ namespace hades
       ASSERT_EQ(selection.status, MainCameraSelectionStatus::Ready);
       ASSERT_TRUE(selection.entity.has_value());
       EXPECT_EQ(selection.entity.value(), secondCamera);
+    }
+
+    TEST(MainCameraSelectionTest, FiltersMainCameraSelectionByWorld)
+    {
+      EntityManager entityManager;
+      ComponentManager componentManager;
+
+      const auto firstWorld = EntityFactory::createWorld(entityManager, componentManager, "World1", true);
+      const auto secondWorld = EntityFactory::createWorld(entityManager, componentManager, "World2", false);
+      const auto firstCamera = EntityFactory::createCamera(entityManager, componentManager, firstWorld);
+      const auto secondCamera = EntityFactory::createCamera(entityManager, componentManager, secondWorld);
+
+      componentManager.getComponent<CameraComponent>(firstCamera).isMainCamera = true;
+      componentManager.getComponent<CameraComponent>(secondCamera).isMainCamera = true;
+
+      const auto worldOneSelection = select_main_camera(entityManager, componentManager, firstWorld);
+      ASSERT_EQ(worldOneSelection.status, MainCameraSelectionStatus::Ready);
+      ASSERT_TRUE(worldOneSelection.entity.has_value());
+      EXPECT_EQ(worldOneSelection.entity.value(), firstCamera);
+
+      const auto worldTwoSelection = select_main_camera(entityManager, componentManager, secondWorld);
+      ASSERT_EQ(worldTwoSelection.status, MainCameraSelectionStatus::Ready);
+      ASSERT_TRUE(worldTwoSelection.entity.has_value());
+      EXPECT_EQ(worldTwoSelection.entity.value(), secondCamera);
+
+      const auto unfilteredSelection = select_main_camera(entityManager, componentManager);
+      EXPECT_EQ(unfilteredSelection.status, MainCameraSelectionStatus::MultipleMainCamerasSelected);
     }
 
     TEST(ScriptRuntimeTest, StartWithoutAttachedScriptsDoesNothing)

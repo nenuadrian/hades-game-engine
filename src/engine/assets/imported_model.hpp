@@ -28,6 +28,13 @@ namespace hades
     std::vector<ImportedMaterial> materials;
     std::size_t totalVertexCount = 0;
     std::size_t totalFaceCount = 0;
+    bool hasBounds = false;
+    float minX = 0.0f;
+    float minY = 0.0f;
+    float minZ = 0.0f;
+    float maxX = 0.0f;
+    float maxY = 0.0f;
+    float maxZ = 0.0f;
   };
 }
 

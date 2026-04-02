@@ -30,6 +30,12 @@ namespace hades
         ComponentManager &componentManager,
         std::optional<Entity::EntityId> parent = std::nullopt);
 
+    static Entity::EntityId createWorld(
+        EntityManager &entityManager,
+        ComponentManager &componentManager,
+        const std::string &name,
+        bool isDefault = false);
+
     static std::optional<Entity::EntityId> createImportedModel(
         EntityManager &entityManager,
         ComponentManager &componentManager,
@@ -42,7 +48,8 @@ namespace hades
         EntityManager &entityManager,
         ComponentManager &componentManager,
         const std::string &name,
-        std::optional<Entity::EntityId> parent);
+        std::optional<Entity::EntityId> parent,
+        bool addPositionComponent = true);
 
     static void attachToParent(
         Entity::EntityId entity,

@@ -8,21 +8,13 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <string>
 #include <system_error>
 
-#ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#include <shobjidl.h>
-#else
-#include <sys/wait.h>
-#endif
-
 #include <SDL.h>
 
+#include "native_dialogs.hpp"
 #include "imgui.h"
 #include "imgui_impl_sdl2.h"
 #include "../engine/audio/audio_engine.hpp"
@@ -112,7 +104,7 @@ namespace
     return fallback_preferences_directory() / WORKSPACE_HISTORY_FILENAME;
   }
 
-  std::string trim_copy(const std::string &value)
+  std::string trim_copy(std::string_view value)
   {
     std::size_t first = 0;
     while (first < value.size() && std::isspace(static_cast<unsigned char>(value[first])) != 0)
@@ -126,7 +118,7 @@ namespace
       --last;
     }
 
-    return value.substr(first, last - first);
+    return std::string(value.substr(first, last - first));
   }
 
   template <std::size_t Size>
@@ -137,238 +129,6 @@ namespace
     std::copy_n(value.data(), copyLength, buffer.data());
     buffer[copyLength] = '\0';
   }
-
-#ifdef _WIN32
-  std::optional<std::filesystem::path> pick_folder_with_native_dialog(std::string *errorMessage)
-  {
-    HRESULT initializeResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-    const bool shouldUninitialize = SUCCEEDED(initializeResult);
-    if (FAILED(initializeResult) && initializeResult != RPC_E_CHANGED_MODE)
-    {
-      if (errorMessage != nullptr)
-      {
-        *errorMessage = "Unable to initialize the Windows folder picker.";
-      }
-      return std::nullopt;
-    }
-
-    IFileDialog *dialog = nullptr;
-    const HRESULT createResult = CoCreateInstance(
-        CLSID_FileOpenDialog,
-        nullptr,
-        CLSCTX_INPROC_SERVER,
-        IID_PPV_ARGS(&dialog));
-    if (FAILED(createResult) || dialog == nullptr)
-    {
-      if (shouldUninitialize)
-      {
-        CoUninitialize();
-      }
-      if (errorMessage != nullptr)
-      {
-        *errorMessage = "Unable to create the Windows folder picker dialog.";
-      }
-      return std::nullopt;
-    }
-
-    DWORD dialogOptions = 0;
-    dialog->GetOptions(&dialogOptions);
-    dialog->SetOptions(dialogOptions | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
-
-    const HRESULT showResult = dialog->Show(nullptr);
-    if (showResult == HRESULT_FROM_WIN32(ERROR_CANCELLED))
-    {
-      dialog->Release();
-      if (shouldUninitialize)
-      {
-        CoUninitialize();
-      }
-      if (errorMessage != nullptr)
-      {
-        errorMessage->clear();
-      }
-      return std::nullopt;
-    }
-
-    if (FAILED(showResult))
-    {
-      dialog->Release();
-      if (shouldUninitialize)
-      {
-        CoUninitialize();
-      }
-      if (errorMessage != nullptr)
-      {
-        *errorMessage = "The Windows folder picker failed to open.";
-      }
-      return std::nullopt;
-    }
-
-    IShellItem *item = nullptr;
-    const HRESULT resultItemStatus = dialog->GetResult(&item);
-    dialog->Release();
-    if (FAILED(resultItemStatus) || item == nullptr)
-    {
-      if (shouldUninitialize)
-      {
-        CoUninitialize();
-      }
-      if (errorMessage != nullptr)
-      {
-        *errorMessage = "The Windows folder picker did not return a folder.";
-      }
-      return std::nullopt;
-    }
-
-    PWSTR rawPath = nullptr;
-    const HRESULT pathStatus = item->GetDisplayName(SIGDN_FILESYSPATH, &rawPath);
-    item->Release();
-
-    std::optional<std::filesystem::path> selectedPath;
-    if (SUCCEEDED(pathStatus) && rawPath != nullptr)
-    {
-      selectedPath = std::filesystem::path(rawPath);
-      CoTaskMemFree(rawPath);
-    }
-
-    if (shouldUninitialize)
-    {
-      CoUninitialize();
-    }
-
-    if (!selectedPath.has_value())
-    {
-      if (errorMessage != nullptr)
-      {
-        *errorMessage = "The Windows folder picker did not return a valid filesystem path.";
-      }
-      return std::nullopt;
-    }
-
-    if (errorMessage != nullptr)
-    {
-      errorMessage->clear();
-    }
-    return selectedPath;
-  }
-#else
-  std::optional<std::string> capture_command_output(const std::string &command, int *exitCode = nullptr)
-  {
-    FILE *pipe = popen(command.c_str(), "r");
-    if (pipe == nullptr)
-    {
-      if (exitCode != nullptr)
-      {
-        *exitCode = -1;
-      }
-      return std::nullopt;
-    }
-
-    std::string output;
-    std::array<char, 256> buffer{};
-    while (std::fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr)
-    {
-      output += buffer.data();
-    }
-
-    const int commandStatus = pclose(pipe);
-    int commandExitCode = commandStatus;
-#if defined(WIFEXITED) && defined(WEXITSTATUS)
-    if (commandStatus >= 0 && WIFEXITED(commandStatus))
-    {
-      commandExitCode = WEXITSTATUS(commandStatus);
-    }
-#endif
-    if (exitCode != nullptr)
-    {
-      *exitCode = commandExitCode;
-    }
-
-    return output;
-  }
-
-  std::optional<std::filesystem::path> pick_folder_with_native_dialog(std::string *errorMessage)
-  {
-#ifdef __APPLE__
-    int exitCode = 0;
-    const auto output = capture_command_output(
-        "osascript -e 'POSIX path of (choose folder with prompt \"Select a workspace folder\")'",
-        &exitCode);
-    if (!output.has_value())
-    {
-      if (errorMessage != nullptr)
-      {
-        *errorMessage = "Unable to launch the macOS folder picker.";
-      }
-      return std::nullopt;
-    }
-
-    const std::string trimmedOutput = trim_copy(*output);
-    if (exitCode != 0 || trimmedOutput.empty())
-    {
-      if (errorMessage != nullptr)
-      {
-        errorMessage->clear();
-      }
-      return std::nullopt;
-    }
-
-    if (errorMessage != nullptr)
-    {
-      errorMessage->clear();
-    }
-    return std::filesystem::path(trimmedOutput);
-#elif defined(__linux__)
-    int exitCode = 0;
-    const auto output = capture_command_output(
-        "sh -c 'if command -v zenity >/dev/null 2>&1; then "
-        "zenity --file-selection --directory --title=\"Select a workspace folder\"; "
-        "elif command -v kdialog >/dev/null 2>&1; then "
-        "kdialog --getexistingdirectory; "
-        "else exit 127; fi'",
-        &exitCode);
-    if (exitCode == 127)
-    {
-      if (errorMessage != nullptr)
-      {
-        *errorMessage = "No native folder picker is available. Enter a folder path manually.";
-      }
-      return std::nullopt;
-    }
-
-    if (!output.has_value())
-    {
-      if (errorMessage != nullptr)
-      {
-        *errorMessage = "Unable to launch the native folder picker.";
-      }
-      return std::nullopt;
-    }
-
-    const std::string trimmedOutput = trim_copy(*output);
-    if (exitCode != 0 || trimmedOutput.empty())
-    {
-      if (errorMessage != nullptr)
-      {
-        errorMessage->clear();
-      }
-      return std::nullopt;
-    }
-
-    if (errorMessage != nullptr)
-    {
-      errorMessage->clear();
-    }
-    return std::filesystem::path(trimmedOutput);
-#else
-    if (errorMessage != nullptr)
-    {
-      *errorMessage = "This platform does not provide a native folder picker in this build.";
-    }
-    return std::nullopt;
-#endif
-  }
-#endif
 
   void build_workspace_logo_preview(
       SDL_Surface *logoSurface,
@@ -478,6 +238,7 @@ namespace
     style.GrabRounding = 4.0f;
     style.TabRounding = 4.0f;
     style.WindowTitleAlign = ImVec2(0.03f, 0.50f);
+    style.WindowMenuButtonPosition = ImGuiDir_None;
     style.ButtonTextAlign = ImVec2(0.50f, 0.50f);
     style.SelectableTextAlign = ImVec2(0.00f, 0.50f);
 
@@ -699,11 +460,6 @@ namespace hades
 
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     ImDrawList *drawList = ImGui::GetWindowDrawList();
-    const ImVec2 cardPadding(12.0f, 12.0f);
-    const ImVec2 cardMin(origin.x - cardPadding.x, origin.y - cardPadding.y);
-    const ImVec2 cardMax(origin.x + logoSize.x + cardPadding.x, origin.y + logoSize.y + cardPadding.y);
-    drawList->AddRectFilled(cardMin, cardMax, IM_COL32(18, 14, 14, 255), 10.0f);
-    drawList->AddRect(cardMin, cardMax, IM_COL32(62, 53, 52, 255), 10.0f);
 
     for (int y = 0; y < workspaceLogoHeight; ++y)
     {
@@ -723,7 +479,7 @@ namespace hades
       }
     }
 
-    ImGui::Dummy(ImVec2(logoSize.x, logoSize.y + cardPadding.y));
+    ImGui::Dummy(ImVec2(logoSize.x, logoSize.y));
   }
 
   void WindowManager::render_workspace_selector()
@@ -752,21 +508,7 @@ namespace hades
 
     ImGui::BeginChild("Workspace Selector Panel", ImVec2(panelWidth, 0.0f), true);
     render_workspace_logo();
-    if (workspaceLogoWidth > 0)
-    {
-      ImGui::Spacing();
-    }
-    ImGui::TextUnformatted(creatingWorkspace ? "Create a Workspace" : "Select a Workspace");
     ImGui::Spacing();
-
-    if (creatingWorkspace)
-    {
-      ImGui::TextWrapped("Choose the parent folder and name for the new empty workspace.");
-    }
-    else
-    {
-      ImGui::TextWrapped("Open a recent workspace folder, browse to an existing folder, or create a new empty workspace.");
-    }
 
     if (!workspaceStatusMessage.empty())
     {
@@ -788,7 +530,7 @@ namespace hades
       if (ImGui::Button("Browse Location..."))
       {
         std::string pickerError;
-        const auto pickedFolder = pick_folder_with_native_dialog(&pickerError);
+        const auto pickedFolder = hades::pick_folder_with_native_dialog("Select a workspace folder", &pickerError);
         if (pickedFolder.has_value())
         {
           set_buffer_text(createWorkspaceParentBuffer, pickedFolder->string());
@@ -846,7 +588,7 @@ namespace hades
       if (ImGui::Button("Browse Existing..."))
       {
         std::string pickerError;
-        const auto pickedFolder = pick_folder_with_native_dialog(&pickerError);
+        const auto pickedFolder = hades::pick_folder_with_native_dialog("Select a workspace folder", &pickerError);
         if (pickedFolder.has_value())
         {
           set_buffer_text(openWorkspacePathBuffer, pickedFolder->string());
@@ -858,22 +600,6 @@ namespace hades
         }
       }
 
-      const bool hasOpenPath = !trim_copy(openWorkspacePathBuffer.data()).empty();
-      ImGui::SameLine();
-      if (!hasOpenPath)
-      {
-        ImGui::BeginDisabled();
-      }
-      if (ImGui::Button("Open Workspace"))
-      {
-        open_workspace(openWorkspacePathBuffer.data());
-      }
-      if (!hasOpenPath)
-      {
-        ImGui::EndDisabled();
-      }
-
-      ImGui::SameLine();
       if (ImGui::Button("Create New Workspace"))
       {
         creatingWorkspace = true;
@@ -932,12 +658,21 @@ namespace hades
 
   void WindowManager::open_workspace(const std::string &workspacePath)
   {
+    const std::filesystem::path previousWorkspacePath =
+        workspaceManager.current_workspace().has_value()
+            ? workspaceManager.current_workspace()->path
+            : std::filesystem::path();
     std::string errorMessage;
     const auto workspace = workspaceManager.open_workspace(std::filesystem::path(trim_copy(workspacePath)), &errorMessage);
     if (!workspace.has_value())
     {
       workspaceStatusMessage = errorMessage.empty() ? "Unable to open the selected workspace folder." : errorMessage;
       return;
+    }
+
+    if (workspace->path != previousWorkspacePath)
+    {
+      reset_workspace_session();
     }
 
     creatingWorkspace = false;
@@ -949,6 +684,10 @@ namespace hades
 
   void WindowManager::create_workspace()
   {
+    const std::filesystem::path previousWorkspacePath =
+        workspaceManager.current_workspace().has_value()
+            ? workspaceManager.current_workspace()->path
+            : std::filesystem::path();
     std::string errorMessage;
     const auto workspace = workspaceManager.create_workspace(
         std::filesystem::path(trim_copy(createWorkspaceParentBuffer.data())),
@@ -960,12 +699,36 @@ namespace hades
       return;
     }
 
+    if (workspace->path != previousWorkspacePath)
+    {
+      reset_workspace_session();
+    }
+
     creatingWorkspace = false;
     workspaceStatusMessage = errorMessage;
     set_buffer_text(openWorkspacePathBuffer, workspace->path.string());
     set_buffer_text(createWorkspaceParentBuffer, workspace->path.parent_path().string());
     set_buffer_text(createWorkspaceNameBuffer, std::string());
     update_window_title();
+  }
+
+  void WindowManager::reset_workspace_session()
+  {
+    scriptRuntime.stop();
+    if (audio_engine != nullptr)
+    {
+      audio_engine->stop_all();
+    }
+
+    entityManager = EntityManager();
+    componentManager = ComponentManager();
+    editor.reset_workspace_session();
+    wasPlayingLastFrame = false;
+
+    if (audioSystem != nullptr)
+    {
+      audioSystem->set_active_world(std::nullopt);
+    }
   }
 
   void WindowManager::update_window_title()
@@ -1056,7 +819,7 @@ namespace hades
 
     systemManager.registerSystem<MovementSystem>();
     systemManager.registerSystem<RenderSystem>();
-    auto audioSystem = systemManager.registerSystem<AudioSystem>();
+    audioSystem = systemManager.registerSystem<AudioSystem>();
     audioSystem->setAudioEngine(audio_engine.get());
     update_window_title();
     SDL_ShowWindow(window.get());
@@ -1101,12 +864,17 @@ namespace hades
     else
     {
       editor.render(io.DeltaTime, workspaceManager.current_workspace()->path, entityManager, componentManager, scriptRuntime);
+      if (audioSystem != nullptr)
+      {
+        audioSystem->set_active_world(editor.state.isPlaying ? editor.state.activeWorld : std::nullopt);
+      }
       if (editor.state.isPlaying)
       {
         scriptRuntime.update(io.DeltaTime, componentManager, entityManager);
         if (scriptRuntime.faulted())
         {
           editor.state.isPlaying = false;
+          editor.state.activeWorld.reset();
           editor.state.activeCamera.reset();
           editor.state.playModeMessage = scriptRuntime.last_error();
           if (audio_engine != nullptr)

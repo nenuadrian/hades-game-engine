@@ -19,6 +19,7 @@ struct SDL_Window;
 namespace hades
 {
   class AudioEngine;
+  class AudioSystem;
   class Renderer;
 
   class WindowManager
@@ -67,6 +68,7 @@ namespace hades
     WindowPtr window{nullptr};
     std::unique_ptr<Renderer> renderer;
     std::unique_ptr<AudioEngine> audio_engine;
+    std::shared_ptr<AudioSystem> audioSystem;
     ImGuiSession imgui_session;
     bool initialized = false;
     bool running = false;
@@ -86,6 +88,7 @@ namespace hades
     void render_workspace_selector();
     void open_workspace(const std::string &workspacePath);
     void create_workspace();
+    void reset_workspace_session();
     void update_window_title();
     bool init();
     void render_frame();

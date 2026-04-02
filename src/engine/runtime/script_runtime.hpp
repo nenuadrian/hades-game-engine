@@ -3,7 +3,10 @@
 
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
+
+#include "../core/ecs/entity.hpp"
 
 namespace hades
 {
@@ -28,6 +31,13 @@ namespace hades
         ComponentManager &componentManager,
         EntityManager &entityManager,
         const std::filesystem::path &workspaceRoot = {},
+        std::string *errorMessage = nullptr);
+
+    bool start(
+        ComponentManager &componentManager,
+        EntityManager &entityManager,
+        const std::filesystem::path &workspaceRoot,
+        std::optional<Entity::EntityId> worldRoot,
         std::string *errorMessage = nullptr);
 
     void update(float deltaTime, ComponentManager &componentManager, EntityManager &entityManager);

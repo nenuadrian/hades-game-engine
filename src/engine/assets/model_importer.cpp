@@ -6,6 +6,7 @@
 #include <assimp/scene.h>
 
 #include <filesystem>
+#include <limits>
 #include <string>
 #include <utility>
 
@@ -93,6 +94,14 @@ namespace hades
     model.sourcePath = std::filesystem::absolute(sourcePath).lexically_normal().string();
     model.formatHint = extension_without_dot(sourcePath);
 
+    bool foundAnyVertex = false;
+    float minX = std::numeric_limits<float>::max();
+    float minY = std::numeric_limits<float>::max();
+    float minZ = std::numeric_limits<float>::max();
+    float maxX = std::numeric_limits<float>::lowest();
+    float maxY = std::numeric_limits<float>::lowest();
+    float maxZ = std::numeric_limits<float>::lowest();
+
     model.meshes.reserve(scene->mNumMeshes);
     for (std::size_t meshIndex = 0; meshIndex < scene->mNumMeshes; ++meshIndex)
     {
@@ -111,6 +120,18 @@ namespace hades
       model.totalVertexCount += importedMesh.vertexCount;
       model.totalFaceCount += importedMesh.faceCount;
       model.meshes.push_back(std::move(importedMesh));
+
+      for (unsigned int vertexIndex = 0; vertexIndex < mesh->mNumVertices; ++vertexIndex)
+      {
+        const aiVector3D &vertex = mesh->mVertices[vertexIndex];
+        minX = std::min(minX, vertex.x);
+        minY = std::min(minY, vertex.y);
+        minZ = std::min(minZ, vertex.z);
+        maxX = std::max(maxX, vertex.x);
+        maxY = std::max(maxY, vertex.y);
+        maxZ = std::max(maxZ, vertex.z);
+        foundAnyVertex = true;
+      }
     }
 
     model.materials.reserve(scene->mNumMaterials);
@@ -125,6 +146,17 @@ namespace hades
       ImportedMaterial importedMaterial;
       importedMaterial.name = material_name_or_default(*material, materialIndex);
       model.materials.push_back(std::move(importedMaterial));
+    }
+
+    if (foundAnyVertex)
+    {
+      model.hasBounds = true;
+      model.minX = minX;
+      model.minY = minY;
+      model.minZ = minZ;
+      model.maxX = maxX;
+      model.maxY = maxY;
+      model.maxZ = maxZ;
     }
 
     return model;

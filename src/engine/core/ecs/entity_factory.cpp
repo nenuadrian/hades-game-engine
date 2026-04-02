@@ -11,17 +11,27 @@
 #include "../../components/position_component_3d.hpp"
 #include "../../components/primitive_component.hpp"
 #include "../../components/transform_hierarchy_component.hpp"
+#include "../../components/world_component.hpp"
 #include "component_manager.hpp"
 #include "entity_manager.hpp"
+#include "world_utils.hpp"
 
 namespace hades
 {
   namespace
   {
-    bool has_existing_camera(EntityManager &entityManager, ComponentManager &componentManager)
+    bool has_existing_camera(
+        EntityManager &entityManager,
+        ComponentManager &componentManager,
+        std::optional<Entity::EntityId> world)
     {
       for (Entity::EntityId entity : entityManager.getAllEntities())
       {
+        if (world.has_value() && !entity_belongs_to_world(entity, *world, componentManager))
+        {
+          continue;
+        }
+
         if (componentManager.hasComponent<CameraComponent>(entity))
         {
           return true;
@@ -38,8 +48,9 @@ namespace hades
       std::optional<Entity::EntityId> parent)
   {
     const auto entity = createBaseEntity(entityManager, componentManager, "Camera", parent);
+    const auto world = world_for_entity(entity, componentManager);
     CameraComponent camera;
-    camera.isMainCamera = !has_existing_camera(entityManager, componentManager);
+    camera.isMainCamera = !has_existing_camera(entityManager, componentManager, world);
     componentManager.addComponent(entity, camera);
     componentManager.addComponent(entity, AudioListenerComponent());
     return entity;
@@ -62,6 +73,17 @@ namespace hades
   {
     const auto entity = createBaseEntity(entityManager, componentManager, "Audio Emitter", parent);
     componentManager.addComponent(entity, AudioSourceComponent());
+    return entity;
+  }
+
+  Entity::EntityId EntityFactory::createWorld(
+      EntityManager &entityManager,
+      ComponentManager &componentManager,
+      const std::string &name,
+      bool isDefault)
+  {
+    const auto entity = createBaseEntity(entityManager, componentManager, name, std::nullopt, false);
+    componentManager.addComponent(entity, WorldComponent{isDefault});
     return entity;
   }
 
@@ -88,12 +110,16 @@ namespace hades
       EntityManager &entityManager,
       ComponentManager &componentManager,
       const std::string &name,
-      std::optional<Entity::EntityId> parent)
+      std::optional<Entity::EntityId> parent,
+      bool addPositionComponent)
   {
     const auto entity = entityManager.createEntity();
     componentManager.addComponent(entity, NameComponent{name});
     componentManager.addComponent(entity, TransformHierarchyComponent());
-    componentManager.addComponent(entity, PositionComponent3D());
+    if (addPositionComponent)
+    {
+      componentManager.addComponent(entity, PositionComponent3D());
+    }
     attachToParent(entity, componentManager, parent);
     return entity;
   }

@@ -11,21 +11,6 @@ hide:
 [![Docs](https://github.com/nenuadrian/hades-game-engine/actions/workflows/docs-pages.yml/badge.svg)](https://github.com/nenuadrian/hades-game-engine/actions/workflows/docs-pages.yml)
 [![Docker test image](https://github.com/nenuadrian/hades-game-engine/actions/workflows/docker-build.yml/badge.svg)](https://github.com/nenuadrian/hades-game-engine/actions/workflows/docker-build.yml)
 
-## table of contents
-
-- [table of contents](#table-of-contents)
-- [overview](#overview)
-- [goals](#goals)
-- [features](#features)
-- [Entity-Component-System (ECS)](#entity-component-system-ecs)
-- [Build \& Run \& Test](#build-run-test)
-  - [Build](#build)
-  - [Run](#run)
-  - [Test](#test)
-- [Scripting](#scripting)
-- [Documentation](#documentation)
-- [Previous version](#previous-version)
-
 ## overview
 
 A game engine written in C++, which has the ability to handle 3D graphics, sound, entity management, and game mechanics using scripts. It currently supports the OpenGL rendering system, but there are plans to include Vulkan as a renderer in the future. The build system used for this engine is cmake.

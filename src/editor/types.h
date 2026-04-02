@@ -39,6 +39,8 @@ namespace hades
     EditorEntityPreset pendingEntityPreset = EditorEntityPreset::None;
     EditorPlayAction pendingPlayAction = EditorPlayAction::None;
     bool isPlaying = false;
+    std::optional<Entity::EntityId> loadedWorld;
+    std::optional<Entity::EntityId> activeWorld;
     std::optional<Entity::EntityId> activeCamera;
     std::string playModeMessage;
   };

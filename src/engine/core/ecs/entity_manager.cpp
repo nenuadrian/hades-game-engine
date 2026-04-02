@@ -1,5 +1,7 @@
 #include "entity_manager.hpp"
 
+#include <algorithm>
+
 namespace hades
 {
   Entity::EntityId EntityManager::createEntity()
@@ -21,6 +23,13 @@ namespace hades
 
   void EntityManager::destroyEntity(Entity::EntityId entity)
   {
+    const auto it = std::find(activeEntities.begin(), activeEntities.end(), entity);
+    if (it == activeEntities.end())
+    {
+      return;
+    }
+
+    activeEntities.erase(it);
     availableEntities.push(entity);
     entityComponentSignatures.erase(entity);
   }

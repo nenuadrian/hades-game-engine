@@ -1,4 +1,6 @@
 #include "editor.hpp"
+#include "native_dialogs.hpp"
+#include "workspace_file_operations.hpp"
 
 #include <array>
 #include <algorithm>
@@ -22,14 +24,17 @@
 #include "../engine/components/camera_component.hpp"
 #include "../engine/components/model_component.hpp"
 #include "../engine/components/name_component.hpp"
+#include "../engine/components/position_component_2d.hpp"
 #include "../engine/components/position_component_3d.hpp"
 #include "../engine/components/primitive_component.hpp"
 #include "../engine/components/render_component.hpp"
 #include "../engine/components/script_component.hpp"
 #include "../engine/components/transform_hierarchy_component.hpp"
+#include "../engine/components/world_component.hpp"
 #include "../engine/core/ecs/component_manager.hpp"
 #include "../engine/core/ecs/entity_factory.hpp"
 #include "../engine/core/ecs/entity_manager.hpp"
+#include "../engine/core/ecs/world_utils.hpp"
 #include "../engine/gui/imgui.hpp"
 #include "../engine/runtime/main_camera_selection.hpp"
 #include "../engine/runtime/script_runtime.hpp"
@@ -42,11 +47,21 @@ namespace hades
     constexpr char WORKSPACE_WINDOW_TITLE[] = "Workspace";
     constexpr char PROPERTIES_WINDOW_TITLE[] = "Properties";
     constexpr char COMPONENTS_WINDOW_TITLE[] = "Components";
+    constexpr char SCENE_WINDOW_TITLE[] = "World";
     constexpr char GAME_WINDOW_TITLE[] = "Game";
     constexpr char IMPORT_MODEL_POPUP_TITLE[] = "Import Model";
     constexpr char WORKSPACE_CREATE_POPUP_TITLE[] = "Create Workspace Item";
+    constexpr char WORKSPACE_IMPORT_POPUP_TITLE[] = "Import Into Workspace";
+    constexpr char WORKSPACE_DELETE_POPUP_TITLE[] = "Delete Workspace Item";
     constexpr float PI = 3.14159265358979323846f;
     constexpr float CUBE_HALF_EXTENT = 0.5f;
+    constexpr float EDITOR_SCENE_CAMERA_Y = 3.0f;
+    constexpr float EDITOR_SCENE_CAMERA_Z = -6.0f;
+    constexpr int BOX_EDGES[12][2] = {
+        {0, 1}, {1, 2}, {2, 3}, {3, 0},
+        {4, 5}, {5, 6}, {6, 7}, {7, 4},
+        {0, 4}, {1, 5}, {2, 6}, {3, 7},
+    };
 
     struct Vec3
     {
@@ -66,6 +81,30 @@ namespace hades
       return "Unknown";
     }
 
+    std::string entity_display_label(Entity::EntityId entity, ComponentManager &componentManager)
+    {
+      std::string name = "Entity";
+      if (componentManager.hasComponent<NameComponent>(entity))
+      {
+        name = componentManager.getComponent<NameComponent>(entity).value;
+      }
+
+      if (componentManager.hasComponent<CameraComponent>(entity) &&
+          componentManager.getComponent<CameraComponent>(entity).isMainCamera)
+      {
+        name += " [Main]";
+      }
+
+      if (componentManager.hasComponent<WorldComponent>(entity))
+      {
+        name += componentManager.getComponent<WorldComponent>(entity).isDefault
+                    ? " [World, Default]"
+                    : " [World]";
+      }
+
+      return name + " (" + std::to_string(entity) + ")";
+    }
+
     void render_selection_hint(const char *message)
     {
       ImGui::TextDisabled("%s", message);
@@ -79,6 +118,67 @@ namespace hades
     Vec3 make_vec3(const PositionComponent3D &position)
     {
       return make_vec3(position.x, position.y, position.z);
+    }
+
+    Vec3 lerp_vec3(const Vec3 &start, const Vec3 &end, float t)
+    {
+      return make_vec3(
+          start.x + ((end.x - start.x) * t),
+          start.y + ((end.y - start.y) * t),
+          start.z + ((end.z - start.z) * t));
+    }
+
+    bool clip_segment_to_camera_depth(
+        Vec3 &start,
+        Vec3 &end,
+        const PositionComponent3D &cameraPosition,
+        const CameraComponent &camera)
+    {
+      auto clip_endpoint = [](Vec3 &point, float &depth, const Vec3 &otherPoint, float otherDepth, float targetDepth)
+      {
+        const float depthDelta = otherDepth - depth;
+        if (std::abs(depthDelta) <= 1e-5f)
+        {
+          return false;
+        }
+
+        const float t = std::clamp((targetDepth - depth) / depthDelta, 0.0f, 1.0f);
+        point = lerp_vec3(point, otherPoint, t);
+        depth = targetDepth;
+        return true;
+      };
+
+      float startDepth = start.z - cameraPosition.z;
+      float endDepth = end.z - cameraPosition.z;
+      if ((startDepth < camera.nearClip && endDepth < camera.nearClip) ||
+          (startDepth > camera.farClip && endDepth > camera.farClip))
+      {
+        return false;
+      }
+
+      if (startDepth < camera.nearClip &&
+          !clip_endpoint(start, startDepth, end, endDepth, camera.nearClip))
+      {
+        return false;
+      }
+      else if (startDepth > camera.farClip &&
+               !clip_endpoint(start, startDepth, end, endDepth, camera.farClip))
+      {
+        return false;
+      }
+
+      if (endDepth < camera.nearClip &&
+          !clip_endpoint(end, endDepth, start, startDepth, camera.nearClip))
+      {
+        return false;
+      }
+      else if (endDepth > camera.farClip &&
+               !clip_endpoint(end, endDepth, start, startDepth, camera.farClip))
+      {
+        return false;
+      }
+
+      return true;
     }
 
     bool project_point(
@@ -122,18 +222,280 @@ namespace hades
       return true;
     }
 
-    std::array<Vec3, 8> cube_corners(const PositionComponent3D &position)
+    bool project_line_segment(
+        const Vec3 &start,
+        const Vec3 &end,
+        const PositionComponent3D &cameraPosition,
+        const CameraComponent &camera,
+        const ImVec2 &canvasOrigin,
+        const ImVec2 &canvasSize,
+        ImVec2 &screenStart,
+        ImVec2 &screenEnd)
+    {
+      Vec3 clippedStart = start;
+      Vec3 clippedEnd = end;
+      if (!clip_segment_to_camera_depth(clippedStart, clippedEnd, cameraPosition, camera))
+      {
+        return false;
+      }
+
+      return project_point(clippedStart, cameraPosition, camera, canvasOrigin, canvasSize, screenStart) &&
+             project_point(clippedEnd, cameraPosition, camera, canvasOrigin, canvasSize, screenEnd);
+    }
+
+    PositionComponent3D editor_scene_camera_position()
+    {
+      return PositionComponent3D(0.0f, EDITOR_SCENE_CAMERA_Y, EDITOR_SCENE_CAMERA_Z);
+    }
+
+    CameraComponent editor_scene_camera()
+    {
+      return CameraComponent();
+    }
+
+    void draw_editor_grid(
+        ImDrawList *drawList,
+        const PositionComponent3D &cameraPosition,
+        const CameraComponent &camera,
+        const ImVec2 &canvasOrigin,
+        const ImVec2 &canvasSize)
+    {
+      constexpr int GRID_HALF_EXTENT = 12;
+      constexpr float GRID_HEIGHT = 0.0f;
+      constexpr ImU32 GRID_MINOR_COLOR = IM_COL32(128, 128, 128, 96);
+      constexpr ImU32 GRID_AXIS_X_COLOR = IM_COL32(172, 172, 172, 168);
+      constexpr ImU32 GRID_AXIS_Z_COLOR = IM_COL32(172, 172, 172, 168);
+
+      for (int x = -GRID_HALF_EXTENT; x <= GRID_HALF_EXTENT; ++x)
+      {
+        ImVec2 screenStart;
+        ImVec2 screenEnd;
+        if (!project_line_segment(
+                make_vec3(static_cast<float>(x), GRID_HEIGHT, -static_cast<float>(GRID_HALF_EXTENT)),
+                make_vec3(static_cast<float>(x), GRID_HEIGHT, static_cast<float>(GRID_HALF_EXTENT)),
+                cameraPosition,
+                camera,
+                canvasOrigin,
+                canvasSize,
+                screenStart,
+                screenEnd))
+        {
+          continue;
+        }
+
+        drawList->AddLine(
+            screenStart,
+            screenEnd,
+            x == 0 ? GRID_AXIS_Z_COLOR : GRID_MINOR_COLOR,
+            x == 0 ? 1.5f : 1.0f);
+      }
+
+      for (int z = -GRID_HALF_EXTENT; z <= GRID_HALF_EXTENT; ++z)
+      {
+        ImVec2 screenStart;
+        ImVec2 screenEnd;
+        if (!project_line_segment(
+                make_vec3(-static_cast<float>(GRID_HALF_EXTENT), GRID_HEIGHT, static_cast<float>(z)),
+                make_vec3(static_cast<float>(GRID_HALF_EXTENT), GRID_HEIGHT, static_cast<float>(z)),
+                cameraPosition,
+                camera,
+                canvasOrigin,
+                canvasSize,
+                screenStart,
+                screenEnd))
+        {
+          continue;
+        }
+
+        drawList->AddLine(
+            screenStart,
+            screenEnd,
+            z == 0 ? GRID_AXIS_X_COLOR : GRID_MINOR_COLOR,
+            z == 0 ? 1.5f : 1.0f);
+      }
+    }
+
+    std::array<Vec3, 8> box_corners(
+        const Vec3 &minCorner,
+        const Vec3 &maxCorner,
+        const PositionComponent3D &position)
     {
       return {
-          make_vec3(position.x - CUBE_HALF_EXTENT, position.y - CUBE_HALF_EXTENT, position.z - CUBE_HALF_EXTENT),
-          make_vec3(position.x + CUBE_HALF_EXTENT, position.y - CUBE_HALF_EXTENT, position.z - CUBE_HALF_EXTENT),
-          make_vec3(position.x + CUBE_HALF_EXTENT, position.y + CUBE_HALF_EXTENT, position.z - CUBE_HALF_EXTENT),
-          make_vec3(position.x - CUBE_HALF_EXTENT, position.y + CUBE_HALF_EXTENT, position.z - CUBE_HALF_EXTENT),
-          make_vec3(position.x - CUBE_HALF_EXTENT, position.y - CUBE_HALF_EXTENT, position.z + CUBE_HALF_EXTENT),
-          make_vec3(position.x + CUBE_HALF_EXTENT, position.y - CUBE_HALF_EXTENT, position.z + CUBE_HALF_EXTENT),
-          make_vec3(position.x + CUBE_HALF_EXTENT, position.y + CUBE_HALF_EXTENT, position.z + CUBE_HALF_EXTENT),
-          make_vec3(position.x - CUBE_HALF_EXTENT, position.y + CUBE_HALF_EXTENT, position.z + CUBE_HALF_EXTENT),
+          make_vec3(position.x + minCorner.x, position.y + minCorner.y, position.z + minCorner.z),
+          make_vec3(position.x + maxCorner.x, position.y + minCorner.y, position.z + minCorner.z),
+          make_vec3(position.x + maxCorner.x, position.y + maxCorner.y, position.z + minCorner.z),
+          make_vec3(position.x + minCorner.x, position.y + maxCorner.y, position.z + minCorner.z),
+          make_vec3(position.x + minCorner.x, position.y + minCorner.y, position.z + maxCorner.z),
+          make_vec3(position.x + maxCorner.x, position.y + minCorner.y, position.z + maxCorner.z),
+          make_vec3(position.x + maxCorner.x, position.y + maxCorner.y, position.z + maxCorner.z),
+          make_vec3(position.x + minCorner.x, position.y + maxCorner.y, position.z + maxCorner.z),
       };
+    }
+
+    std::array<Vec3, 8> cube_corners(const PositionComponent3D &position)
+    {
+      return box_corners(
+          make_vec3(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT),
+          make_vec3(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT),
+          position);
+    }
+
+    Vec3 box_center(
+        const Vec3 &minCorner,
+        const Vec3 &maxCorner,
+        const PositionComponent3D &position)
+    {
+      return make_vec3(
+          position.x + ((minCorner.x + maxCorner.x) * 0.5f),
+          position.y + ((minCorner.y + maxCorner.y) * 0.5f),
+          position.z + ((minCorner.z + maxCorner.z) * 0.5f));
+    }
+
+    bool draw_wire_box(
+        ImDrawList *drawList,
+        const PositionComponent3D &cameraPosition,
+        const CameraComponent &camera,
+        const ImVec2 &canvasOrigin,
+        const ImVec2 &canvasSize,
+        const PositionComponent3D &position,
+        const Vec3 &minCorner,
+        const Vec3 &maxCorner,
+        ImU32 lineColor,
+        float thickness,
+        const std::string *label = nullptr,
+        ImU32 labelColor = IM_COL32(205, 210, 218, 255))
+    {
+      const auto corners = box_corners(minCorner, maxCorner, position);
+      int drawnEdgeCount = 0;
+      for (const auto &edge : BOX_EDGES)
+      {
+        ImVec2 lineStart;
+        ImVec2 lineEnd;
+        if (!project_line_segment(
+                corners[edge[0]],
+                corners[edge[1]],
+                cameraPosition,
+                camera,
+                canvasOrigin,
+                canvasSize,
+                lineStart,
+                lineEnd))
+        {
+          continue;
+        }
+
+        drawList->AddLine(lineStart, lineEnd, lineColor, thickness);
+        ++drawnEdgeCount;
+      }
+
+      if (drawnEdgeCount == 0)
+      {
+        return false;
+      }
+
+      if (label != nullptr)
+      {
+        ImVec2 centerPoint;
+        if (project_point(box_center(minCorner, maxCorner, position), cameraPosition, camera, canvasOrigin, canvasSize, centerPoint))
+        {
+          drawList->AddText(
+              ImVec2(centerPoint.x + 6.0f, centerPoint.y + 6.0f),
+              labelColor,
+              label->c_str());
+        }
+      }
+
+      return true;
+    }
+
+    int draw_world_preview(
+        ImDrawList *drawList,
+        const PositionComponent3D &cameraPosition,
+        const CameraComponent &camera,
+        const ImVec2 &canvasOrigin,
+        const ImVec2 &canvasSize,
+        EntityManager &entityManager,
+        ComponentManager &componentManager,
+        std::optional<Entity::EntityId> world,
+        std::optional<Entity::EntityId> excludedEntity)
+    {
+      int visibleRenderableCount = 0;
+      for (Entity::EntityId entity : entityManager.getAllEntities())
+      {
+        if (excludedEntity.has_value() && entity == *excludedEntity)
+        {
+          continue;
+        }
+
+        if (world.has_value() && !entity_belongs_to_world(entity, *world, componentManager))
+        {
+          continue;
+        }
+
+        if (!componentManager.hasComponent<PositionComponent3D>(entity))
+        {
+          continue;
+        }
+
+        const auto &position = componentManager.getComponent<PositionComponent3D>(entity);
+        const std::string label = entity_display_label(entity, componentManager);
+
+        if (componentManager.hasComponent<PrimitiveComponent>(entity))
+        {
+          const auto &primitive = componentManager.getComponent<PrimitiveComponent>(entity);
+          if (primitive.type != PrimitiveType::Cube)
+          {
+            continue;
+          }
+
+          if (draw_wire_box(
+                  drawList,
+                  cameraPosition,
+                  camera,
+                  canvasOrigin,
+                  canvasSize,
+                  position,
+                  make_vec3(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT),
+                  make_vec3(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT),
+                  IM_COL32(223, 228, 235, 255),
+                  1.5f,
+                  &label))
+          {
+            ++visibleRenderableCount;
+          }
+          continue;
+        }
+
+        if (componentManager.hasComponent<ModelComponent>(entity))
+        {
+          const auto &model = componentManager.getComponent<ModelComponent>(entity).model;
+          const Vec3 minCorner = model.hasBounds
+                                     ? make_vec3(model.minX, model.minY, model.minZ)
+                                     : make_vec3(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT);
+          const Vec3 maxCorner = model.hasBounds
+                                     ? make_vec3(model.maxX, model.maxY, model.maxZ)
+                                     : make_vec3(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT);
+
+          if (draw_wire_box(
+                  drawList,
+                  cameraPosition,
+                  camera,
+                  canvasOrigin,
+                  canvasSize,
+                  position,
+                  minCorner,
+                  maxCorner,
+                  IM_COL32(179, 189, 202, 255),
+                  1.5f,
+                  &label,
+                  IM_COL32(205, 210, 218, 255)))
+          {
+            ++visibleRenderableCount;
+          }
+        }
+      }
+
+      return visibleRenderableCount;
     }
 
     std::string script_component_label(const ScriptAttachment &attachment, std::size_t index)
@@ -172,6 +534,21 @@ namespace hades
     bool has_path_separator(const std::string &name)
     {
       return name.find('/') != std::string::npos || name.find('\\') != std::string::npos;
+    }
+
+    template <std::size_t Size>
+    void set_buffer_text(std::array<char, Size> &buffer, const std::string &value)
+    {
+      buffer.fill('\0');
+      const std::size_t copyLength = std::min(value.size(), Size - 1);
+      std::copy_n(value.data(), copyLength, buffer.data());
+      buffer[copyLength] = '\0';
+    }
+
+    std::string workspace_delete_button_label(const std::filesystem::path &path)
+    {
+      std::error_code errorCode;
+      return std::filesystem::is_directory(path, errorCode) ? "Delete Folder" : "Delete File";
     }
 
     std::string csharp_class_name_from_stem(const std::string &stem)
@@ -355,6 +732,81 @@ namespace hades
       return fields;
     }
 
+    template <typename T>
+    void remove_component_if_present(ComponentManager &componentManager, Entity::EntityId entity)
+    {
+      if (componentManager.hasComponent<T>(entity))
+      {
+        componentManager.removeComponent<T>(entity);
+      }
+    }
+
+    bool hierarchy_contains_entity(
+        Entity::EntityId root,
+        Entity::EntityId target,
+        ComponentManager &componentManager)
+    {
+      if (root == target)
+      {
+        return true;
+      }
+
+      if (!componentManager.hasComponent<TransformHierarchyComponent>(root))
+      {
+        return false;
+      }
+
+      const auto &hierarchy = componentManager.getComponent<TransformHierarchyComponent>(root);
+      for (const Entity::EntityId child : hierarchy.children)
+      {
+        if (hierarchy_contains_entity(child, target, componentManager))
+        {
+          return true;
+        }
+      }
+
+      return false;
+    }
+
+    void destroy_entity_subtree(
+        Entity::EntityId entity,
+        EntityManager &entityManager,
+        ComponentManager &componentManager)
+    {
+      if (!componentManager.hasComponent<TransformHierarchyComponent>(entity))
+      {
+        return;
+      }
+
+      const auto hierarchy = componentManager.getComponent<TransformHierarchyComponent>(entity);
+      for (const Entity::EntityId child : hierarchy.children)
+      {
+        destroy_entity_subtree(child, entityManager, componentManager);
+      }
+
+      if (hierarchy.parent.has_value() &&
+          componentManager.hasComponent<TransformHierarchyComponent>(*hierarchy.parent))
+      {
+        auto &parentHierarchy = componentManager.getComponent<TransformHierarchyComponent>(*hierarchy.parent);
+        parentHierarchy.removeChild(entity);
+      }
+
+      remove_component_if_present<NameComponent>(componentManager, entity);
+      remove_component_if_present<WorldComponent>(componentManager, entity);
+      remove_component_if_present<TransformHierarchyComponent>(componentManager, entity);
+      remove_component_if_present<PositionComponent2D>(componentManager, entity);
+      remove_component_if_present<PositionComponent3D>(componentManager, entity);
+      remove_component_if_present<CameraComponent>(componentManager, entity);
+      remove_component_if_present<AudioListenerComponent>(componentManager, entity);
+      remove_component_if_present<PrimitiveComponent>(componentManager, entity);
+      remove_component_if_present<AudioSourceComponent>(componentManager, entity);
+      remove_component_if_present<ModelComponent>(componentManager, entity);
+      remove_component_if_present<RenderComponent>(componentManager, entity);
+      remove_component_if_present<ScriptComponent>(componentManager, entity);
+
+      entityManager.destroyEntity(entity);
+    }
+
     bool create_workspace_item(
         const std::filesystem::path &parentPath,
         const std::string &rawName,
@@ -517,8 +969,142 @@ namespace hades
 
   Editor::Editor() : gui(std::make_unique<ImGui_GUI>())
   {
+  }
+
+  Editor::~Editor() = default;
+
+  void Editor::reset_workspace_session()
+  {
+    state.selectedEntity.reset();
+    state.pendingEntityPreset = EditorEntityPreset::None;
+    state.pendingPlayAction = EditorPlayAction::None;
+    state.isPlaying = false;
+    state.loadedWorld.reset();
+    state.activeWorld.reset();
+    state.activeCamera.reset();
+    state.playModeMessage.clear();
+    pendingEntityDeletion_.reset();
+
+    activeWorkspacePath_.clear();
+    workspaceTreeRoot_.reset();
+    workspaceScriptFiles_.clear();
+    workspaceScanError_.clear();
+    nextWorkspaceScanTime_ = 0.0;
+    workspaceScriptListDirty_ = false;
+    scriptModTimes_.clear();
+    parsedFieldsCache_.clear();
+    parsedFieldsModTimes_.clear();
+    lastCompileError_.clear();
+    lastCompileSucceeded_ = true;
+    backgroundCompileInProgress_ = false;
+  }
+
+  void Editor::render(
+      float deltaTime,
+      const std::filesystem::path &workspacePath,
+      EntityManager &entityManager,
+      ComponentManager &componentManager,
+      ScriptRuntime &scriptRuntime)
+  {
+    refresh_workspace_cache(deltaTime, workspacePath);
+    ensure_world_state(entityManager, componentManager);
+    sync_menu_bar(entityManager, componentManager);
+    configure_default_dock_layout(gui->render_frame());
+
+    // File watch: detect script changes and trigger background compile.
+    bool scriptsChanged = workspaceScriptListDirty_;
+    if (!activeWorkspacePath_.empty())
+    {
+      for (const auto &relPath : workspaceScriptFiles_)
+      {
+        const auto fullPath = activeWorkspacePath_ / relPath;
+        std::error_code ec;
+        const auto modTime = std::filesystem::last_write_time(fullPath, ec);
+        if (ec)
+        {
+          continue;
+        }
+        auto it = scriptModTimes_.find(relPath);
+        if (it == scriptModTimes_.end())
+        {
+          scriptModTimes_[relPath] = modTime;
+          scriptsChanged = true;
+        }
+        else if (it->second != modTime)
+        {
+          it->second = modTime;
+          scriptsChanged = true;
+        }
+      }
+
+      if (scriptsChanged)
+      {
+        if (workspaceScriptFiles_.empty())
+        {
+          lastCompileError_.clear();
+          lastCompileSucceeded_ = true;
+          workspaceScriptListDirty_ = false;
+        }
+        else if (!backgroundCompileInProgress_)
+        {
+          std::vector<std::filesystem::path> sourceFiles;
+          sourceFiles.reserve(workspaceScriptFiles_.size());
+          for (const auto &relPath : workspaceScriptFiles_)
+          {
+            sourceFiles.push_back(activeWorkspacePath_ / relPath);
+          }
+
+          backgroundCompileInProgress_ = true;
+          workspaceScriptListDirty_ = false;
+          backgroundCompileResult_ = std::async(std::launch::async,
+              [files = std::move(sourceFiles)]() -> std::string
+              {
+                std::string error;
+                ScriptRuntime::compile(files, &error);
+                return error;
+              });
+        }
+        else
+        {
+          workspaceScriptListDirty_ = true;
+        }
+      }
+    }
+
+    if (backgroundCompileInProgress_ && backgroundCompileResult_.valid() &&
+        backgroundCompileResult_.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+    {
+      lastCompileError_ = backgroundCompileResult_.get();
+      lastCompileSucceeded_ = lastCompileError_.empty();
+      backgroundCompileInProgress_ = false;
+    }
+
+    handle_entity_creation_requests(entityManager, componentManager);
+    import_model(entityManager, componentManager);
+    handle_play_mode_requests(entityManager, componentManager, scriptRuntime);
+    workspace(entityManager, componentManager);
+    entities(entityManager, componentManager);
+    handle_entity_deletion_requests(entityManager, componentManager, scriptRuntime);
+    scene(entityManager, componentManager);
+    properties(entityManager, componentManager);
+    components(entityManager, componentManager);
+    game(entityManager, componentManager, scriptRuntime);
+    debug(deltaTime);
+  }
+
+  void Editor::sync_menu_bar(EntityManager &entityManager, ComponentManager &componentManager)
+  {
+    gui->menu_bar_items.clear();
+
     MenuBarItem file;
     file.title = "File";
+
+    MenuBarItem newWorld;
+    newWorld.title = "New World";
+    newWorld.on_activate = [this, &entityManager, &componentManager]()
+    {
+      create_world(entityManager, componentManager);
+    };
 
     MenuBarItem exit;
     exit.title = "Exit";
@@ -527,55 +1113,41 @@ namespace hades
       state.events.push(EDITOR_QUIT);
     };
 
+    file.children_menu_items.push_back(newWorld);
     file.children_menu_items.push_back(exit);
     gui->menu_bar_items.push_back(file);
 
-    MenuBarItem addEntity;
-    addEntity.title = "Add Entity";
+    MenuBarItem worlds;
+    worlds.title = "Worlds";
 
-    MenuBarItem addCamera;
-    addCamera.title = "Camera";
-    addCamera.on_activate = [this]()
+    const auto worldEntities = find_world_entities(entityManager, componentManager);
+    if (worldEntities.empty())
     {
-      state.pendingEntityPreset = EditorEntityPreset::Camera;
-    };
-
-    MenuBarItem addCube;
-    addCube.title = "Cube";
-    addCube.on_activate = [this]()
+      MenuBarItem emptyWorlds;
+      emptyWorlds.title = "No Worlds Available";
+      worlds.children_menu_items.push_back(emptyWorlds);
+    }
+    else
     {
-      state.pendingEntityPreset = EditorEntityPreset::Cube;
-    };
-
-    MenuBarItem addAudioEmitter;
-    addAudioEmitter.title = "Audio Emitter";
-    addAudioEmitter.on_activate = [this]()
-    {
-      state.pendingEntityPreset = EditorEntityPreset::AudioEmitter;
-    };
-
-    MenuBarItem importModel;
-    importModel.title = "Import Model...";
-    importModel.on_activate = [this]()
-    {
-      if (importModelPathBuffer[0] == '\0')
+      for (const Entity::EntityId world : worldEntities)
       {
-        std::snprintf(
-            importModelPathBuffer.data(),
-            importModelPathBuffer.size(),
-            "%s",
-            "src/tests/backpack/12305_backpack_v2_l3.obj");
+        std::string label = entity_label(world, componentManager);
+        if (state.loadedWorld.has_value() && *state.loadedWorld == world)
+        {
+          label += " [Loaded]";
+        }
+
+        MenuBarItem worldItem;
+        worldItem.title = std::move(label);
+        worldItem.on_activate = [this, &componentManager, world]()
+        {
+          load_world(world, componentManager);
+        };
+        worlds.children_menu_items.push_back(std::move(worldItem));
       }
+    }
 
-      importModelError.clear();
-      openImportModelDialog = true;
-    };
-
-    addEntity.children_menu_items.push_back(addCamera);
-    addEntity.children_menu_items.push_back(addCube);
-    addEntity.children_menu_items.push_back(addAudioEmitter);
-    addEntity.children_menu_items.push_back(importModel);
-    gui->menu_bar_items.push_back(addEntity);
+    gui->menu_bar_items.push_back(worlds);
 
     MenuBarItem game;
     game.title = "Game";
@@ -599,94 +1171,10 @@ namespace hades
     gui->menu_bar_items.push_back(game);
   }
 
-  Editor::~Editor() = default;
-
-  void Editor::render(
-      float deltaTime,
-      const std::filesystem::path &workspacePath,
-      EntityManager &entityManager,
-      ComponentManager &componentManager,
-      ScriptRuntime &scriptRuntime)
-  {
-    configure_default_dock_layout(gui->render_frame());
-    refresh_workspace_cache(deltaTime, workspacePath);
-
-    // File watch: detect script changes and trigger background compile.
-    if (!activeWorkspacePath_.empty() && !workspaceScriptFiles_.empty())
-    {
-      bool scriptsChanged = false;
-      for (const auto &relPath : workspaceScriptFiles_)
-      {
-        const auto fullPath = activeWorkspacePath_ / relPath;
-        std::error_code ec;
-        const auto modTime = std::filesystem::last_write_time(fullPath, ec);
-        if (ec)
-        {
-          continue;
-        }
-        auto it = scriptModTimes_.find(relPath);
-        if (it == scriptModTimes_.end())
-        {
-          scriptModTimes_[relPath] = modTime;
-          scriptsChanged = true;
-        }
-        else if (it->second != modTime)
-        {
-          it->second = modTime;
-          scriptsChanged = true;
-        }
-      }
-
-      if (scriptsChanged && !backgroundCompileInProgress_)
-      {
-        std::vector<std::filesystem::path> sourceFiles;
-        sourceFiles.reserve(workspaceScriptFiles_.size());
-        for (const auto &relPath : workspaceScriptFiles_)
-        {
-          sourceFiles.push_back(activeWorkspacePath_ / relPath);
-        }
-
-        backgroundCompileInProgress_ = true;
-        backgroundCompileResult_ = std::async(std::launch::async,
-            [files = std::move(sourceFiles)]() -> std::string
-            {
-              std::string error;
-              ScriptRuntime::compile(files, &error);
-              return error;
-            });
-      }
-
-      if (backgroundCompileInProgress_ && backgroundCompileResult_.valid() &&
-          backgroundCompileResult_.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
-      {
-        lastCompileError_ = backgroundCompileResult_.get();
-        lastCompileSucceeded_ = lastCompileError_.empty();
-        backgroundCompileInProgress_ = false;
-      }
-    }
-
-    handle_entity_creation_requests(entityManager, componentManager);
-    import_model(entityManager, componentManager);
-    handle_play_mode_requests(entityManager, componentManager, scriptRuntime);
-    workspace();
-    entities(entityManager, componentManager);
-    properties(entityManager, componentManager);
-    components(entityManager, componentManager);
-    game(entityManager, componentManager, scriptRuntime);
-    debug(deltaTime);
-  }
-
   void Editor::configure_default_dock_layout(std::uint32_t dockspaceId)
   {
     if (dockLayoutInitialized || dockspaceId == 0)
     {
-      return;
-    }
-
-    ImGuiDockNode *existingNode = ImGui::DockBuilderGetNode(dockspaceId);
-    if (existingNode != nullptr && existingNode->ChildNodes[0] != nullptr)
-    {
-      dockLayoutInitialized = true;
       return;
     }
 
@@ -701,12 +1189,14 @@ namespace hades
     const ImGuiID entitiesDockId = ImGui::DockBuilderSplitNode(workspaceDockId, ImGuiDir_Down, 0.56f, nullptr, &workspaceDockId);
     ImGuiID inspectorDockId = ImGui::DockBuilderSplitNode(mainDockId, ImGuiDir_Right, 0.34f, nullptr, &mainDockId);
     const ImGuiID componentsDockId = ImGui::DockBuilderSplitNode(inspectorDockId, ImGuiDir_Right, 0.45f, nullptr, &inspectorDockId);
+    const ImGuiID gameDockId = ImGui::DockBuilderSplitNode(mainDockId, ImGuiDir_Down, 0.22f, nullptr, &mainDockId);
 
     ImGui::DockBuilderDockWindow(WORKSPACE_WINDOW_TITLE, workspaceDockId);
     ImGui::DockBuilderDockWindow(ENTITY_WINDOW_TITLE, entitiesDockId);
     ImGui::DockBuilderDockWindow(PROPERTIES_WINDOW_TITLE, inspectorDockId);
     ImGui::DockBuilderDockWindow(COMPONENTS_WINDOW_TITLE, componentsDockId);
-    ImGui::DockBuilderDockWindow(GAME_WINDOW_TITLE, mainDockId);
+    ImGui::DockBuilderDockWindow(SCENE_WINDOW_TITLE, mainDockId);
+    ImGui::DockBuilderDockWindow(GAME_WINDOW_TITLE, gameDockId);
     ImGui::DockBuilderFinish(dockspaceId);
   }
 
@@ -719,6 +1209,10 @@ namespace hades
       workspaceTreeRoot_.reset();
       workspaceScriptFiles_.clear();
       workspaceScanError_.clear();
+      workspaceScriptListDirty_ = false;
+      scriptModTimes_.clear();
+      parsedFieldsCache_.clear();
+      parsedFieldsModTimes_.clear();
       nextWorkspaceScanTime_ = 0.0;
     }
 
@@ -732,6 +1226,22 @@ namespace hades
     std::string scanError;
     build_workspace_tree(activeWorkspacePath_, activeWorkspacePath_, rootNode, scriptFiles, &scanError);
     std::sort(scriptFiles.begin(), scriptFiles.end());
+    if (scriptFiles != workspaceScriptFiles_)
+    {
+      workspaceScriptListDirty_ = true;
+
+      std::unordered_map<std::string, std::filesystem::file_time_type> retainedModTimes;
+      retainedModTimes.reserve(scriptFiles.size());
+      for (const auto &relPath : scriptFiles)
+      {
+        const auto existing = scriptModTimes_.find(relPath);
+        if (existing != scriptModTimes_.end())
+        {
+          retainedModTimes.emplace(existing->first, existing->second);
+        }
+      }
+      scriptModTimes_ = std::move(retainedModTimes);
+    }
     workspaceTreeRoot_ = std::move(rootNode);
     workspaceScriptFiles_ = std::move(scriptFiles);
     workspaceScanError_ = std::move(scanError);
@@ -741,7 +1251,6 @@ namespace hades
   void Editor::invalidate_workspace_cache()
   {
     workspaceTreeRoot_.reset();
-    workspaceScriptFiles_.clear();
     workspaceScanError_.clear();
     nextWorkspaceScanTime_ = 0.0;
   }
@@ -753,6 +1262,21 @@ namespace hades
     workspaceCreateNameBuffer_.fill('\0');
     workspaceCreateError_.clear();
     openWorkspaceCreateDialog_ = true;
+  }
+
+  void Editor::request_workspace_item_import(const std::filesystem::path &destinationDirectory)
+  {
+    pendingWorkspaceImportParentPath_ = destinationDirectory;
+    workspaceImportSourcePathBuffer_.fill('\0');
+    workspaceImportError_.clear();
+    openWorkspaceImportDialog_ = true;
+  }
+
+  void Editor::request_workspace_item_deletion(const std::filesystem::path &targetPath)
+  {
+    pendingWorkspaceDeletePath_ = targetPath;
+    workspaceDeleteError_.clear();
+    openWorkspaceDeleteDialog_ = true;
   }
 
   void Editor::render_workspace_create_dialog()
@@ -818,33 +1342,203 @@ namespace hades
     ImGui::EndPopup();
   }
 
-  void Editor::render_workspace_tree_node(const WorkspaceTreeNode &node)
+  void Editor::render_workspace_import_dialog()
   {
-    const std::string label = path_display_name(node.path);
-    if (!node.directory)
+    if (openWorkspaceImportDialog_)
     {
-      ImGui::BulletText("%s", label.c_str());
+      ImGui::OpenPopup(WORKSPACE_IMPORT_POPUP_TITLE);
+      openWorkspaceImportDialog_ = false;
+    }
+
+    if (!ImGui::BeginPopupModal(WORKSPACE_IMPORT_POPUP_TITLE, nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    {
       return;
     }
 
+    ImGui::TextWrapped("Import a file into:");
+    ImGui::TextWrapped("%s", pendingWorkspaceImportParentPath_.string().c_str());
+    ImGui::InputText("Source File", workspaceImportSourcePathBuffer_.data(), workspaceImportSourcePathBuffer_.size());
+    ImGui::TextDisabled("The original file stays in place. The workspace receives a copy with the same name.");
+
+    if (ImGui::Button("Browse File..."))
+    {
+      std::string pickerError;
+      const auto pickedFile = hades::pick_file_with_native_dialog("Select a file to import", &pickerError);
+      if (pickedFile.has_value())
+      {
+        set_buffer_text(workspaceImportSourcePathBuffer_, pickedFile->string());
+        workspaceImportError_.clear();
+      }
+      else if (!pickerError.empty())
+      {
+        workspaceImportError_ = std::move(pickerError);
+      }
+    }
+
+    if (!workspaceImportError_.empty())
+    {
+      ImGui::TextColored(ImVec4(0.88f, 0.42f, 0.42f, 1.0f), "%s", workspaceImportError_.c_str());
+    }
+
+    const bool canImportFile = !trim(workspaceImportSourcePathBuffer_.data()).empty();
+    if (!canImportFile)
+    {
+      ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("Import"))
+    {
+      std::string errorMessage;
+      if (copy_file_to_directory(
+              std::filesystem::path(workspaceImportSourcePathBuffer_.data()),
+              pendingWorkspaceImportParentPath_,
+              nullptr,
+              &errorMessage))
+      {
+        workspaceImportError_.clear();
+        pendingWorkspaceImportParentPath_.clear();
+        invalidate_workspace_cache();
+        ImGui::CloseCurrentPopup();
+      }
+      else
+      {
+        workspaceImportError_ = std::move(errorMessage);
+      }
+    }
+    if (!canImportFile)
+    {
+      ImGui::EndDisabled();
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel"))
+    {
+      workspaceImportError_.clear();
+      pendingWorkspaceImportParentPath_.clear();
+      ImGui::CloseCurrentPopup();
+    }
+
+    ImGui::EndPopup();
+  }
+
+  void Editor::render_workspace_delete_dialog(
+      EntityManager &entityManager,
+      ComponentManager &componentManager)
+  {
+    if (openWorkspaceDeleteDialog_)
+    {
+      ImGui::OpenPopup(WORKSPACE_DELETE_POPUP_TITLE);
+      openWorkspaceDeleteDialog_ = false;
+    }
+
+    if (!ImGui::BeginPopupModal(WORKSPACE_DELETE_POPUP_TITLE, nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    {
+      return;
+    }
+
+    std::error_code errorCode;
+    const bool deletingDirectory = std::filesystem::is_directory(pendingWorkspaceDeletePath_, errorCode);
+
+    ImGui::TextWrapped(
+        "Delete this %s from the active workspace?",
+        deletingDirectory ? "folder" : "file");
+    ImGui::TextWrapped("%s", pendingWorkspaceDeletePath_.string().c_str());
+    if (deletingDirectory)
+    {
+      ImGui::TextDisabled("Folder deletion is recursive.");
+    }
+    ImGui::TextDisabled("Deleted C# scripts are removed from any script components that reference them.");
+
+    if (!workspaceDeleteError_.empty())
+    {
+      ImGui::TextColored(ImVec4(0.88f, 0.42f, 0.42f, 1.0f), "%s", workspaceDeleteError_.c_str());
+    }
+
+    if (ImGui::Button(workspace_delete_button_label(pendingWorkspaceDeletePath_).c_str()))
+    {
+      WorkspaceDeleteResult deleteResult;
+      std::string errorMessage;
+      if (delete_workspace_item(
+              activeWorkspacePath_,
+              pendingWorkspaceDeletePath_,
+              entityManager,
+              componentManager,
+              &deleteResult,
+              &errorMessage))
+      {
+        for (const auto &relativeScriptPath : deleteResult.removedScriptPaths)
+        {
+          scriptModTimes_.erase(relativeScriptPath);
+          const std::string pathKey = (activeWorkspacePath_ / relativeScriptPath).string();
+          parsedFieldsCache_.erase(pathKey);
+          parsedFieldsModTimes_.erase(pathKey);
+        }
+
+        workspaceDeleteError_.clear();
+        pendingWorkspaceDeletePath_.clear();
+        invalidate_workspace_cache();
+        ImGui::CloseCurrentPopup();
+      }
+      else
+      {
+        workspaceDeleteError_ = std::move(errorMessage);
+      }
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel"))
+    {
+      workspaceDeleteError_.clear();
+      pendingWorkspaceDeletePath_.clear();
+      ImGui::CloseCurrentPopup();
+    }
+
+    ImGui::EndPopup();
+  }
+
+  void Editor::render_workspace_tree_node(const WorkspaceTreeNode &node)
+  {
+    const std::string label = path_display_name(node.path);
     const std::string treeNodeId = label + "##" + node.path.string();
-    const ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick |
-                                     (node.children.empty() ? ImGuiTreeNodeFlags_Leaf : 0);
+    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow |
+                               ImGuiTreeNodeFlags_OpenOnDoubleClick |
+                               ImGuiTreeNodeFlags_SpanAvailWidth;
+    if (!node.directory || node.children.empty())
+    {
+      flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+    }
+
     const bool open = ImGui::TreeNodeEx(treeNodeId.c_str(), flags);
     if (ImGui::BeginPopupContextItem())
     {
+      const std::filesystem::path destinationDirectory =
+          node.directory ? node.path : node.path.parent_path();
+      const bool isWorkspaceRoot = node.path == activeWorkspacePath_;
+
       if (ImGui::MenuItem("New Folder"))
       {
-        request_workspace_item_creation(WorkspaceCreateKind::Folder, node.path);
+        request_workspace_item_creation(WorkspaceCreateKind::Folder, destinationDirectory);
       }
       if (ImGui::MenuItem("New Script"))
       {
-        request_workspace_item_creation(WorkspaceCreateKind::Script, node.path);
+        request_workspace_item_creation(WorkspaceCreateKind::Script, destinationDirectory);
+      }
+      if (ImGui::MenuItem("Import"))
+      {
+        request_workspace_item_import(destinationDirectory);
+      }
+
+      if (!isWorkspaceRoot)
+      {
+        ImGui::Separator();
+        if (ImGui::MenuItem(workspace_delete_button_label(node.path).c_str()))
+        {
+          request_workspace_item_deletion(node.path);
+        }
       }
       ImGui::EndPopup();
     }
 
-    if (!open)
+    if (!node.directory || !open || node.children.empty())
     {
       return;
     }
@@ -857,10 +1551,12 @@ namespace hades
     ImGui::TreePop();
   }
 
-  void Editor::workspace()
+  void Editor::workspace(EntityManager &entityManager, ComponentManager &componentManager)
   {
     ImGui::Begin(WORKSPACE_WINDOW_TITLE);
     render_workspace_create_dialog();
+    render_workspace_import_dialog();
+    render_workspace_delete_dialog(entityManager, componentManager);
 
     if (activeWorkspacePath_.empty())
     {
@@ -870,17 +1566,6 @@ namespace hades
     }
 
     ImGui::TextWrapped("%s", activeWorkspacePath_.string().c_str());
-    if (ImGui::Button("New Folder"))
-    {
-      request_workspace_item_creation(WorkspaceCreateKind::Folder, activeWorkspacePath_);
-    }
-
-    ImGui::SameLine();
-    if (ImGui::Button("New Script"))
-    {
-      request_workspace_item_creation(WorkspaceCreateKind::Script, activeWorkspacePath_);
-    }
-
     ImGui::Separator();
 
     if (!workspaceScanError_.empty())
@@ -908,9 +1593,101 @@ namespace hades
       {
         request_workspace_item_creation(WorkspaceCreateKind::Script, activeWorkspacePath_);
       }
+      if (ImGui::MenuItem("Import"))
+      {
+        request_workspace_item_import(activeWorkspacePath_);
+      }
       ImGui::EndPopup();
     }
     ImGui::End();
+  }
+
+  void Editor::ensure_world_state(EntityManager &entityManager, ComponentManager &componentManager)
+  {
+    const auto defaultWorld = normalize_default_world(entityManager, componentManager);
+    if (!defaultWorld.has_value())
+    {
+      const auto world = EntityFactory::createWorld(entityManager, componentManager, "World1", true);
+      load_world(world, componentManager);
+      state.playModeMessage.clear();
+      return;
+    }
+
+    if (!state.loadedWorld.has_value() || !componentManager.hasComponent<WorldComponent>(*state.loadedWorld))
+    {
+      load_world(*defaultWorld, componentManager);
+      return;
+    }
+
+    if (state.selectedEntity.has_value())
+    {
+      const auto selectedWorld = world_for_entity(*state.selectedEntity, componentManager);
+      if (!selectedWorld.has_value() || *selectedWorld != *state.loadedWorld)
+      {
+        state.selectedEntity = *state.loadedWorld;
+      }
+    }
+  }
+
+  Entity::EntityId Editor::create_world(EntityManager &entityManager, ComponentManager &componentManager)
+  {
+    const std::size_t worldIndex = find_world_entities(entityManager, componentManager).size() + 1U;
+    const bool shouldBeDefault = !find_default_world(entityManager, componentManager).has_value();
+    const auto world = EntityFactory::createWorld(
+        entityManager,
+        componentManager,
+        "World" + std::to_string(worldIndex),
+        shouldBeDefault);
+    if (shouldBeDefault)
+    {
+      set_default_world(world, entityManager, componentManager);
+    }
+
+    load_world(world, componentManager);
+    state.playModeMessage.clear();
+    return world;
+  }
+
+  void Editor::load_world(Entity::EntityId world, ComponentManager &componentManager)
+  {
+    state.loadedWorld = world;
+    state.selectedEntity = world;
+  }
+
+  void Editor::set_default_world(
+      Entity::EntityId world,
+      EntityManager &entityManager,
+      ComponentManager &componentManager)
+  {
+    hades::set_default_world(entityManager, componentManager, world);
+    state.playModeMessage.clear();
+  }
+
+  void Editor::request_entity_creation(EditorEntityPreset preset, Entity::EntityId parent)
+  {
+    state.selectedEntity = parent;
+    state.pendingEntityPreset = preset;
+  }
+
+  void Editor::request_model_import(Entity::EntityId parent)
+  {
+    state.selectedEntity = parent;
+    if (importModelPathBuffer[0] == '\0')
+    {
+      std::snprintf(
+          importModelPathBuffer.data(),
+          importModelPathBuffer.size(),
+          "%s",
+          "src/tests/backpack/12305_backpack_v2_l3.obj");
+    }
+
+    importModelError.clear();
+    openImportModelDialog = true;
+  }
+
+  void Editor::request_entity_deletion(Entity::EntityId entity)
+  {
+    pendingEntityDeletion_ = entity;
   }
 
   void Editor::handle_entity_creation_requests(EntityManager &entityManager, ComponentManager &componentManager)
@@ -920,7 +1697,7 @@ namespace hades
       return;
     }
 
-    const auto parent = get_selected_parent(componentManager);
+    const auto parent = get_selected_parent(entityManager, componentManager);
     Entity::EntityId createdEntity = Entity::INVALID;
 
     switch (state.pendingEntityPreset)
@@ -947,6 +1724,72 @@ namespace hades
     state.pendingEntityPreset = EditorEntityPreset::None;
   }
 
+  void Editor::handle_entity_deletion_requests(
+      EntityManager &entityManager,
+      ComponentManager &componentManager,
+      ScriptRuntime &scriptRuntime)
+  {
+    if (!pendingEntityDeletion_.has_value())
+    {
+      return;
+    }
+
+    const Entity::EntityId entity = *pendingEntityDeletion_;
+    pendingEntityDeletion_.reset();
+
+    if (!componentManager.hasComponent<TransformHierarchyComponent>(entity))
+    {
+      return;
+    }
+
+    if (state.isPlaying)
+    {
+      stop_play_mode(scriptRuntime);
+      state.playModeMessage = "Play mode stopped because an entity hierarchy was deleted.";
+    }
+
+    const auto hierarchy = componentManager.getComponent<TransformHierarchyComponent>(entity);
+    const std::optional<Entity::EntityId> fallbackParent =
+        hierarchy.parent.has_value() &&
+                componentManager.hasComponent<TransformHierarchyComponent>(*hierarchy.parent)
+            ? hierarchy.parent
+            : std::nullopt;
+    const bool deletedSelectedEntity =
+        state.selectedEntity.has_value() &&
+        hierarchy_contains_entity(entity, *state.selectedEntity, componentManager);
+    const bool deletedLoadedWorld =
+        state.loadedWorld.has_value() &&
+        hierarchy_contains_entity(entity, *state.loadedWorld, componentManager);
+
+    destroy_entity_subtree(entity, entityManager, componentManager);
+
+    const auto defaultWorld = normalize_default_world(entityManager, componentManager);
+    if (deletedLoadedWorld || !state.loadedWorld.has_value() ||
+        !componentManager.hasComponent<WorldComponent>(*state.loadedWorld))
+    {
+      if (defaultWorld.has_value())
+      {
+        load_world(*defaultWorld, componentManager);
+      }
+      else
+      {
+        state.loadedWorld.reset();
+        state.selectedEntity.reset();
+      }
+    }
+    else if (deletedSelectedEntity)
+    {
+      if (fallbackParent.has_value())
+      {
+        state.selectedEntity = fallbackParent;
+      }
+      else
+      {
+        state.selectedEntity = state.loadedWorld;
+      }
+    }
+  }
+
   void Editor::import_model(EntityManager &entityManager, ComponentManager &componentManager)
   {
     if (openImportModelDialog)
@@ -971,7 +1814,7 @@ namespace hades
     if (ImGui::Button("Import"))
     {
       std::string errorMessage;
-      const auto parent = get_selected_parent(componentManager);
+      const auto parent = get_selected_parent(entityManager, componentManager);
       const auto createdEntity = EntityFactory::createImportedModel(
           entityManager,
           componentManager,
@@ -1026,25 +1869,36 @@ namespace hades
       ComponentManager &componentManager,
       ScriptRuntime &scriptRuntime)
   {
-    const auto selection = select_main_camera(entityManager, componentManager);
+    const auto startupWorld = normalize_default_world(entityManager, componentManager);
+    if (!startupWorld.has_value())
+    {
+      state.isPlaying = false;
+      state.activeWorld.reset();
+      state.activeCamera.reset();
+      return;
+    }
+
+    const auto selection = select_main_camera(entityManager, componentManager, startupWorld);
     if (selection.status != MainCameraSelectionStatus::Ready || !selection.entity.has_value())
     {
       state.isPlaying = false;
+      state.activeWorld.reset();
       state.activeCamera.reset();
-      state.playModeMessage = main_camera_selection_message(selection.status);
       return;
     }
 
     std::string scriptError;
-    if (!scriptRuntime.start(componentManager, entityManager, activeWorkspacePath_, &scriptError))
+    if (!scriptRuntime.start(componentManager, entityManager, activeWorkspacePath_, startupWorld, &scriptError))
     {
       state.isPlaying = false;
+      state.activeWorld.reset();
       state.activeCamera.reset();
       state.playModeMessage = scriptError;
       return;
     }
 
     state.isPlaying = true;
+    state.activeWorld = startupWorld;
     state.activeCamera = selection.entity;
     state.playModeMessage.clear();
   }
@@ -1053,15 +1907,22 @@ namespace hades
   {
     scriptRuntime.stop();
     state.isPlaying = false;
+    state.activeWorld.reset();
     state.activeCamera.reset();
     state.playModeMessage.clear();
   }
 
   void Editor::set_main_camera(Entity::EntityId entity, EntityManager &entityManager, ComponentManager &componentManager)
   {
+    const auto targetWorld = world_for_entity(entity, componentManager);
     for (Entity::EntityId current : entityManager.getAllEntities())
     {
       if (!componentManager.hasComponent<CameraComponent>(current))
+      {
+        continue;
+      }
+
+      if (targetWorld.has_value() && world_for_entity(current, componentManager) != targetWorld)
       {
         continue;
       }
@@ -1071,42 +1932,122 @@ namespace hades
     }
   }
 
-  std::optional<Entity::EntityId> Editor::get_selected_parent(ComponentManager &componentManager) const
+  std::optional<Entity::EntityId> Editor::get_selected_parent(
+      EntityManager &entityManager,
+      ComponentManager &componentManager) const
   {
-    if (!state.selectedEntity.has_value())
+    if (state.selectedEntity.has_value() &&
+        componentManager.hasComponent<TransformHierarchyComponent>(*state.selectedEntity))
     {
-      return std::nullopt;
+      const auto selectedWorld = world_for_entity(*state.selectedEntity, componentManager);
+      if (selectedWorld.has_value() &&
+          state.loadedWorld.has_value() &&
+          *selectedWorld == *state.loadedWorld)
+      {
+        return state.selectedEntity;
+      }
     }
 
-    if (!componentManager.hasComponent<TransformHierarchyComponent>(*state.selectedEntity))
+    if (state.loadedWorld.has_value())
     {
-      return std::nullopt;
+      return state.loadedWorld;
     }
 
-    return state.selectedEntity;
+    return find_default_world(entityManager, componentManager);
   }
 
   std::string Editor::entity_label(Entity::EntityId entity, ComponentManager &componentManager) const
   {
-    std::string name = "Entity";
-    if (componentManager.hasComponent<NameComponent>(entity))
-    {
-      name = componentManager.getComponent<NameComponent>(entity).value;
-    }
-
-    if (componentManager.hasComponent<CameraComponent>(entity) &&
-        componentManager.getComponent<CameraComponent>(entity).isMainCamera)
-    {
-      name += " [Main]";
-    }
-
-    return name + " (" + std::to_string(entity) + ")";
+    return entity_display_label(entity, componentManager);
   }
 
   void Editor::entities(EntityManager &entityManager, ComponentManager &componentManager)
   {
     ImGui::Begin(ENTITY_WINDOW_TITLE);
+
     render_hierarchies(entityManager, componentManager);
+
+    ImGui::End();
+  }
+
+  void Editor::scene(EntityManager &entityManager, ComponentManager &componentManager)
+  {
+    ImGui::Begin(SCENE_WINDOW_TITLE);
+
+    const auto sceneWorld = state.isPlaying
+                                ? state.activeWorld
+                                : (state.loadedWorld.has_value() &&
+                                           componentManager.hasComponent<WorldComponent>(*state.loadedWorld)
+                                       ? state.loadedWorld
+                                       : normalize_default_world(entityManager, componentManager));
+
+    if (sceneWorld.has_value())
+    {
+      ImGui::TextDisabled(
+          "%s: %s",
+          state.isPlaying ? "Active World" : "Loaded World",
+          entity_label(*sceneWorld, componentManager).c_str());
+    }
+    else
+    {
+      ImGui::TextDisabled("No world is loaded.");
+    }
+
+    if (!sceneWorld.has_value())
+    {
+      ImGui::End();
+      return;
+    }
+
+    const PositionComponent3D cameraPosition = editor_scene_camera_position();
+    const CameraComponent camera = editor_scene_camera();
+
+    ImGui::Spacing();
+    const ImVec2 canvasSize = ImGui::GetContentRegionAvail();
+    if (canvasSize.x < 64.0f || canvasSize.y < 64.0f)
+    {
+      ImGui::End();
+      return;
+    }
+
+    const ImVec2 canvasOrigin = ImGui::GetCursorScreenPos();
+    const ImVec2 canvasMax(canvasOrigin.x + canvasSize.x, canvasOrigin.y + canvasSize.y);
+    ImGui::InvisibleButton("scene_canvas", canvasSize);
+
+    ImDrawList *drawList = ImGui::GetWindowDrawList();
+    drawList->AddRectFilled(canvasOrigin, canvasMax, IM_COL32(17, 20, 24, 255));
+    drawList->AddRect(canvasOrigin, canvasMax, IM_COL32(70, 76, 86, 255));
+    drawList->PushClipRect(canvasOrigin, canvasMax, true);
+
+    if (!state.isPlaying)
+    {
+      draw_editor_grid(drawList, cameraPosition, camera, canvasOrigin, canvasSize);
+    }
+
+    const int visibleRenderableCount = draw_world_preview(
+        drawList,
+        cameraPosition,
+        camera,
+        canvasOrigin,
+        canvasSize,
+        entityManager,
+        componentManager,
+        sceneWorld,
+        std::nullopt);
+
+    if (visibleRenderableCount == 0)
+    {
+      const char *message = "No cubes or imported models from the loaded world are visible in the scene.";
+      const ImVec2 textSize = ImGui::CalcTextSize(message);
+      drawList->AddText(
+          ImVec2(
+              canvasOrigin.x + (canvasSize.x * 0.5f) - (textSize.x * 0.5f),
+              canvasOrigin.y + (canvasSize.y * 0.5f) - (textSize.y * 0.5f)),
+          IM_COL32(120, 128, 142, 255),
+          message);
+    }
+
+    drawList->PopClipRect();
     ImGui::End();
   }
 
@@ -1116,76 +2057,34 @@ namespace hades
 
     if (!state.selectedEntity.has_value())
     {
-      render_selection_hint("Select an entity to edit its properties.");
+      render_selection_hint("Select a world or entity to edit its properties.");
       ImGui::End();
       return;
     }
 
     const Entity::EntityId entity = *state.selectedEntity;
-    ImGui::Text("Entity %u", entity);
+    const bool isWorld = componentManager.hasComponent<WorldComponent>(entity);
+    ImGui::Text("%s %u", isWorld ? "World" : "Entity", entity);
     if (componentManager.hasComponent<NameComponent>(entity))
     {
-      ImGui::TextDisabled("%s", componentManager.getComponent<NameComponent>(entity).value.c_str());
+      auto &name = componentManager.getComponent<NameComponent>(entity);
+      std::array<char, 128> nameBuffer{};
+      std::snprintf(nameBuffer.data(), nameBuffer.size(), "%s", name.value.c_str());
+      if (ImGui::InputText("Name", nameBuffer.data(), nameBuffer.size()))
+      {
+        name.value = nameBuffer.data();
+      }
     }
-    ImGui::Separator();
-
-    std::size_t componentTypeCount = 0;
-    componentTypeCount += componentManager.hasComponent<NameComponent>(entity) ? 1U : 0U;
-    componentTypeCount += componentManager.hasComponent<TransformHierarchyComponent>(entity) ? 1U : 0U;
-    componentTypeCount += componentManager.hasComponent<PositionComponent3D>(entity) ? 1U : 0U;
-    componentTypeCount += componentManager.hasComponent<CameraComponent>(entity) ? 1U : 0U;
-    componentTypeCount += componentManager.hasComponent<AudioListenerComponent>(entity) ? 1U : 0U;
-    componentTypeCount += componentManager.hasComponent<PrimitiveComponent>(entity) ? 1U : 0U;
-    componentTypeCount += componentManager.hasComponent<AudioSourceComponent>(entity) ? 1U : 0U;
-    componentTypeCount += componentManager.hasComponent<ModelComponent>(entity) ? 1U : 0U;
-    componentTypeCount += componentManager.hasComponent<RenderComponent>(entity) ? 1U : 0U;
-    componentTypeCount += componentManager.hasComponent<ScriptComponent>(entity) ? 1U : 0U;
-
-    ImGui::Text("Component Types: %zu", componentTypeCount);
-    if (componentManager.hasComponent<ScriptComponent>(entity))
+    else
     {
-      const auto &scriptComponent = componentManager.getComponent<ScriptComponent>(entity);
-      ImGui::Text("Script Components: %zu", scriptComponent.attachments.size());
+      ImGui::TextDisabled("Unnamed");
     }
 
-    if (componentManager.hasComponent<TransformHierarchyComponent>(entity))
+    if (isWorld)
     {
-      const auto &hierarchy = componentManager.getComponent<TransformHierarchyComponent>(entity);
-      ImGui::Separator();
-      ImGui::TextUnformatted("Hierarchy");
-
-      if (hierarchy.parent.has_value())
-      {
-        const Entity::EntityId parent = *hierarchy.parent;
-        if (ImGui::Selectable(entity_label(parent, componentManager).c_str(), false))
-        {
-          state.selectedEntity = parent;
-        }
-      }
-      else
-      {
-        ImGui::TextDisabled("Parent: Root");
-      }
-
-      if (hierarchy.children.empty())
-      {
-        ImGui::TextDisabled("No child entities.");
-      }
-      else
-      {
-        ImGui::Text("Children (%zu)", hierarchy.children.size());
-        for (const Entity::EntityId child : hierarchy.children)
-        {
-          if (ImGui::Selectable(entity_label(child, componentManager).c_str(), false))
-          {
-            state.selectedEntity = child;
-          }
-        }
-      }
+      const auto &world = componentManager.getComponent<WorldComponent>(entity);
+      ImGui::Text("Startup World: %s", world.isDefault ? "Yes" : "No");
     }
-
-    ImGui::Separator();
-    ImGui::TextDisabled("Expand attached components in the Components panel to edit their details.");
 
     ImGui::End();
   }
@@ -1196,20 +2095,25 @@ namespace hades
 
     if (!state.selectedEntity.has_value())
     {
-      render_selection_hint("Select an entity to inspect its components.");
+      render_selection_hint("Select a world or entity to inspect its components.");
       ImGui::End();
       return;
     }
 
     const Entity::EntityId entity = *state.selectedEntity;
+    const bool isWorld = componentManager.hasComponent<WorldComponent>(entity);
 
-    ImGui::Text("Entity %u", entity);
+    ImGui::Text("%s %u", isWorld ? "World" : "Entity", entity);
     if (componentManager.hasComponent<NameComponent>(entity))
     {
       ImGui::TextDisabled("%s", componentManager.getComponent<NameComponent>(entity).value.c_str());
     }
     ImGui::Separator();
 
+    if (isWorld)
+    {
+      ImGui::BeginDisabled();
+    }
     if (ImGui::Button("Add Script Component"))
     {
       if (!componentManager.hasComponent<ScriptComponent>(entity))
@@ -1223,19 +2127,30 @@ namespace hades
         componentManager.getComponent<ScriptComponent>(entity).attachments.push_back(ScriptAttachment());
       }
     }
+    if (isWorld)
+    {
+      ImGui::EndDisabled();
+    }
 
     ImGui::SameLine();
-    ImGui::TextDisabled("Expand a component to inspect or edit it.");
+    ImGui::TextDisabled(
+        "%s",
+        isWorld
+            ? "World roots own child entities and startup settings."
+            : "Expand a component to inspect or edit it.");
     ImGui::Separator();
 
-    if (componentManager.hasComponent<NameComponent>(entity) && ImGui::CollapsingHeader("Name"))
+    if (componentManager.hasComponent<WorldComponent>(entity) && ImGui::CollapsingHeader("World", ImGuiTreeNodeFlags_DefaultOpen))
     {
-      auto &name = componentManager.getComponent<NameComponent>(entity);
-      std::array<char, 128> nameBuffer{};
-      std::snprintf(nameBuffer.data(), nameBuffer.size(), "%s", name.value.c_str());
-      if (ImGui::InputText("Name", nameBuffer.data(), nameBuffer.size()))
+      const auto &world = componentManager.getComponent<WorldComponent>(entity);
+      ImGui::TextDisabled(
+          "%s",
+          world.isDefault
+              ? "This is the startup world used when Play begins."
+              : "This world stays inactive until it is chosen as the startup world.");
+      if (!world.isDefault && ImGui::Button("Set As Default World"))
       {
-        name.value = nameBuffer.data();
+        set_default_world(entity, entityManager, componentManager);
       }
     }
 
@@ -1408,7 +2323,7 @@ namespace hades
       }
       else
       {
-        ImGui::TextDisabled("Parent: Root");
+        ImGui::TextDisabled("%s", isWorld ? "World Root" : "Parent: Root");
       }
 
       if (hierarchy.children.empty())
@@ -1594,9 +2509,6 @@ namespace hades
         scriptComponent.attachments.erase(scriptComponent.attachments.begin() + static_cast<std::ptrdiff_t>(*removeAttachmentIndex));
       }
 
-      ImGui::TextDisabled("Scripts compile when Play starts using dotnet and must derive from Hades.Scripting.HadesScript.");
-      ImGui::TextDisabled("Relative script paths resolve from the active workspace folder.");
-
       if (backgroundCompileInProgress_)
       {
         ImGui::TextDisabled("Compiling scripts...");
@@ -1625,6 +2537,8 @@ namespace hades
   {
     ImGui::Begin(GAME_WINDOW_TITLE);
 
+    const auto activeWorld = state.isPlaying ? state.activeWorld : normalize_default_world(entityManager, componentManager);
+
     if (ImGui::Button(state.isPlaying ? "Stop" : "Play"))
     {
       if (state.isPlaying)
@@ -1637,16 +2551,13 @@ namespace hades
       }
     }
 
-    if (state.isPlaying && state.activeCamera.has_value())
+    if (activeWorld.has_value())
     {
       ImGui::SameLine();
-      ImGui::Text("Active Camera: %s", entity_label(*state.activeCamera, componentManager).c_str());
-    }
-    else
-    {
-      const auto selection = select_main_camera(entityManager, componentManager);
-      ImGui::SameLine();
-      ImGui::TextDisabled("%s", main_camera_selection_message(selection.status));
+      ImGui::TextDisabled(
+          "%s: %s",
+          state.isPlaying ? "Active World" : "Default World",
+          entity_label(*activeWorld, componentManager).c_str());
     }
 
     if (!state.playModeMessage.empty())
@@ -1654,13 +2565,30 @@ namespace hades
       ImGui::TextColored(ImVec4(0.88f, 0.42f, 0.42f, 1.0f), "%s", state.playModeMessage.c_str());
     }
 
-    if (!state.isPlaying || !state.activeCamera.has_value())
+    if (!state.isPlaying)
     {
       ImGui::Spacing();
-      ImGui::TextWrapped("Play mode uses the camera marked as Main Camera and starts from that view.");
+      if (!activeWorld.has_value())
+      {
+        ImGui::TextDisabled("No startup world is available.");
+      }
+      else
+      {
+        const auto selection = select_main_camera(entityManager, componentManager, activeWorld);
+        ImGui::TextDisabled("%s", main_camera_selection_message(selection.status));
+      }
       ImGui::End();
       return;
     }
+
+    if (!activeWorld.has_value() || !state.activeCamera.has_value())
+    {
+      ImGui::TextDisabled("Play mode has no active world or camera.");
+      ImGui::End();
+      return;
+    }
+
+    ImGui::Text("Active Camera: %s", entity_label(*state.activeCamera, componentManager).c_str());
 
     const Entity::EntityId cameraEntity = *state.activeCamera;
     if (!componentManager.hasComponent<CameraComponent>(cameraEntity) ||
@@ -1692,82 +2620,23 @@ namespace hades
     ImDrawList *drawList = ImGui::GetWindowDrawList();
     drawList->AddRectFilled(canvasOrigin, canvasMax, IM_COL32(17, 20, 24, 255));
     drawList->AddRect(canvasOrigin, canvasMax, IM_COL32(70, 76, 86, 255));
-
-    const ImVec2 canvasCenter(canvasOrigin.x + (canvasSize.x * 0.5f), canvasOrigin.y + (canvasSize.y * 0.5f));
-    drawList->AddLine(
-        ImVec2(canvasCenter.x - 8.0f, canvasCenter.y),
-        ImVec2(canvasCenter.x + 8.0f, canvasCenter.y),
-        IM_COL32(90, 96, 110, 160),
-        1.0f);
-    drawList->AddLine(
-        ImVec2(canvasCenter.x, canvasCenter.y - 8.0f),
-        ImVec2(canvasCenter.x, canvasCenter.y + 8.0f),
-        IM_COL32(90, 96, 110, 160),
-        1.0f);
-
     drawList->PushClipRect(canvasOrigin, canvasMax, true);
 
-    static constexpr int cubeEdges[12][2] = {
-        {0, 1}, {1, 2}, {2, 3}, {3, 0},
-        {4, 5}, {5, 6}, {6, 7}, {7, 4},
-        {0, 4}, {1, 5}, {2, 6}, {3, 7},
-    };
+    const int visibleRenderableCount = draw_world_preview(
+        drawList,
+        cameraPosition,
+        camera,
+        canvasOrigin,
+        canvasSize,
+        entityManager,
+        componentManager,
+        activeWorld,
+        cameraEntity);
 
-    int visiblePrimitiveCount = 0;
-    for (Entity::EntityId entity : entityManager.getAllEntities())
+    if (visibleRenderableCount == 0)
     {
-      if (entity == cameraEntity ||
-          !componentManager.hasComponent<PrimitiveComponent>(entity) ||
-          !componentManager.hasComponent<PositionComponent3D>(entity))
-      {
-        continue;
-      }
-
-      const auto &primitive = componentManager.getComponent<PrimitiveComponent>(entity);
-      if (primitive.type != PrimitiveType::Cube)
-      {
-        continue;
-      }
-
-      const auto &position = componentManager.getComponent<PositionComponent3D>(entity);
-      const auto corners = cube_corners(position);
-      std::array<ImVec2, 8> projectedCorners{};
-
-      bool isVisible = true;
-      for (std::size_t i = 0; i < corners.size(); ++i)
-      {
-        if (!project_point(corners[i], cameraPosition, camera, canvasOrigin, canvasSize, projectedCorners[i]))
-        {
-          isVisible = false;
-          break;
-        }
-      }
-
-      if (!isVisible)
-      {
-        continue;
-      }
-
-      ++visiblePrimitiveCount;
-      for (const auto &edge : cubeEdges)
-      {
-        drawList->AddLine(projectedCorners[edge[0]], projectedCorners[edge[1]], IM_COL32(223, 228, 235, 255), 1.5f);
-      }
-
-      ImVec2 centerPoint;
-      if (project_point(make_vec3(position), cameraPosition, camera, canvasOrigin, canvasSize, centerPoint))
-      {
-        const std::string label = entity_label(entity, componentManager);
-        drawList->AddText(
-            ImVec2(centerPoint.x + 6.0f, centerPoint.y + 6.0f),
-            IM_COL32(205, 210, 218, 255),
-            label.c_str());
-      }
-    }
-
-    if (visiblePrimitiveCount == 0)
-    {
-      const char *message = "No primitives are visible from the active camera.";
+      const char *message = "No cubes or imported models from the active world are visible from the active camera.";
+      const ImVec2 canvasCenter(canvasOrigin.x + (canvasSize.x * 0.5f), canvasOrigin.y + (canvasSize.y * 0.5f));
       const ImVec2 textSize = ImGui::CalcTextSize(message);
       drawList->AddText(
           ImVec2(canvasCenter.x - (textSize.x * 0.5f), canvasCenter.y - (textSize.y * 0.5f)),
@@ -1779,7 +2648,10 @@ namespace hades
     ImGui::End();
   }
 
-  void Editor::render_hierarchy(Entity::EntityId entity, ComponentManager &componentManager)
+  void Editor::render_hierarchy(
+      Entity::EntityId entity,
+      EntityManager &entityManager,
+      ComponentManager &componentManager)
   {
     if (!componentManager.hasComponent<TransformHierarchyComponent>(entity))
     {
@@ -1801,17 +2673,53 @@ namespace hades
 
     const std::string label = entity_label(entity, componentManager);
     ImGui::PushID(static_cast<int>(entity));
+    if (componentManager.hasComponent<WorldComponent>(entity))
+    {
+      ImGui::SetNextItemOpen(true, ImGuiCond_Once);
+    }
     const bool open = ImGui::TreeNodeEx("entity", flags, "%s", label.c_str());
     if (ImGui::IsItemClicked())
     {
       state.selectedEntity = entity;
     }
 
+    if (ImGui::BeginPopupContextItem())
+    {
+      if (ImGui::BeginMenu("Add Child"))
+      {
+        if (ImGui::MenuItem("Camera"))
+        {
+          request_entity_creation(EditorEntityPreset::Camera, entity);
+        }
+        if (ImGui::MenuItem("Cube"))
+        {
+          request_entity_creation(EditorEntityPreset::Cube, entity);
+        }
+        if (ImGui::MenuItem("Audio Emitter"))
+        {
+          request_entity_creation(EditorEntityPreset::AudioEmitter, entity);
+        }
+        if (ImGui::MenuItem("Import Model..."))
+        {
+          request_model_import(entity);
+        }
+        ImGui::EndMenu();
+      }
+
+      ImGui::Separator();
+      if (ImGui::MenuItem("Delete Entity and Children"))
+      {
+        request_entity_deletion(entity);
+      }
+
+      ImGui::EndPopup();
+    }
+
     if (open && !hierarchy.children.empty())
     {
       for (const auto &child : hierarchy.children)
       {
-        render_hierarchy(child, componentManager);
+        render_hierarchy(child, entityManager, componentManager);
       }
       ImGui::TreePop();
     }
@@ -1821,19 +2729,15 @@ namespace hades
 
   void Editor::render_hierarchies(EntityManager &entityManager, ComponentManager &componentManager)
   {
-    for (Entity::EntityId entity : entityManager.getAllEntities())
-    {
-      if (!componentManager.hasComponent<TransformHierarchyComponent>(entity))
-      {
-        continue;
-      }
+    (void)entityManager;
 
-      const auto &hierarchy = componentManager.getComponent<TransformHierarchyComponent>(entity);
-      if (!hierarchy.hasParent())
-      {
-        render_hierarchy(entity, componentManager);
-      }
+    if (!state.loadedWorld.has_value() || !componentManager.hasComponent<WorldComponent>(*state.loadedWorld))
+    {
+      render_selection_hint("Load a world from the Worlds menu.");
+      return;
     }
+
+    render_hierarchy(*state.loadedWorld, entityManager, componentManager);
   }
 
   void Editor::debug(float deltaTime)

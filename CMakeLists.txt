@@ -76,6 +76,7 @@ endif()
 
 set(TEST_SUPPORT_SOURCES
   src/editor/workspace_manager.cpp
+  src/editor/workspace_file_operations.cpp
   src/engine/assets/model_importer.cpp
   src/engine/components/position_component_3d.cpp
   src/engine/components/transform_hierarchy_component.cpp
