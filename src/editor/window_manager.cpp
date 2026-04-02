@@ -1,11 +1,25 @@
 #include "window_manager.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
+#include <system_error>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <shobjidl.h>
+#else
+#include <sys/wait.h>
+#endif
 
 #include <SDL.h>
 
@@ -21,13 +35,11 @@
 namespace
 {
   constexpr char EDITOR_WINDOW_TITLE[] = "Hades Editor";
+  constexpr char WORKSPACE_HISTORY_FILENAME[] = "recent_workspaces.txt";
   constexpr char LOGO_ASSET_PATH[] = "assets/logo.bmp";
   constexpr int EDITOR_WINDOW_WIDTH = 1280;
   constexpr int EDITOR_WINDOW_HEIGHT = 720;
-  constexpr int SPLASH_WINDOW_SIZE = 360;
-  constexpr int SPLASH_WINDOW_PADDING = 28;
-  constexpr std::uint32_t SPLASH_MINIMUM_DURATION_MS = 450;
-  constexpr std::uint32_t SPLASH_FADE_DURATION_MS = 180;
+  constexpr int WORKSPACE_LOGO_MAX_SIZE = 160;
 
   using SdlStringPtr = std::unique_ptr<char, decltype(&SDL_free)>;
   using SurfacePtr = std::unique_ptr<SDL_Surface, decltype(&SDL_FreeSurface)>;
@@ -63,163 +75,369 @@ namespace
     }
   }
 
-  SDL_Rect centered_destination_rect(
-      int source_width,
-      int source_height,
-      int destination_width,
-      int destination_height,
-      int padding)
+  std::filesystem::path fallback_preferences_directory()
   {
-    const int available_width = std::max(destination_width - (padding * 2), 1);
-    const int available_height = std::max(destination_height - (padding * 2), 1);
-    const double scale = std::min(
-        static_cast<double>(available_width) / static_cast<double>(source_width),
-        static_cast<double>(available_height) / static_cast<double>(source_height));
+#ifdef _WIN32
+    const char *appData = std::getenv("APPDATA");
+    if (appData != nullptr && appData[0] != '\0')
+    {
+      return std::filesystem::path(appData) / "Hades";
+    }
+#else
+    const char *home = std::getenv("HOME");
+    if (home != nullptr && home[0] != '\0')
+    {
+      return std::filesystem::path(home) / ".config" / "hades";
+    }
+#endif
 
-    const int scaled_width = std::max(static_cast<int>(std::lround(source_width * scale)), 1);
-    const int scaled_height = std::max(static_cast<int>(std::lround(source_height * scale)), 1);
+    std::error_code errorCode;
+    const std::filesystem::path tempDirectory = std::filesystem::temp_directory_path(errorCode);
+    if (!errorCode)
+    {
+      return tempDirectory / "hades";
+    }
 
-    return SDL_Rect{
-        (destination_width - scaled_width) / 2,
-        (destination_height - scaled_height) / 2,
-        scaled_width,
-        scaled_height};
+    return std::filesystem::path("hades");
   }
 
-  struct SplashScreen
+  std::filesystem::path workspace_history_path()
   {
-    ~SplashScreen()
+    SdlStringPtr pref_path(SDL_GetPrefPath("Hades", "Editor"), SDL_free);
+    if (pref_path)
     {
-      if (window != nullptr)
-      {
-        SDL_DestroyWindow(window);
-      }
+      return std::filesystem::path(pref_path.get()) / WORKSPACE_HISTORY_FILENAME;
     }
 
-    bool show(SDL_Surface *logo_surface)
+    return fallback_preferences_directory() / WORKSPACE_HISTORY_FILENAME;
+  }
+
+  std::string trim_copy(const std::string &value)
+  {
+    std::size_t first = 0;
+    while (first < value.size() && std::isspace(static_cast<unsigned char>(value[first])) != 0)
     {
-      if (logo_surface == nullptr)
-      {
-        return true;
-      }
-
-      window = SDL_CreateWindow(
-          "Hades",
-          SDL_WINDOWPOS_CENTERED,
-          SDL_WINDOWPOS_CENTERED,
-          SPLASH_WINDOW_SIZE,
-          SPLASH_WINDOW_SIZE,
-          SDL_WINDOW_BORDERLESS | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_SKIP_TASKBAR | SDL_WINDOW_ALWAYS_ON_TOP);
-      if (window == nullptr)
-      {
-        std::fprintf(stderr, "Warning: SDL_CreateWindow() for splash failed: %s\n", SDL_GetError());
-        return true;
-      }
-
-      SDL_Surface *window_surface = SDL_GetWindowSurface(window);
-      if (window_surface == nullptr)
-      {
-        std::fprintf(stderr, "Warning: SDL_GetWindowSurface() for splash failed: %s\n", SDL_GetError());
-        return true;
-      }
-
-      const Uint32 background = SDL_MapRGB(window_surface->format, 0, 0, 0);
-      SDL_FillRect(window_surface, nullptr, background);
-
-      SDL_Rect destination = centered_destination_rect(
-          logo_surface->w,
-          logo_surface->h,
-          window_surface->w,
-          window_surface->h,
-          SPLASH_WINDOW_PADDING);
-      SDL_BlitScaled(logo_surface, nullptr, window_surface, &destination);
-      SDL_UpdateWindowSurface(window);
-
-      shown_at = SDL_GetTicks();
-      pump_events();
-      return !cancelled;
+      ++first;
     }
 
-    bool finish()
+    std::size_t last = value.size();
+    while (last > first && std::isspace(static_cast<unsigned char>(value[last - 1])) != 0)
     {
-      if (window == nullptr)
-      {
-        return !cancelled;
-      }
-
-      const std::uint32_t elapsed = SDL_GetTicks() - shown_at;
-      if (elapsed < SPLASH_MINIMUM_DURATION_MS)
-      {
-        wait_with_event_pump(SPLASH_MINIMUM_DURATION_MS - elapsed);
-      }
-
-      if (cancelled)
-      {
-        return false;
-      }
-
-      const Uint32 fade_started_at = SDL_GetTicks();
-      const bool opacity_supported = (SDL_SetWindowOpacity(window, 1.0f) == 0);
-      if (!opacity_supported)
-      {
-        wait_with_event_pump(SPLASH_FADE_DURATION_MS);
-        return !cancelled;
-      }
-
-      while (!cancelled)
-      {
-        const std::uint32_t fade_elapsed = SDL_GetTicks() - fade_started_at;
-        const float progress = std::min(
-            static_cast<float>(fade_elapsed) / static_cast<float>(SPLASH_FADE_DURATION_MS),
-            1.0f);
-
-        SDL_SetWindowOpacity(window, 1.0f - progress);
-        if (progress >= 1.0f)
-        {
-          break;
-        }
-
-        pump_events();
-        SDL_Delay(16);
-      }
-
-      return !cancelled;
+      --last;
     }
 
-  private:
-    void wait_with_event_pump(std::uint32_t duration_ms)
+    return value.substr(first, last - first);
+  }
+
+  template <std::size_t Size>
+  void set_buffer_text(std::array<char, Size> &buffer, const std::string &value)
+  {
+    buffer.fill('\0');
+    const std::size_t copyLength = std::min(value.size(), Size - 1);
+    std::copy_n(value.data(), copyLength, buffer.data());
+    buffer[copyLength] = '\0';
+  }
+
+#ifdef _WIN32
+  std::optional<std::filesystem::path> pick_folder_with_native_dialog(std::string *errorMessage)
+  {
+    HRESULT initializeResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    const bool shouldUninitialize = SUCCEEDED(initializeResult);
+    if (FAILED(initializeResult) && initializeResult != RPC_E_CHANGED_MODE)
     {
-      const Uint32 started_at = SDL_GetTicks();
-      while (!cancelled && (SDL_GetTicks() - started_at) < duration_ms)
+      if (errorMessage != nullptr)
       {
-        pump_events();
-        SDL_Delay(16);
+        *errorMessage = "Unable to initialize the Windows folder picker.";
       }
+      return std::nullopt;
     }
 
-    void pump_events()
+    IFileDialog *dialog = nullptr;
+    const HRESULT createResult = CoCreateInstance(
+        CLSID_FileOpenDialog,
+        nullptr,
+        CLSCTX_INPROC_SERVER,
+        IID_PPV_ARGS(&dialog));
+    if (FAILED(createResult) || dialog == nullptr)
     {
-      SDL_Event event;
-      while (SDL_PollEvent(&event))
+      if (shouldUninitialize)
       {
-        if (event.type == SDL_QUIT)
-        {
-          cancelled = true;
-        }
-        if (event.type == SDL_WINDOWEVENT &&
-            event.window.event == SDL_WINDOWEVENT_CLOSE &&
-            window != nullptr &&
-            event.window.windowID == SDL_GetWindowID(window))
-        {
-          cancelled = true;
-        }
+        CoUninitialize();
       }
+      if (errorMessage != nullptr)
+      {
+        *errorMessage = "Unable to create the Windows folder picker dialog.";
+      }
+      return std::nullopt;
     }
 
-    SDL_Window *window = nullptr;
-    Uint32 shown_at = 0;
-    bool cancelled = false;
-  };
+    DWORD dialogOptions = 0;
+    dialog->GetOptions(&dialogOptions);
+    dialog->SetOptions(dialogOptions | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
+
+    const HRESULT showResult = dialog->Show(nullptr);
+    if (showResult == HRESULT_FROM_WIN32(ERROR_CANCELLED))
+    {
+      dialog->Release();
+      if (shouldUninitialize)
+      {
+        CoUninitialize();
+      }
+      if (errorMessage != nullptr)
+      {
+        errorMessage->clear();
+      }
+      return std::nullopt;
+    }
+
+    if (FAILED(showResult))
+    {
+      dialog->Release();
+      if (shouldUninitialize)
+      {
+        CoUninitialize();
+      }
+      if (errorMessage != nullptr)
+      {
+        *errorMessage = "The Windows folder picker failed to open.";
+      }
+      return std::nullopt;
+    }
+
+    IShellItem *item = nullptr;
+    const HRESULT resultItemStatus = dialog->GetResult(&item);
+    dialog->Release();
+    if (FAILED(resultItemStatus) || item == nullptr)
+    {
+      if (shouldUninitialize)
+      {
+        CoUninitialize();
+      }
+      if (errorMessage != nullptr)
+      {
+        *errorMessage = "The Windows folder picker did not return a folder.";
+      }
+      return std::nullopt;
+    }
+
+    PWSTR rawPath = nullptr;
+    const HRESULT pathStatus = item->GetDisplayName(SIGDN_FILESYSPATH, &rawPath);
+    item->Release();
+
+    std::optional<std::filesystem::path> selectedPath;
+    if (SUCCEEDED(pathStatus) && rawPath != nullptr)
+    {
+      selectedPath = std::filesystem::path(rawPath);
+      CoTaskMemFree(rawPath);
+    }
+
+    if (shouldUninitialize)
+    {
+      CoUninitialize();
+    }
+
+    if (!selectedPath.has_value())
+    {
+      if (errorMessage != nullptr)
+      {
+        *errorMessage = "The Windows folder picker did not return a valid filesystem path.";
+      }
+      return std::nullopt;
+    }
+
+    if (errorMessage != nullptr)
+    {
+      errorMessage->clear();
+    }
+    return selectedPath;
+  }
+#else
+  std::optional<std::string> capture_command_output(const std::string &command, int *exitCode = nullptr)
+  {
+    FILE *pipe = popen(command.c_str(), "r");
+    if (pipe == nullptr)
+    {
+      if (exitCode != nullptr)
+      {
+        *exitCode = -1;
+      }
+      return std::nullopt;
+    }
+
+    std::string output;
+    std::array<char, 256> buffer{};
+    while (std::fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr)
+    {
+      output += buffer.data();
+    }
+
+    const int commandStatus = pclose(pipe);
+    int commandExitCode = commandStatus;
+#if defined(WIFEXITED) && defined(WEXITSTATUS)
+    if (commandStatus >= 0 && WIFEXITED(commandStatus))
+    {
+      commandExitCode = WEXITSTATUS(commandStatus);
+    }
+#endif
+    if (exitCode != nullptr)
+    {
+      *exitCode = commandExitCode;
+    }
+
+    return output;
+  }
+
+  std::optional<std::filesystem::path> pick_folder_with_native_dialog(std::string *errorMessage)
+  {
+#ifdef __APPLE__
+    int exitCode = 0;
+    const auto output = capture_command_output(
+        "osascript -e 'POSIX path of (choose folder with prompt \"Select a workspace folder\")'",
+        &exitCode);
+    if (!output.has_value())
+    {
+      if (errorMessage != nullptr)
+      {
+        *errorMessage = "Unable to launch the macOS folder picker.";
+      }
+      return std::nullopt;
+    }
+
+    const std::string trimmedOutput = trim_copy(*output);
+    if (exitCode != 0 || trimmedOutput.empty())
+    {
+      if (errorMessage != nullptr)
+      {
+        errorMessage->clear();
+      }
+      return std::nullopt;
+    }
+
+    if (errorMessage != nullptr)
+    {
+      errorMessage->clear();
+    }
+    return std::filesystem::path(trimmedOutput);
+#elif defined(__linux__)
+    int exitCode = 0;
+    const auto output = capture_command_output(
+        "sh -c 'if command -v zenity >/dev/null 2>&1; then "
+        "zenity --file-selection --directory --title=\"Select a workspace folder\"; "
+        "elif command -v kdialog >/dev/null 2>&1; then "
+        "kdialog --getexistingdirectory; "
+        "else exit 127; fi'",
+        &exitCode);
+    if (exitCode == 127)
+    {
+      if (errorMessage != nullptr)
+      {
+        *errorMessage = "No native folder picker is available. Enter a folder path manually.";
+      }
+      return std::nullopt;
+    }
+
+    if (!output.has_value())
+    {
+      if (errorMessage != nullptr)
+      {
+        *errorMessage = "Unable to launch the native folder picker.";
+      }
+      return std::nullopt;
+    }
+
+    const std::string trimmedOutput = trim_copy(*output);
+    if (exitCode != 0 || trimmedOutput.empty())
+    {
+      if (errorMessage != nullptr)
+      {
+        errorMessage->clear();
+      }
+      return std::nullopt;
+    }
+
+    if (errorMessage != nullptr)
+    {
+      errorMessage->clear();
+    }
+    return std::filesystem::path(trimmedOutput);
+#else
+    if (errorMessage != nullptr)
+    {
+      *errorMessage = "This platform does not provide a native folder picker in this build.";
+    }
+    return std::nullopt;
+#endif
+  }
+#endif
+
+  void build_workspace_logo_preview(
+      SDL_Surface *logoSurface,
+      std::vector<std::uint32_t> &pixels,
+      int &width,
+      int &height)
+  {
+    pixels.clear();
+    width = 0;
+    height = 0;
+
+    if (logoSurface == nullptr)
+    {
+      return;
+    }
+
+    SurfacePtr rgbaSurface(SDL_ConvertSurfaceFormat(logoSurface, SDL_PIXELFORMAT_RGBA32, 0), SDL_FreeSurface);
+    if (rgbaSurface == nullptr)
+    {
+      std::fprintf(stderr, "Warning: failed to convert logo surface for workspace preview: %s\n", SDL_GetError());
+      return;
+    }
+
+    const double scale = std::min(
+        1.0,
+        std::min(
+            static_cast<double>(WORKSPACE_LOGO_MAX_SIZE) / static_cast<double>(rgbaSurface->w),
+            static_cast<double>(WORKSPACE_LOGO_MAX_SIZE) / static_cast<double>(rgbaSurface->h)));
+
+    width = std::max(static_cast<int>(std::lround(static_cast<double>(rgbaSurface->w) * scale)), 1);
+    height = std::max(static_cast<int>(std::lround(static_cast<double>(rgbaSurface->h) * scale)), 1);
+
+    SurfacePtr scaledSurface(
+        SDL_CreateRGBSurfaceWithFormat(0, width, height, 32, SDL_PIXELFORMAT_RGBA32),
+        SDL_FreeSurface);
+    if (scaledSurface == nullptr)
+    {
+      std::fprintf(stderr, "Warning: failed to allocate logo preview surface: %s\n", SDL_GetError());
+      width = 0;
+      height = 0;
+      return;
+    }
+
+    if (SDL_BlitScaled(rgbaSurface.get(), nullptr, scaledSurface.get(), nullptr) != 0)
+    {
+      std::fprintf(stderr, "Warning: failed to scale logo preview surface: %s\n", SDL_GetError());
+      pixels.clear();
+      width = 0;
+      height = 0;
+      return;
+    }
+
+    pixels.resize(static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
+    for (int y = 0; y < height; ++y)
+    {
+      const auto *row = static_cast<const std::uint8_t *>(scaledSurface->pixels) + (y * scaledSurface->pitch);
+      for (int x = 0; x < width; ++x)
+      {
+        const auto *rawPixel = reinterpret_cast<const Uint32 *>(row + (x * sizeof(Uint32)));
+        Uint8 red = 0;
+        Uint8 green = 0;
+        Uint8 blue = 0;
+        Uint8 alpha = 0;
+        SDL_GetRGBA(*rawPixel, scaledSurface->format, &red, &green, &blue, &alpha);
+        pixels[(static_cast<std::size_t>(y) * static_cast<std::size_t>(width)) + static_cast<std::size_t>(x)] =
+            IM_COL32(red, green, blue, alpha);
+      }
+    }
+  }
 
   void apply_editor_theme()
   {
@@ -468,6 +686,300 @@ namespace hades
     }
   }
 
+  void WindowManager::render_workspace_logo() const
+  {
+    if (workspaceLogoPixels.empty() || workspaceLogoWidth <= 0 || workspaceLogoHeight <= 0)
+    {
+      return;
+    }
+
+    const ImVec2 logoSize(static_cast<float>(workspaceLogoWidth), static_cast<float>(workspaceLogoHeight));
+    const float startX = ImGui::GetCursorPosX() + std::max((ImGui::GetContentRegionAvail().x - logoSize.x) * 0.5f, 0.0f);
+    ImGui::SetCursorPosX(startX);
+
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    ImDrawList *drawList = ImGui::GetWindowDrawList();
+    const ImVec2 cardPadding(12.0f, 12.0f);
+    const ImVec2 cardMin(origin.x - cardPadding.x, origin.y - cardPadding.y);
+    const ImVec2 cardMax(origin.x + logoSize.x + cardPadding.x, origin.y + logoSize.y + cardPadding.y);
+    drawList->AddRectFilled(cardMin, cardMax, IM_COL32(18, 14, 14, 255), 10.0f);
+    drawList->AddRect(cardMin, cardMax, IM_COL32(62, 53, 52, 255), 10.0f);
+
+    for (int y = 0; y < workspaceLogoHeight; ++y)
+    {
+      for (int x = 0; x < workspaceLogoWidth; ++x)
+      {
+        const std::uint32_t color =
+            workspaceLogoPixels[(static_cast<std::size_t>(y) * static_cast<std::size_t>(workspaceLogoWidth)) + static_cast<std::size_t>(x)];
+        if ((color & IM_COL32_A_MASK) == 0)
+        {
+          continue;
+        }
+
+        drawList->AddRectFilled(
+            ImVec2(origin.x + static_cast<float>(x), origin.y + static_cast<float>(y)),
+            ImVec2(origin.x + static_cast<float>(x + 1), origin.y + static_cast<float>(y + 1)),
+            color);
+      }
+    }
+
+    ImGui::Dummy(ImVec2(logoSize.x, logoSize.y + cardPadding.y));
+  }
+
+  void WindowManager::render_workspace_selector()
+  {
+    ImGuiViewport *viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(viewport->Pos);
+    ImGui::SetNextWindowSize(viewport->Size);
+    ImGui::SetNextWindowViewport(viewport->ID);
+
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    const ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                                         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus;
+
+    if (!ImGui::Begin("Workspace Selector", nullptr, windowFlags))
+    {
+      ImGui::End();
+      ImGui::PopStyleVar(2);
+      return;
+    }
+
+    const float panelWidth = std::min(ImGui::GetContentRegionAvail().x, 760.0f);
+    const float leftMargin = std::max((ImGui::GetWindowSize().x - panelWidth) * 0.5f, 24.0f);
+    ImGui::SetCursorPosX(leftMargin);
+    ImGui::SetCursorPosY(28.0f);
+
+    ImGui::BeginChild("Workspace Selector Panel", ImVec2(panelWidth, 0.0f), true);
+    render_workspace_logo();
+    if (workspaceLogoWidth > 0)
+    {
+      ImGui::Spacing();
+    }
+    ImGui::TextUnformatted(creatingWorkspace ? "Create a Workspace" : "Select a Workspace");
+    ImGui::Spacing();
+
+    if (creatingWorkspace)
+    {
+      ImGui::TextWrapped("Choose the parent folder and name for the new empty workspace.");
+    }
+    else
+    {
+      ImGui::TextWrapped("Open a recent workspace folder, browse to an existing folder, or create a new empty workspace.");
+    }
+
+    if (!workspaceStatusMessage.empty())
+    {
+      ImGui::Spacing();
+      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.90f, 0.62f, 0.56f, 1.00f));
+      ImGui::TextWrapped("%s", workspaceStatusMessage.c_str());
+      ImGui::PopStyleColor();
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    if (creatingWorkspace)
+    {
+      ImGui::InputText("Workspace Name", createWorkspaceNameBuffer.data(), createWorkspaceNameBuffer.size());
+      ImGui::InputText("Location", createWorkspaceParentBuffer.data(), createWorkspaceParentBuffer.size());
+
+      if (ImGui::Button("Browse Location..."))
+      {
+        std::string pickerError;
+        const auto pickedFolder = pick_folder_with_native_dialog(&pickerError);
+        if (pickedFolder.has_value())
+        {
+          set_buffer_text(createWorkspaceParentBuffer, pickedFolder->string());
+          workspaceStatusMessage.clear();
+        }
+        else if (!pickerError.empty())
+        {
+          workspaceStatusMessage = pickerError;
+        }
+      }
+
+      ImGui::SameLine();
+      if (ImGui::Button("Back"))
+      {
+        creatingWorkspace = false;
+        workspaceStatusMessage.clear();
+      }
+
+      const std::string workspaceName = trim_copy(createWorkspaceNameBuffer.data());
+      const std::string parentDirectory = trim_copy(createWorkspaceParentBuffer.data());
+      if (!workspaceName.empty() && !parentDirectory.empty())
+      {
+        ImGui::Spacing();
+        ImGui::TextDisabled("Workspace folder");
+        const std::string targetPath = (std::filesystem::path(parentDirectory) / workspaceName).string();
+        ImGui::PushTextWrapPos();
+        ImGui::Text("%s", targetPath.c_str());
+        ImGui::PopTextWrapPos();
+      }
+
+      const bool canCreateWorkspace = !workspaceName.empty() && !parentDirectory.empty();
+      if (!canCreateWorkspace)
+      {
+        ImGui::BeginDisabled();
+      }
+      if (ImGui::Button("Create Workspace", ImVec2(180.0f, 0.0f)))
+      {
+        create_workspace();
+      }
+      if (!canCreateWorkspace)
+      {
+        ImGui::EndDisabled();
+      }
+    }
+    else
+    {
+      ImGui::InputText("Workspace Folder", openWorkspacePathBuffer.data(), openWorkspacePathBuffer.size());
+
+      if (ImGui::Button("Browse Existing..."))
+      {
+        std::string pickerError;
+        const auto pickedFolder = pick_folder_with_native_dialog(&pickerError);
+        if (pickedFolder.has_value())
+        {
+          set_buffer_text(openWorkspacePathBuffer, pickedFolder->string());
+          workspaceStatusMessage.clear();
+        }
+        else if (!pickerError.empty())
+        {
+          workspaceStatusMessage = pickerError;
+        }
+      }
+
+      const bool hasOpenPath = !trim_copy(openWorkspacePathBuffer.data()).empty();
+      ImGui::SameLine();
+      if (!hasOpenPath)
+      {
+        ImGui::BeginDisabled();
+      }
+      if (ImGui::Button("Open Workspace"))
+      {
+        open_workspace(openWorkspacePathBuffer.data());
+      }
+      if (!hasOpenPath)
+      {
+        ImGui::EndDisabled();
+      }
+
+      ImGui::SameLine();
+      if (ImGui::Button("Create New Workspace"))
+      {
+        creatingWorkspace = true;
+        workspaceStatusMessage.clear();
+        if (createWorkspaceParentBuffer[0] == '\0')
+        {
+          std::error_code errorCode;
+          set_buffer_text(createWorkspaceParentBuffer, std::filesystem::current_path(errorCode).string());
+        }
+      }
+
+      ImGui::Spacing();
+      ImGui::TextUnformatted("Recent Workspaces");
+      ImGui::Separator();
+
+      if (workspaceManager.recent_workspaces().empty())
+      {
+        ImGui::Spacing();
+        ImGui::TextDisabled("No recent workspaces yet.");
+      }
+      else
+      {
+        ImGui::BeginChild("Recent Workspaces List", ImVec2(0.0f, 0.0f), false);
+        for (std::size_t index = 0; index < workspaceManager.recent_workspaces().size(); ++index)
+        {
+          const WorkspaceEntry &workspace = workspaceManager.recent_workspaces()[index];
+          ImGui::PushID(static_cast<int>(index));
+
+          if (ImGui::Button(workspace.name.c_str(), ImVec2(ImGui::GetContentRegionAvail().x, 0.0f)))
+          {
+            open_workspace(workspace.path.string());
+          }
+
+          ImGui::PushTextWrapPos();
+          ImGui::TextDisabled("%s", workspace.path.string().c_str());
+          ImGui::PopTextWrapPos();
+
+          if (index + 1 < workspaceManager.recent_workspaces().size())
+          {
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+          }
+
+          ImGui::PopID();
+        }
+        ImGui::EndChild();
+      }
+    }
+
+    ImGui::EndChild();
+
+    ImGui::End();
+    ImGui::PopStyleVar(2);
+  }
+
+  void WindowManager::open_workspace(const std::string &workspacePath)
+  {
+    std::string errorMessage;
+    const auto workspace = workspaceManager.open_workspace(std::filesystem::path(trim_copy(workspacePath)), &errorMessage);
+    if (!workspace.has_value())
+    {
+      workspaceStatusMessage = errorMessage.empty() ? "Unable to open the selected workspace folder." : errorMessage;
+      return;
+    }
+
+    creatingWorkspace = false;
+    workspaceStatusMessage = errorMessage;
+    set_buffer_text(openWorkspacePathBuffer, workspace->path.string());
+    set_buffer_text(createWorkspaceParentBuffer, workspace->path.parent_path().string());
+    update_window_title();
+  }
+
+  void WindowManager::create_workspace()
+  {
+    std::string errorMessage;
+    const auto workspace = workspaceManager.create_workspace(
+        std::filesystem::path(trim_copy(createWorkspaceParentBuffer.data())),
+        trim_copy(createWorkspaceNameBuffer.data()),
+        &errorMessage);
+    if (!workspace.has_value())
+    {
+      workspaceStatusMessage = errorMessage.empty() ? "Unable to create the workspace folder." : errorMessage;
+      return;
+    }
+
+    creatingWorkspace = false;
+    workspaceStatusMessage = errorMessage;
+    set_buffer_text(openWorkspacePathBuffer, workspace->path.string());
+    set_buffer_text(createWorkspaceParentBuffer, workspace->path.parent_path().string());
+    set_buffer_text(createWorkspaceNameBuffer, std::string());
+    update_window_title();
+  }
+
+  void WindowManager::update_window_title()
+  {
+    if (window == nullptr)
+    {
+      return;
+    }
+
+    if (!workspaceManager.current_workspace().has_value())
+    {
+      SDL_SetWindowTitle(window.get(), EDITOR_WINDOW_TITLE);
+      return;
+    }
+
+    const WorkspaceEntry &workspace = workspaceManager.current_workspace().value();
+    const std::string title = std::string(EDITOR_WINDOW_TITLE) + " - " + workspace.name;
+    SDL_SetWindowTitle(window.get(), title.c_str());
+  }
+
   bool WindowManager::init()
   {
     if (initialized)
@@ -480,12 +992,28 @@ namespace hades
       return false;
     }
 
-    SurfacePtr logo_surface = load_logo_surface();
-    SplashScreen splash_screen;
-    if (!splash_screen.show(logo_surface.get()))
+    workspaceManager.set_storage_path(workspace_history_path());
+    std::string workspaceLoadError;
+    if (!workspaceManager.load(&workspaceLoadError))
     {
-      return false;
+      workspaceStatusMessage = workspaceLoadError;
     }
+
+    std::error_code errorCode;
+    const std::filesystem::path defaultCreateDirectory = workspaceManager.recent_workspaces().empty()
+                                                             ? std::filesystem::current_path(errorCode)
+                                                             : workspaceManager.recent_workspaces().front().path.parent_path();
+    if (!errorCode)
+    {
+      set_buffer_text(createWorkspaceParentBuffer, defaultCreateDirectory.string());
+    }
+
+    SurfacePtr logo_surface = load_logo_surface();
+    build_workspace_logo_preview(
+        logo_surface.get(),
+        workspaceLogoPixels,
+        workspaceLogoWidth,
+        workspaceLogoHeight);
 
     const SDL_WindowFlags window_flags =
         static_cast<SDL_WindowFlags>(SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_HIDDEN);
@@ -524,13 +1052,8 @@ namespace hades
     systemManager.registerSystem<RenderSystem>();
     auto audioSystem = systemManager.registerSystem<AudioSystem>();
     audioSystem->setAudioEngine(audio_engine.get());
+    update_window_title();
     SDL_ShowWindow(window.get());
-    SDL_RaiseWindow(window.get());
-    if (!splash_screen.finish())
-    {
-      return false;
-    }
-
     SDL_RaiseWindow(window.get());
     initialized = true;
     return true;
@@ -564,34 +1087,43 @@ namespace hades
     imgui_session.begin_frame();
 
     ImGuiIO &io = ImGui::GetIO();
-    editor.render(io.DeltaTime, entityManager, componentManager, scriptRuntime);
-    if (editor.state.isPlaying)
+    if (!workspaceManager.has_current_workspace())
     {
-      scriptRuntime.update(io.DeltaTime, componentManager, entityManager);
-      if (scriptRuntime.faulted())
+      render_workspace_selector();
+      wasPlayingLastFrame = false;
+    }
+    else
+    {
+      editor.render(io.DeltaTime, entityManager, componentManager, scriptRuntime);
+      if (editor.state.isPlaying)
       {
-        editor.state.isPlaying = false;
-        editor.state.activeCamera.reset();
-        editor.state.playModeMessage = scriptRuntime.last_error();
-        if (audio_engine != nullptr)
+        scriptRuntime.update(io.DeltaTime, componentManager, entityManager);
+        if (scriptRuntime.faulted())
         {
-          audio_engine->stop_all();
+          editor.state.isPlaying = false;
+          editor.state.activeCamera.reset();
+          editor.state.playModeMessage = scriptRuntime.last_error();
+          if (audio_engine != nullptr)
+          {
+            audio_engine->stop_all();
+          }
+        }
+        else
+        {
+          systemManager.updateSystems(io.DeltaTime, componentManager, entityManager);
         }
       }
-      else
+      else if (wasPlayingLastFrame && audio_engine != nullptr)
       {
-        systemManager.updateSystems(io.DeltaTime, componentManager, entityManager);
+        audio_engine->stop_all();
       }
-    }
-    else if (wasPlayingLastFrame && audio_engine != nullptr)
-    {
-      audio_engine->stop_all();
-    }
-    wasPlayingLastFrame = editor.state.isPlaying;
-    process_editor_events();
-    if (!running)
-    {
-      return;
+
+      wasPlayingLastFrame = editor.state.isPlaying;
+      process_editor_events();
+      if (!running)
+      {
+        return;
+      }
     }
 
     imgui_session.render();

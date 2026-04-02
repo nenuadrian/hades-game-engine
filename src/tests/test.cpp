@@ -1,8 +1,11 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
+#include <fstream>
 
+#include "../editor/workspace_manager.hpp"
 #include "../engine/assets/model_importer.hpp"
 #include "../engine/components/audio_listener_component.hpp"
 #include "../engine/components/audio_source_component.hpp"
@@ -23,9 +26,110 @@ namespace hades
 {
   namespace
   {
+    struct ScopedDirectoryCleanup
+    {
+      explicit ScopedDirectoryCleanup(std::filesystem::path directoryPath)
+          : directory(directoryPath) {}
+
+      ~ScopedDirectoryCleanup()
+      {
+        std::error_code errorCode;
+        std::filesystem::remove_all(directory, errorCode);
+      }
+
+      std::filesystem::path directory;
+    };
+
+    std::filesystem::path unique_test_directory(const char *prefix)
+    {
+      const auto uniqueSuffix = std::to_string(
+          std::chrono::high_resolution_clock::now().time_since_epoch().count());
+      return std::filesystem::temp_directory_path() / (std::string(prefix) + "-" + uniqueSuffix);
+    }
+
     std::filesystem::path backpack_model_path()
     {
       return std::filesystem::path(__FILE__).parent_path() / "backpack/12305_backpack_v2_l3.obj";
+    }
+
+    TEST(WorkspaceManagerTest, CreateWorkspaceCreatesFolderAndPersistsRecentHistory)
+    {
+      const std::filesystem::path testRoot = unique_test_directory("hades-workspace-create");
+      ScopedDirectoryCleanup cleanup(testRoot);
+
+      const std::filesystem::path parentDirectory = testRoot / "workspaces";
+      const std::filesystem::path storagePath = testRoot / "prefs" / "recent_workspaces.txt";
+      std::filesystem::create_directories(parentDirectory);
+
+      WorkspaceManager manager(storagePath);
+      std::string errorMessage;
+      const auto createdWorkspace = manager.create_workspace(parentDirectory, "Sandbox", &errorMessage);
+
+      ASSERT_TRUE(createdWorkspace.has_value()) << errorMessage;
+      EXPECT_EQ(createdWorkspace->name, "Sandbox");
+      EXPECT_TRUE(std::filesystem::exists(createdWorkspace->path));
+      EXPECT_TRUE(std::filesystem::is_directory(createdWorkspace->path));
+      ASSERT_TRUE(manager.current_workspace().has_value());
+      EXPECT_EQ(manager.current_workspace()->path, createdWorkspace->path);
+      ASSERT_EQ(manager.recent_workspaces().size(), 1U);
+      EXPECT_EQ(manager.recent_workspaces().front().path, createdWorkspace->path);
+
+      WorkspaceManager reloadedManager(storagePath);
+      EXPECT_TRUE(reloadedManager.load(&errorMessage)) << errorMessage;
+      ASSERT_EQ(reloadedManager.recent_workspaces().size(), 1U);
+      EXPECT_EQ(reloadedManager.recent_workspaces().front().name, "Sandbox");
+      EXPECT_EQ(reloadedManager.recent_workspaces().front().path, createdWorkspace->path);
+    }
+
+    TEST(WorkspaceManagerTest, ReopeningWorkspaceMovesItToFrontWithoutDuplicates)
+    {
+      const std::filesystem::path testRoot = unique_test_directory("hades-workspace-reopen");
+      ScopedDirectoryCleanup cleanup(testRoot);
+
+      const std::filesystem::path storagePath = testRoot / "prefs" / "recent_workspaces.txt";
+      const std::filesystem::path alphaWorkspace = testRoot / "Alpha";
+      const std::filesystem::path betaWorkspace = testRoot / "Beta";
+      std::filesystem::create_directories(alphaWorkspace);
+      std::filesystem::create_directories(betaWorkspace);
+
+      WorkspaceManager manager(storagePath);
+      std::string errorMessage;
+      ASSERT_TRUE(manager.open_workspace(alphaWorkspace, &errorMessage).has_value()) << errorMessage;
+      ASSERT_TRUE(manager.open_workspace(betaWorkspace, &errorMessage).has_value()) << errorMessage;
+      ASSERT_TRUE(manager.open_workspace(alphaWorkspace, &errorMessage).has_value()) << errorMessage;
+
+      ASSERT_EQ(manager.recent_workspaces().size(), 2U);
+      EXPECT_EQ(manager.recent_workspaces()[0].name, "Alpha");
+      EXPECT_EQ(manager.recent_workspaces()[0].path, std::filesystem::weakly_canonical(alphaWorkspace));
+      EXPECT_EQ(manager.recent_workspaces()[1].name, "Beta");
+      EXPECT_EQ(manager.recent_workspaces()[1].path, std::filesystem::weakly_canonical(betaWorkspace));
+      ASSERT_TRUE(manager.current_workspace().has_value());
+      EXPECT_EQ(manager.current_workspace()->path, std::filesystem::weakly_canonical(alphaWorkspace));
+    }
+
+    TEST(WorkspaceManagerTest, LoadSkipsMissingRecentWorkspaceFolders)
+    {
+      const std::filesystem::path testRoot = unique_test_directory("hades-workspace-load");
+      ScopedDirectoryCleanup cleanup(testRoot);
+
+      const std::filesystem::path storagePath = testRoot / "prefs" / "recent_workspaces.txt";
+      const std::filesystem::path existingWorkspace = testRoot / "Playable";
+      const std::filesystem::path missingWorkspace = testRoot / "Missing";
+      std::filesystem::create_directories(existingWorkspace);
+      std::filesystem::create_directories(storagePath.parent_path());
+
+      {
+        std::ofstream output(storagePath);
+        output << missingWorkspace.string() << '\n';
+        output << existingWorkspace.string() << '\n';
+      }
+
+      WorkspaceManager manager(storagePath);
+      std::string errorMessage;
+      EXPECT_TRUE(manager.load(&errorMessage)) << errorMessage;
+      ASSERT_EQ(manager.recent_workspaces().size(), 1U);
+      EXPECT_EQ(manager.recent_workspaces().front().name, "Playable");
+      EXPECT_EQ(manager.recent_workspaces().front().path, std::filesystem::weakly_canonical(existingWorkspace));
     }
 
     TEST(ModelImporterTest, ImportObjCollectsMeshAndMaterialMetadata)

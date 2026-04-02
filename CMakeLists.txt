@@ -54,6 +54,9 @@ target_link_libraries(
           miniaudio
           tinyobjloader
           Vulkan::Vulkan)
+if(WIN32)
+  target_link_libraries(${PROJECT_NAME} PRIVATE Ole32 uuid)
+endif()
 hades_stage_runtime_dependency(${PROJECT_NAME} assimp)
 
 add_custom_command(
@@ -70,6 +73,7 @@ if(TARGET SDL2::SDL2main)
 endif()
 
 set(TEST_SUPPORT_SOURCES
+  src/editor/workspace_manager.cpp
   src/engine/assets/model_importer.cpp
   src/engine/components/position_component_3d.cpp
   src/engine/components/transform_hierarchy_component.cpp
