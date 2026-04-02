@@ -7,6 +7,27 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(cmake/Dependencies.cmake)
 
+function(hades_stage_runtime_dependency target dependency)
+  if(NOT WIN32 OR NOT TARGET "${target}" OR NOT TARGET "${dependency}")
+    return()
+  endif()
+
+  get_target_property(dependency_type "${dependency}" TYPE)
+  if(NOT dependency_type STREQUAL "SHARED_LIBRARY" AND NOT dependency_type STREQUAL "MODULE_LIBRARY")
+    return()
+  endif()
+
+  add_custom_command(
+    TARGET "${target}"
+    POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${target}>"
+    COMMAND
+      ${CMAKE_COMMAND} -E copy_if_different
+      "$<TARGET_FILE:${dependency}>"
+      "$<TARGET_FILE_DIR:${target}>"
+    VERBATIM)
+endfunction()
+
 find_package(Vulkan REQUIRED)
 hades_configure_dependencies()
 
@@ -33,6 +54,7 @@ target_link_libraries(
           miniaudio
           tinyobjloader
           Vulkan::Vulkan)
+hades_stage_runtime_dependency(${PROJECT_NAME} assimp)
 
 add_custom_command(
   TARGET ${PROJECT_NAME}
@@ -58,7 +80,12 @@ set(TEST_SUPPORT_SOURCES
 
 add_executable(hades_tests src/tests/test.cpp ${TEST_SUPPORT_SOURCES})
 target_link_libraries(hades_tests PRIVATE assimp gtest_main)
+hades_stage_runtime_dependency(hades_tests assimp)
 
 enable_testing()
 include(GoogleTest)
-gtest_discover_tests(hades_tests)
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.18)
+  gtest_discover_tests(hades_tests DISCOVERY_MODE PRE_TEST)
+else()
+  gtest_discover_tests(hades_tests)
+endif()

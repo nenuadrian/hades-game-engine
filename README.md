@@ -18,6 +18,7 @@
   - [Build](#build)
   - [Run](#run)
   - [Test](#test)
+- [Scripting](#scripting)
 - [Documentation](#documentation)
 - [Previous version](#previous-version)
 
@@ -77,30 +78,6 @@ Entity scripts are compiled when Play starts. Install a local `dotnet` SDK if yo
 want to attach `.cs` files to entities and run them in play mode on macOS,
 Linux, or Windows.
 
-### Entity Scripts
-
-Attach a `Script` component to an entity in the editor, add one or more `.cs`
-files, and set the C# class name to instantiate for each attachment. Each
-script class should derive from `Hades.Scripting.HadesScript`:
-
-```csharp
-using Hades.Scripting;
-
-public sealed class MoveAlongX : HadesScript
-{
-    public override void OnUpdate(EntityContext context, float deltaTime)
-    {
-        var position = context.Position;
-        position.X += 1.0f * deltaTime;
-        context.Position = position;
-    }
-}
-```
-
-The editor compiles attached scripts when Play starts, then runs them against
-the attached entities during play mode. Script paths resolve relative to the
-engine process working directory.
-
 ### Test
 
 ```bash
@@ -108,6 +85,11 @@ cmake -S . -B build
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
+
+## Scripting
+
+For the scripting workflow, runtime behavior, and the current limitations, see
+[SCRIPTS.md](SCRIPTS.md).
 
 ## Documentation
 
