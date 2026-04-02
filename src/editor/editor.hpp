@@ -22,6 +22,13 @@ namespace hades
   class Editor
   {
   public:
+    enum class WorkspaceCreateKind
+    {
+      None,
+      Folder,
+      Script,
+    };
+
     struct WorkspaceTreeNode
     {
       std::filesystem::path path;
@@ -52,9 +59,18 @@ namespace hades
     std::vector<std::string> workspaceScriptFiles_;
     std::string workspaceScanError_;
     double nextWorkspaceScanTime_ = 0.0;
+    bool openWorkspaceCreateDialog_ = false;
+    WorkspaceCreateKind pendingWorkspaceCreateKind_ = WorkspaceCreateKind::None;
+    std::filesystem::path pendingWorkspaceCreateParentPath_;
+    std::array<char, 256> workspaceCreateNameBuffer_{};
+    std::string workspaceCreateError_;
 
     void configure_default_dock_layout(std::uint32_t dockspaceId);
     void refresh_workspace_cache(float deltaTime, const std::filesystem::path &workspacePath);
+    void invalidate_workspace_cache();
+    void request_workspace_item_creation(WorkspaceCreateKind kind, const std::filesystem::path &parentPath);
+    void render_workspace_create_dialog();
+    void render_workspace_tree_node(const WorkspaceTreeNode &node);
     void workspace();
     void handle_entity_creation_requests(EntityManager &entityManager, ComponentManager &componentManager);
     void import_model(EntityManager &entityManager, ComponentManager &componentManager);

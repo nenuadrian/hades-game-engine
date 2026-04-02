@@ -2,10 +2,12 @@
 
 #include <array>
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
 
@@ -38,6 +40,7 @@ namespace hades
     constexpr char COMPONENTS_WINDOW_TITLE[] = "Components";
     constexpr char GAME_WINDOW_TITLE[] = "Game";
     constexpr char IMPORT_MODEL_POPUP_TITLE[] = "Import Model";
+    constexpr char WORKSPACE_CREATE_POPUP_TITLE[] = "Create Workspace Item";
     constexpr float PI = 3.14159265358979323846f;
     constexpr float CUBE_HALF_EXTENT = 0.5f;
 
@@ -162,6 +165,152 @@ namespace hades
       return relativePath.empty() ? path.generic_string() : relativePath.generic_string();
     }
 
+    bool has_path_separator(const std::string &name)
+    {
+      return name.find('/') != std::string::npos || name.find('\\') != std::string::npos;
+    }
+
+    std::string csharp_class_name_from_stem(const std::string &stem)
+    {
+      std::string className;
+      bool capitalizeNext = true;
+      for (const char character : stem)
+      {
+        const unsigned char unsignedCharacter = static_cast<unsigned char>(character);
+        if (std::isalnum(unsignedCharacter) == 0)
+        {
+          capitalizeNext = true;
+          continue;
+        }
+
+        if (className.empty() && std::isdigit(unsignedCharacter) != 0)
+        {
+          className.push_back('_');
+        }
+
+        if (capitalizeNext)
+        {
+          className.push_back(static_cast<char>(std::toupper(unsignedCharacter)));
+          capitalizeNext = false;
+        }
+        else
+        {
+          className.push_back(character);
+        }
+      }
+
+      return className.empty() ? "NewScript" : className;
+    }
+
+    std::string build_script_template(const std::string &className)
+    {
+      return "using Hades.Scripting;\n\n"
+             "public sealed class " +
+             className +
+             " : HadesScript\n"
+             "{\n"
+             "    public override void OnUpdate(EntityContext context, float deltaTime)\n"
+             "    {\n"
+             "    }\n"
+             "}\n";
+    }
+
+    bool create_workspace_item(
+        const std::filesystem::path &parentPath,
+        const std::string &rawName,
+        const Editor::WorkspaceCreateKind kind,
+        std::string *errorMessage)
+    {
+      if (rawName.empty())
+      {
+        if (errorMessage != nullptr)
+        {
+          *errorMessage = "Enter a name before creating the item.";
+        }
+        return false;
+      }
+
+      if (has_path_separator(rawName))
+      {
+        if (errorMessage != nullptr)
+        {
+          *errorMessage = "Names cannot contain path separators.";
+        }
+        return false;
+      }
+
+      std::error_code errorCode;
+      if (!std::filesystem::exists(parentPath, errorCode) || !std::filesystem::is_directory(parentPath, errorCode))
+      {
+        if (errorMessage != nullptr)
+        {
+          *errorMessage = "The selected parent folder is no longer available.";
+        }
+        return false;
+      }
+
+      std::filesystem::path targetPath = parentPath / rawName;
+      if (kind == Editor::WorkspaceCreateKind::Script)
+      {
+        if (!targetPath.has_extension())
+        {
+          targetPath += ".cs";
+        }
+        else if (targetPath.extension() != ".cs")
+        {
+          if (errorMessage != nullptr)
+          {
+            *errorMessage = "Scripts must use the .cs extension.";
+          }
+          return false;
+        }
+      }
+
+      if (std::filesystem::exists(targetPath, errorCode))
+      {
+        if (errorMessage != nullptr)
+        {
+          *errorMessage = "'" + path_display_name(targetPath) + "' already exists.";
+        }
+        return false;
+      }
+
+      if (kind == Editor::WorkspaceCreateKind::Folder)
+      {
+        if (!std::filesystem::create_directory(targetPath, errorCode))
+        {
+          if (errorMessage != nullptr)
+          {
+            *errorMessage = "Unable to create folder '" + targetPath.string() + "': " + errorCode.message();
+          }
+          return false;
+        }
+        return true;
+      }
+
+      std::ofstream output(targetPath);
+      if (!output)
+      {
+        if (errorMessage != nullptr)
+        {
+          *errorMessage = "Unable to create script '" + targetPath.string() + "'.";
+        }
+        return false;
+      }
+
+      output << build_script_template(csharp_class_name_from_stem(targetPath.stem().string()));
+      if (!output.good())
+      {
+        if (errorMessage != nullptr)
+        {
+          *errorMessage = "Unable to write script '" + targetPath.string() + "'.";
+        }
+        return false;
+      }
+
+      return true;
+    }
+
     bool build_workspace_tree(
         const std::filesystem::path &path,
         const std::filesystem::path &workspacePath,
@@ -223,31 +372,6 @@ namespace hades
       }
 
       return true;
-    }
-
-    void render_workspace_tree_node(const Editor::WorkspaceTreeNode &node)
-    {
-      const std::string label = path_display_name(node.path);
-      if (!node.directory)
-      {
-        ImGui::BulletText("%s", label.c_str());
-        return;
-      }
-
-      const ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick |
-                                       (node.children.empty() ? ImGuiTreeNodeFlags_Leaf : 0);
-      const bool open = ImGui::TreeNodeEx(label.c_str(), flags);
-      if (!open)
-      {
-        return;
-      }
-
-      for (const auto &child : node.children)
-      {
-        render_workspace_tree_node(child);
-      }
-
-      ImGui::TreePop();
     }
   }
 
@@ -419,9 +543,129 @@ namespace hades
     nextWorkspaceScanTime_ = now + std::max(static_cast<double>(deltaTime), 1.0);
   }
 
+  void Editor::invalidate_workspace_cache()
+  {
+    workspaceTreeRoot_.reset();
+    workspaceScriptFiles_.clear();
+    workspaceScanError_.clear();
+    nextWorkspaceScanTime_ = 0.0;
+  }
+
+  void Editor::request_workspace_item_creation(WorkspaceCreateKind kind, const std::filesystem::path &parentPath)
+  {
+    pendingWorkspaceCreateKind_ = kind;
+    pendingWorkspaceCreateParentPath_ = parentPath;
+    workspaceCreateNameBuffer_.fill('\0');
+    workspaceCreateError_.clear();
+    openWorkspaceCreateDialog_ = true;
+  }
+
+  void Editor::render_workspace_create_dialog()
+  {
+    if (openWorkspaceCreateDialog_)
+    {
+      ImGui::OpenPopup(WORKSPACE_CREATE_POPUP_TITLE);
+      openWorkspaceCreateDialog_ = false;
+    }
+
+    if (!ImGui::BeginPopupModal(WORKSPACE_CREATE_POPUP_TITLE, nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    {
+      return;
+    }
+
+    const bool creatingScript = pendingWorkspaceCreateKind_ == WorkspaceCreateKind::Script;
+    ImGui::TextWrapped(
+        "%s in:",
+        creatingScript ? "Create a new C# script" : "Create a new folder");
+    ImGui::TextWrapped("%s", pendingWorkspaceCreateParentPath_.string().c_str());
+    ImGui::InputText(creatingScript ? "Script Name" : "Folder Name", workspaceCreateNameBuffer_.data(), workspaceCreateNameBuffer_.size());
+
+    if (creatingScript)
+    {
+      ImGui::TextDisabled("The .cs extension will be added automatically when needed.");
+    }
+
+    if (!workspaceCreateError_.empty())
+    {
+      ImGui::TextColored(ImVec4(0.88f, 0.42f, 0.42f, 1.0f), "%s", workspaceCreateError_.c_str());
+    }
+
+    if (ImGui::Button(creatingScript ? "Create Script" : "Create Folder"))
+    {
+      std::string errorMessage;
+      if (create_workspace_item(
+              pendingWorkspaceCreateParentPath_,
+              std::string(workspaceCreateNameBuffer_.data()),
+              pendingWorkspaceCreateKind_,
+              &errorMessage))
+      {
+        workspaceCreateError_.clear();
+        pendingWorkspaceCreateKind_ = WorkspaceCreateKind::None;
+        pendingWorkspaceCreateParentPath_.clear();
+        invalidate_workspace_cache();
+        ImGui::CloseCurrentPopup();
+      }
+      else
+      {
+        workspaceCreateError_ = std::move(errorMessage);
+      }
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel"))
+    {
+      workspaceCreateError_.clear();
+      pendingWorkspaceCreateKind_ = WorkspaceCreateKind::None;
+      pendingWorkspaceCreateParentPath_.clear();
+      ImGui::CloseCurrentPopup();
+    }
+
+    ImGui::EndPopup();
+  }
+
+  void Editor::render_workspace_tree_node(const WorkspaceTreeNode &node)
+  {
+    const std::string label = path_display_name(node.path);
+    if (!node.directory)
+    {
+      ImGui::BulletText("%s", label.c_str());
+      return;
+    }
+
+    const std::string treeNodeId = label + "##" + node.path.string();
+    const ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick |
+                                     (node.children.empty() ? ImGuiTreeNodeFlags_Leaf : 0);
+    const bool open = ImGui::TreeNodeEx(treeNodeId.c_str(), flags);
+    if (ImGui::BeginPopupContextItem())
+    {
+      if (ImGui::MenuItem("New Folder"))
+      {
+        request_workspace_item_creation(WorkspaceCreateKind::Folder, node.path);
+      }
+      if (ImGui::MenuItem("New Script"))
+      {
+        request_workspace_item_creation(WorkspaceCreateKind::Script, node.path);
+      }
+      ImGui::EndPopup();
+    }
+
+    if (!open)
+    {
+      return;
+    }
+
+    for (const auto &child : node.children)
+    {
+      render_workspace_tree_node(child);
+    }
+
+    ImGui::TreePop();
+  }
+
   void Editor::workspace()
   {
     ImGui::Begin(WORKSPACE_WINDOW_TITLE);
+    render_workspace_create_dialog();
 
     if (activeWorkspacePath_.empty())
     {
@@ -431,6 +675,17 @@ namespace hades
     }
 
     ImGui::TextWrapped("%s", activeWorkspacePath_.string().c_str());
+    if (ImGui::Button("New Folder"))
+    {
+      request_workspace_item_creation(WorkspaceCreateKind::Folder, activeWorkspacePath_);
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("New Script"))
+    {
+      request_workspace_item_creation(WorkspaceCreateKind::Script, activeWorkspacePath_);
+    }
+
     ImGui::Separator();
 
     if (!workspaceScanError_.empty())
@@ -448,6 +703,18 @@ namespace hades
 
     ImGui::SetNextItemOpen(true, ImGuiCond_Once);
     render_workspace_tree_node(*workspaceTreeRoot_);
+    if (ImGui::BeginPopupContextWindow("WorkspaceRootContext", ImGuiPopupFlags_NoOpenOverItems))
+    {
+      if (ImGui::MenuItem("New Folder"))
+      {
+        request_workspace_item_creation(WorkspaceCreateKind::Folder, activeWorkspacePath_);
+      }
+      if (ImGui::MenuItem("New Script"))
+      {
+        request_workspace_item_creation(WorkspaceCreateKind::Script, activeWorkspacePath_);
+      }
+      ImGui::EndPopup();
+    }
     ImGui::End();
   }
 

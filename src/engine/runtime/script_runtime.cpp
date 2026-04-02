@@ -2,8 +2,8 @@
 
 #include <algorithm>
 #include <atomic>
-#include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -21,6 +21,7 @@
 #include "../components/script_component.hpp"
 #include "../core/ecs/component_manager.hpp"
 #include "../core/ecs/entity_manager.hpp"
+#include "clr_host.hpp"
 #include "subprocess.hpp"
 
 namespace hades
@@ -28,6 +29,63 @@ namespace hades
   namespace
   {
     constexpr char HOST_ASSEMBLY_NAME[] = "HadesScriptHost.dll";
+
+    // Interop structures shared between C++ and C# via blittable layout.
+    // These must match the definitions in the generated HostProgram.cs exactly.
+#pragma pack(push, 1)
+    struct InteropEntityData
+    {
+      uint32_t entityId;
+      float x;
+      float y;
+      float z;
+      int32_t classNameCount;
+      // Class names are passed separately via InteropStringArray.
+    };
+
+    struct InteropEntityPosition
+    {
+      uint32_t entityId;
+      float x;
+      float y;
+      float z;
+    };
+
+    struct InteropString
+    {
+      const char *data;
+      int32_t length;
+    };
+
+    struct InteropLoadResult
+    {
+      int32_t success;
+      const char *errorMessage;
+      int32_t errorLength;
+    };
+
+    struct InteropUpdateResult
+    {
+      int32_t success;
+      int32_t entityCount;
+      const char *errorMessage;
+      int32_t errorLength;
+    };
+#pragma pack(pop)
+
+    // Function pointer types for managed entry points.
+    using LoadSceneFn = void (*)(
+        const InteropEntityData *entities, int32_t entityCount,
+        const InteropString *names, const InteropString *classNames,
+        InteropLoadResult *result);
+
+    using UpdateFrameFn = void (*)(
+        float deltaTime,
+        const InteropEntityPosition *positionsIn, int32_t entityCount,
+        InteropEntityPosition *positionsOut,
+        InteropUpdateResult *result);
+
+    using ShutdownFn = void (*)();
 
     struct ScriptedEntity
     {
@@ -45,122 +103,9 @@ namespace hades
       std::filesystem::path outputDirectory;
       std::filesystem::path projectPath;
       std::filesystem::path hostPath;
+      std::filesystem::path runtimeConfigPath;
       std::string targetFramework;
     };
-
-    std::string base64_encode(const std::string &value)
-    {
-      static constexpr char alphabet[] =
-          "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-      std::string encoded;
-      encoded.reserve(((value.size() + 2) / 3) * 4);
-
-      int valueAccumulator = 0;
-      int bitsCollected = -6;
-      for (unsigned char ch : value)
-      {
-        valueAccumulator = (valueAccumulator << 8) + ch;
-        bitsCollected += 8;
-        while (bitsCollected >= 0)
-        {
-          encoded.push_back(alphabet[(valueAccumulator >> bitsCollected) & 0x3F]);
-          bitsCollected -= 6;
-        }
-      }
-
-      if (bitsCollected > -6)
-      {
-        encoded.push_back(alphabet[((valueAccumulator << 8) >> (bitsCollected + 8)) & 0x3F]);
-      }
-
-      while (encoded.size() % 4 != 0)
-      {
-        encoded.push_back('=');
-      }
-
-      return encoded;
-    }
-
-    std::string base64_decode(const std::string &value)
-    {
-      static constexpr unsigned char invalid = 0xFF;
-      static constexpr unsigned char decodeTable[256] = {
-          invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid,
-          invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid,
-          invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, 62, invalid, invalid, invalid, 63,
-          52, 53, 54, 55, 56, 57, 58, 59, 60, 61, invalid, invalid, invalid, invalid, invalid, invalid,
-          invalid, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
-          15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, invalid, invalid, invalid, invalid, invalid,
-          invalid, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
-          41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, invalid, invalid, invalid, invalid, invalid,
-          invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid,
-          invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid,
-          invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid,
-          invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid,
-          invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid,
-          invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid,
-          invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid,
-          invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid, invalid};
-
-      std::string decoded;
-      int valueAccumulator = 0;
-      int bitsCollected = -8;
-
-      for (unsigned char ch : value)
-      {
-        if (ch == '=')
-        {
-          break;
-        }
-
-        const unsigned char decodedValue = decodeTable[ch];
-        if (decodedValue == invalid)
-        {
-          return std::string();
-        }
-
-        valueAccumulator = (valueAccumulator << 6) + decodedValue;
-        bitsCollected += 6;
-        if (bitsCollected >= 0)
-        {
-          decoded.push_back(static_cast<char>((valueAccumulator >> bitsCollected) & 0xFF));
-          bitsCollected -= 8;
-        }
-      }
-
-      return decoded;
-    }
-
-    std::vector<std::string> split_fields(const std::string &line)
-    {
-      std::istringstream stream(line);
-      stream.imbue(std::locale::classic());
-
-      std::vector<std::string> fields;
-      std::string field;
-      while (stream >> field)
-      {
-        fields.push_back(field);
-      }
-      return fields;
-    }
-
-    std::string format_float(float value)
-    {
-      std::ostringstream stream;
-      stream.imbue(std::locale::classic());
-      stream << std::setprecision(9) << value;
-      return stream.str();
-    }
-
-    bool parse_float(const std::string &value, float &parsed)
-    {
-      std::istringstream stream(value);
-      stream.imbue(std::locale::classic());
-      stream >> parsed;
-      return stream.good() || stream.eof();
-    }
 
     std::string xml_escape(const std::string &value)
     {
@@ -397,7 +342,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Reflection;
-using System.Text;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace Hades.Scripting
 {
@@ -435,7 +381,58 @@ namespace Hades.Scripting
         public virtual void OnUpdate(EntityContext context, float deltaTime) { }
     }
 
-    internal sealed class ScriptHost
+    // Interop structures matching the C++ side (packed, blittable).
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    internal struct InteropEntityData
+    {
+        public uint EntityId;
+        public float X;
+        public float Y;
+        public float Z;
+        public int ClassNameCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    internal struct InteropEntityPosition
+    {
+        public uint EntityId;
+        public float X;
+        public float Y;
+        public float Z;
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    internal struct InteropString
+    {
+        public IntPtr Data;
+        public int Length;
+
+        public string ToManaged()
+        {
+            if (Data == IntPtr.Zero || Length <= 0)
+                return string.Empty;
+            return Marshal.PtrToStringUTF8(Data, Length) ?? string.Empty;
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    internal struct InteropLoadResult
+    {
+        public int Success;
+        public IntPtr ErrorMessage;
+        public int ErrorLength;
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    internal struct InteropUpdateResult
+    {
+        public int Success;
+        public int EntityCount;
+        public IntPtr ErrorMessage;
+        public int ErrorLength;
+    }
+
+    internal static class ScriptHost
     {
         private sealed class ScriptInstance
         {
@@ -449,190 +446,42 @@ namespace Hades.Scripting
             }
         }
 
-        private readonly Dictionary<uint, List<ScriptInstance>> _instancesByEntity = new();
-        private readonly List<uint> _entityOrder = new();
+        private static readonly Dictionary<uint, List<ScriptInstance>> InstancesByEntity = new();
+        private static readonly List<uint> EntityOrder = new();
+        private static IntPtr _lastErrorPtr = IntPtr.Zero;
 
-        public int Run()
+        private static void SetError(ref InteropLoadResult result, string message)
         {
-            try
-            {
-                LoadScene();
-                WriteLine("READY");
-
-                while (true)
-                {
-                    var line = Console.ReadLine();
-                    if (line is null || line == "STOP")
-                    {
-                        return 0;
-                    }
-
-                    var fields = SplitFields(line);
-                    if (fields.Length < 1)
-                    {
-                        throw new InvalidOperationException("Empty command received by the script host.");
-                    }
-
-                    if (fields[0] != "FRAME")
-                    {
-                        throw new InvalidOperationException($"Unexpected command '{fields[0]}'.");
-                    }
-
-                    HandleFrame(fields);
-                }
-            }
-            catch (Exception ex)
-            {
-                WriteError(ex.Message);
-                return 1;
-            }
+            FreeLastError();
+            _lastErrorPtr = Marshal.StringToCoTaskMemUTF8(message);
+            result.ErrorMessage = _lastErrorPtr;
+            result.ErrorLength = System.Text.Encoding.UTF8.GetByteCount(message);
+            result.Success = 0;
         }
 
-        private void LoadScene()
+        private static void SetError(ref InteropUpdateResult result, string message)
         {
-            var header = RequireLine("LOAD header");
-            var fields = SplitFields(header);
-            if (fields.Length != 2 || fields[0] != "LOAD")
-            {
-                throw new InvalidOperationException("Expected a LOAD header from the engine.");
-            }
-
-            var entityCount = ParseInt(fields[1], "entity count");
-            var assembly = Assembly.GetExecutingAssembly();
-
-            for (var index = 0; index < entityCount; ++index)
-            {
-                var entityLine = RequireLine("ENTITY definition");
-                var entityFields = SplitFields(entityLine);
-                if (entityFields.Length != 7 || entityFields[0] != "ENTITY")
-                {
-                    throw new InvalidOperationException("Malformed ENTITY definition.");
-                }
-
-                var entityId = ParseUInt(entityFields[1], "entity id");
-                var name = Decode(entityFields[2]);
-                var x = ParseFloat(entityFields[3], "position x");
-                var y = ParseFloat(entityFields[4], "position y");
-                var z = ParseFloat(entityFields[5], "position z");
-                var attachmentCount = ParseInt(entityFields[6], "attachment count");
-
-                var context = new EntityContext(entityId, name, new Vector3(x, y, z));
-                var instances = new List<ScriptInstance>(attachmentCount);
-                for (var attachmentIndex = 0; attachmentIndex < attachmentCount; ++attachmentIndex)
-                {
-                    var attachmentLine = RequireLine("ATTACH definition");
-                    var attachmentFields = SplitFields(attachmentLine);
-                    if (attachmentFields.Length != 2 || attachmentFields[0] != "ATTACH")
-                    {
-                        throw new InvalidOperationException("Malformed ATTACH definition.");
-                    }
-
-                    var className = Decode(attachmentFields[1]);
-                    var type = ResolveScriptType(assembly, className);
-                    if (!typeof(HadesScript).IsAssignableFrom(type))
-                    {
-                        throw new InvalidOperationException(
-                            $"Type '{className}' must derive from Hades.Scripting.HadesScript.");
-                    }
-
-                    if (Activator.CreateInstance(type) is not HadesScript script)
-                    {
-                        throw new InvalidOperationException(
-                            $"Type '{className}' must have a public parameterless constructor.");
-                    }
-
-                    instances.Add(new ScriptInstance(script, context));
-                }
-
-                _instancesByEntity[entityId] = instances;
-                _entityOrder.Add(entityId);
-            }
-
-            var endLine = RequireLine("END marker");
-            if (endLine != "END")
-            {
-                throw new InvalidOperationException("Expected END after the LOAD block.");
-            }
-
-            foreach (var entityId in _entityOrder)
-            {
-                foreach (var instance in _instancesByEntity[entityId])
-                {
-                    instance.Script.OnStart(instance.Context);
-                }
-            }
+            FreeLastError();
+            _lastErrorPtr = Marshal.StringToCoTaskMemUTF8(message);
+            result.ErrorMessage = _lastErrorPtr;
+            result.ErrorLength = System.Text.Encoding.UTF8.GetByteCount(message);
+            result.Success = 0;
         }
 
-        private void HandleFrame(string[] headerFields)
+        private static void FreeLastError()
         {
-            if (headerFields.Length != 3)
+            if (_lastErrorPtr != IntPtr.Zero)
             {
-                throw new InvalidOperationException("Malformed FRAME header.");
+                Marshal.FreeCoTaskMem(_lastErrorPtr);
+                _lastErrorPtr = IntPtr.Zero;
             }
-
-            var deltaTime = ParseFloat(headerFields[1], "delta time");
-            var entityCount = ParseInt(headerFields[2], "frame entity count");
-
-            for (var index = 0; index < entityCount; ++index)
-            {
-                var entityLine = RequireLine("frame ENTITY");
-                var entityFields = SplitFields(entityLine);
-                if (entityFields.Length != 5 || entityFields[0] != "ENTITY")
-                {
-                    throw new InvalidOperationException("Malformed frame ENTITY definition.");
-                }
-
-                var entityId = ParseUInt(entityFields[1], "entity id");
-                if (!_instancesByEntity.TryGetValue(entityId, out var instances))
-                {
-                    continue;
-                }
-
-                var position = new Vector3(
-                    ParseFloat(entityFields[2], "position x"),
-                    ParseFloat(entityFields[3], "position y"),
-                    ParseFloat(entityFields[4], "position z"));
-
-                foreach (var instance in instances)
-                {
-                    instance.Context.Position = position;
-                }
-            }
-
-            var endLine = RequireLine("END marker");
-            if (endLine != "END")
-            {
-                throw new InvalidOperationException("Expected END after the FRAME block.");
-            }
-
-            foreach (var entityId in _entityOrder)
-            {
-                foreach (var instance in _instancesByEntity[entityId])
-                {
-                    instance.Script.OnUpdate(instance.Context, deltaTime);
-                }
-            }
-
-            WriteLine($"RESULT {_entityOrder.Count.ToString(CultureInfo.InvariantCulture)}");
-            foreach (var entityId in _entityOrder)
-            {
-                var context = _instancesByEntity[entityId][0].Context;
-                WriteLine(
-                    $"ENTITY {context.EntityId.ToString(CultureInfo.InvariantCulture)} " +
-                    $"{context.Position.X.ToString("R", CultureInfo.InvariantCulture)} " +
-                    $"{context.Position.Y.ToString("R", CultureInfo.InvariantCulture)} " +
-                    $"{context.Position.Z.ToString("R", CultureInfo.InvariantCulture)}");
-            }
-            WriteLine("END");
         }
 
         private static Type ResolveScriptType(Assembly assembly, string className)
         {
             var directMatch = assembly.GetType(className, false, false);
             if (directMatch is not null)
-            {
                 return directMatch;
-            }
 
             var matches = assembly
                 .GetTypes()
@@ -641,80 +490,164 @@ namespace Hades.Scripting
                 .ToList();
 
             if (matches.Count == 0)
-            {
                 throw new InvalidOperationException($"Unable to locate script class '{className}'.");
-            }
 
             if (matches.Count > 1)
-            {
                 throw new InvalidOperationException(
                     $"Script class name '{className}' is ambiguous. Use the full namespace-qualified name.");
-            }
 
             return matches[0];
         }
 
-        private static string RequireLine(string description)
+        [UnmanagedCallersOnly]
+        public static void LoadScene(
+            IntPtr entitiesPtr, int entityCount,
+            IntPtr namesPtr, IntPtr classNamesPtr,
+            IntPtr resultPtr)
         {
-            return Console.ReadLine() ?? throw new InvalidOperationException($"Unexpected end of input while reading {description}.");
-        }
+            ref var result = ref Unsafe.AsRef<InteropLoadResult>((void*)resultPtr);
+            result.Success = 1;
+            result.ErrorMessage = IntPtr.Zero;
+            result.ErrorLength = 0;
 
-        private static string[] SplitFields(string line)
-        {
-            return line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        }
-
-        private static string Decode(string value)
-        {
-            return Encoding.UTF8.GetString(Convert.FromBase64String(value));
-        }
-
-        private static int ParseInt(string value, string description)
-        {
-            if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+            try
             {
-                throw new InvalidOperationException($"Invalid {description}: '{value}'.");
-            }
-            return parsed;
-        }
+                InstancesByEntity.Clear();
+                EntityOrder.Clear();
 
-        private static uint ParseUInt(string value, string description)
-        {
-            if (!uint.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+                var assembly = Assembly.GetExecutingAssembly();
+                int classNameOffset = 0;
+
+                for (int i = 0; i < entityCount; i++)
+                {
+                    var entityData = Marshal.PtrToStructure<InteropEntityData>(
+                        entitiesPtr + i * Marshal.SizeOf<InteropEntityData>());
+
+                    var nameInterop = Marshal.PtrToStructure<InteropString>(
+                        namesPtr + i * Marshal.SizeOf<InteropString>());
+                    var name = nameInterop.ToManaged();
+
+                    var context = new EntityContext(
+                        entityData.EntityId, name,
+                        new Vector3(entityData.X, entityData.Y, entityData.Z));
+
+                    var instances = new List<ScriptInstance>(entityData.ClassNameCount);
+
+                    for (int j = 0; j < entityData.ClassNameCount; j++)
+                    {
+                        var classNameInterop = Marshal.PtrToStructure<InteropString>(
+                            classNamesPtr + (classNameOffset + j) * Marshal.SizeOf<InteropString>());
+                        var className = classNameInterop.ToManaged();
+
+                        var type = ResolveScriptType(assembly, className);
+                        if (!typeof(HadesScript).IsAssignableFrom(type))
+                            throw new InvalidOperationException(
+                                $"Type '{className}' must derive from Hades.Scripting.HadesScript.");
+
+                        if (Activator.CreateInstance(type) is not HadesScript script)
+                            throw new InvalidOperationException(
+                                $"Type '{className}' must have a public parameterless constructor.");
+
+                        instances.Add(new ScriptInstance(script, context));
+                    }
+
+                    classNameOffset += entityData.ClassNameCount;
+                    InstancesByEntity[entityData.EntityId] = instances;
+                    EntityOrder.Add(entityData.EntityId);
+                }
+
+                // Call OnStart for all script instances.
+                foreach (var entityId in EntityOrder)
+                {
+                    foreach (var instance in InstancesByEntity[entityId])
+                    {
+                        instance.Script.OnStart(instance.Context);
+                    }
+                }
+            }
+            catch (Exception ex)
             {
-                throw new InvalidOperationException($"Invalid {description}: '{value}'.");
+                SetError(ref result, ex.Message);
             }
-            return parsed;
         }
 
-        private static float ParseFloat(string value, string description)
+        [UnmanagedCallersOnly]
+        public static void UpdateFrame(
+            float deltaTime,
+            IntPtr positionsInPtr, int entityCount,
+            IntPtr positionsOutPtr,
+            IntPtr resultPtr)
         {
-            if (!float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed))
+            ref var result = ref Unsafe.AsRef<InteropUpdateResult>((void*)resultPtr);
+            result.Success = 1;
+            result.EntityCount = 0;
+            result.ErrorMessage = IntPtr.Zero;
+            result.ErrorLength = 0;
+
+            try
             {
-                throw new InvalidOperationException($"Invalid {description}: '{value}'.");
+                // Update positions from engine.
+                for (int i = 0; i < entityCount; i++)
+                {
+                    var pos = Marshal.PtrToStructure<InteropEntityPosition>(
+                        positionsInPtr + i * Marshal.SizeOf<InteropEntityPosition>());
+
+                    if (InstancesByEntity.TryGetValue(pos.EntityId, out var instances))
+                    {
+                        var newPos = new Vector3(pos.X, pos.Y, pos.Z);
+                        foreach (var instance in instances)
+                        {
+                            instance.Context.Position = newPos;
+                        }
+                    }
+                }
+
+                // Call OnUpdate for all script instances.
+                foreach (var entityId in EntityOrder)
+                {
+                    if (InstancesByEntity.TryGetValue(entityId, out var instances))
+                    {
+                        foreach (var instance in instances)
+                        {
+                            instance.Script.OnUpdate(instance.Context, deltaTime);
+                        }
+                    }
+                }
+
+                // Write back updated positions.
+                int outIndex = 0;
+                foreach (var entityId in EntityOrder)
+                {
+                    if (!InstancesByEntity.TryGetValue(entityId, out var instances) || instances.Count == 0)
+                        continue;
+
+                    var context = instances[0].Context;
+                    var outPos = new InteropEntityPosition
+                    {
+                        EntityId = context.EntityId,
+                        X = context.Position.X,
+                        Y = context.Position.Y,
+                        Z = context.Position.Z,
+                    };
+                    Marshal.StructureToPtr(outPos,
+                        positionsOutPtr + outIndex * Marshal.SizeOf<InteropEntityPosition>(), false);
+                    outIndex++;
+                }
+
+                result.EntityCount = outIndex;
             }
-            return parsed;
+            catch (Exception ex)
+            {
+                SetError(ref result, ex.Message);
+            }
         }
 
-        private static void WriteLine(string value)
+        [UnmanagedCallersOnly]
+        public static void Shutdown()
         {
-            Console.Out.WriteLine(value);
-            Console.Out.Flush();
-        }
-
-        private static void WriteError(string value)
-        {
-            WriteLine($"ERROR {Convert.ToBase64String(Encoding.UTF8.GetBytes(value))}");
-        }
-    }
-
-    internal static class Program
-    {
-        private static int Main()
-        {
-            Console.InputEncoding = Encoding.UTF8;
-            Console.OutputEncoding = Encoding.UTF8;
-            return new ScriptHost().Run();
+            InstancesByEntity.Clear();
+            EntityOrder.Clear();
+            FreeLastError();
         }
     }
 }
@@ -730,13 +663,14 @@ namespace Hades.Scripting
       project.imbue(std::locale::classic());
       project << "<Project Sdk=\"Microsoft.NET.Sdk\">\n"
               << "  <PropertyGroup>\n"
-              << "    <OutputType>Exe</OutputType>\n"
+              << "    <OutputType>Library</OutputType>\n"
               << "    <TargetFramework>" << xml_escape(targetFramework) << "</TargetFramework>\n"
               << "    <ImplicitUsings>enable</ImplicitUsings>\n"
               << "    <Nullable>enable</Nullable>\n"
               << "    <LangVersion>latest</LangVersion>\n"
               << "    <AssemblyName>HadesScriptHost</AssemblyName>\n"
               << "    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>\n"
+              << "    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>\n"
               << "  </PropertyGroup>\n"
               << "  <ItemGroup>\n"
               << "    <Compile Include=\"" << xml_escape(hostSourcePath.generic_string()) << "\" />\n";
@@ -751,6 +685,36 @@ namespace Hades.Scripting
       project << "  </ItemGroup>\n"
               << "</Project>\n";
       return project.str();
+    }
+
+    std::string render_runtime_config(const std::string &targetFramework)
+    {
+      // Extract version from target framework (e.g., "net8.0" -> "8.0.0").
+      std::string version = "8.0.0";
+      if (targetFramework.size() > 3 && targetFramework.substr(0, 3) == "net")
+      {
+        version = targetFramework.substr(3);
+        // Ensure it has a patch component.
+        if (version.find('.') != std::string::npos &&
+            version.rfind('.') == version.find('.'))
+        {
+          version += ".0";
+        }
+      }
+
+      return "{\n"
+             "  \"runtimeOptions\": {\n"
+             "    \"tfm\": \"" +
+             targetFramework +
+             "\",\n"
+             "    \"framework\": {\n"
+             "      \"name\": \"Microsoft.NETCore.App\",\n"
+             "      \"version\": \"" +
+             version +
+             "\"\n"
+             "    }\n"
+             "  }\n"
+             "}\n";
     }
 
     bool prepare_build(
@@ -777,11 +741,11 @@ namespace Hades.Scripting
       }
 
       const auto majorVersion = parse_dotnet_major_version(dotnetVersion.output);
-      if (!majorVersion.has_value() || *majorVersion < 6)
+      if (!majorVersion.has_value() || *majorVersion < 7)
       {
         if (errorMessage != nullptr)
         {
-          *errorMessage = "Hades scripting requires dotnet SDK 6.0 or newer.";
+          *errorMessage = "Hades scripting requires dotnet SDK 7.0 or newer (for [UnmanagedCallersOnly] support).";
         }
         return false;
       }
@@ -795,6 +759,7 @@ namespace Hades.Scripting
       artifacts.outputDirectory = artifacts.workingDirectory / "out";
       artifacts.projectPath = artifacts.workingDirectory / "HadesScriptHost.csproj";
       artifacts.hostPath = artifacts.outputDirectory / HOST_ASSEMBLY_NAME;
+      artifacts.runtimeConfigPath = artifacts.outputDirectory / "HadesScriptHost.runtimeconfig.json";
 
       std::error_code directoryError;
       std::filesystem::create_directories(artifacts.outputDirectory, directoryError);
@@ -861,6 +826,18 @@ namespace Hades.Scripting
         return false;
       }
 
+      // Write the runtimeconfig.json if dotnet build did not produce one.
+      if (!std::filesystem::exists(artifacts.runtimeConfigPath))
+      {
+        if (!write_text_file(
+                artifacts.runtimeConfigPath,
+                render_runtime_config(artifacts.targetFramework),
+                errorMessage))
+        {
+          return false;
+        }
+      }
+
       return true;
     }
   }
@@ -869,10 +846,14 @@ namespace Hades.Scripting
   {
     std::vector<ScriptedEntity> trackedEntities;
     BuildArtifacts buildArtifacts;
-    Subprocess process;
+    ClrHost clrHost;
     std::string lastError;
     bool running = false;
     bool faulted = false;
+
+    LoadSceneFn loadSceneFn = nullptr;
+    UpdateFrameFn updateFrameFn = nullptr;
+    ShutdownFn shutdownFn = nullptr;
   };
 
   ScriptRuntime::ScriptRuntime() : impl_(std::make_unique<Impl>()) {}
@@ -935,115 +916,104 @@ namespace Hades.Scripting
       return false;
     }
 
-    if (!impl_->process.start(
-            {
-                "dotnet",
-                to_utf8(impl_->buildArtifacts.hostPath),
-            },
-            impl_->buildArtifacts.outputDirectory,
-            &localError))
+    // Initialize the CLR host with the runtime config.
+    if (!impl_->clrHost.initialize(impl_->buildArtifacts.runtimeConfigPath, &localError))
     {
-      impl_->lastError = "Failed to launch the managed C# script host.";
+      impl_->lastError = localError;
       impl_->faulted = true;
       if (errorMessage != nullptr)
       {
-        *errorMessage = impl_->lastError;
+        *errorMessage = localError;
       }
       return false;
     }
 
-    if (!impl_->process.write_line("LOAD " + std::to_string(impl_->trackedEntities.size()), &localError))
+    // Get managed function pointers.
+    const std::string assemblyPath = impl_->buildArtifacts.hostPath.string();
+    const std::string typeName = "Hades.Scripting.ScriptHost, HadesScriptHost";
+
+    void *loadScenePtr = nullptr;
+    void *updateFramePtr = nullptr;
+    void *shutdownPtr = nullptr;
+
+    if (!impl_->clrHost.get_managed_function(assemblyPath, typeName, "LoadScene", &loadScenePtr, &localError) ||
+        !impl_->clrHost.get_managed_function(assemblyPath, typeName, "UpdateFrame", &updateFramePtr, &localError) ||
+        !impl_->clrHost.get_managed_function(assemblyPath, typeName, "Shutdown", &shutdownPtr, &localError))
     {
-      impl_->process.stop();
-      impl_->lastError = "Failed to initialize the managed C# script host.";
+      impl_->clrHost.close();
+      impl_->lastError = localError;
       impl_->faulted = true;
       if (errorMessage != nullptr)
       {
-        *errorMessage = impl_->lastError;
+        *errorMessage = localError;
       }
       return false;
     }
 
+    impl_->loadSceneFn = reinterpret_cast<LoadSceneFn>(loadScenePtr);
+    impl_->updateFrameFn = reinterpret_cast<UpdateFrameFn>(updateFramePtr);
+    impl_->shutdownFn = reinterpret_cast<ShutdownFn>(shutdownPtr);
+
+    // Prepare interop data for LoadScene.
+    const std::size_t entityCount = impl_->trackedEntities.size();
+    std::vector<InteropEntityData> entityDataVec(entityCount);
+    std::vector<InteropString> nameVec(entityCount);
+    std::vector<InteropString> classNameVec;
+
+    // Count total class names.
+    std::size_t totalClassNames = 0;
     for (const auto &entity : impl_->trackedEntities)
     {
-      if (!impl_->process.write_line(
-              "ENTITY " + std::to_string(entity.entity) + " " + base64_encode(entity.name) + " " +
-                  format_float(entity.x) + " " + format_float(entity.y) + " " + format_float(entity.z) + " " +
-                  std::to_string(entity.classNames.size()),
-              &localError))
-      {
-        impl_->process.stop();
-        impl_->lastError = "Failed to stream entity script metadata into the managed host.";
-        impl_->faulted = true;
-        if (errorMessage != nullptr)
-        {
-          *errorMessage = impl_->lastError;
-        }
-        return false;
-      }
+      totalClassNames += entity.classNames.size();
+    }
+    classNameVec.resize(totalClassNames);
 
-      for (const auto &className : entity.classNames)
+    std::size_t classNameOffset = 0;
+    for (std::size_t i = 0; i < entityCount; ++i)
+    {
+      const auto &entity = impl_->trackedEntities[i];
+      entityDataVec[i].entityId = entity.entity;
+      entityDataVec[i].x = entity.x;
+      entityDataVec[i].y = entity.y;
+      entityDataVec[i].z = entity.z;
+      entityDataVec[i].classNameCount = static_cast<int32_t>(entity.classNames.size());
+
+      nameVec[i].data = entity.name.c_str();
+      nameVec[i].length = static_cast<int32_t>(entity.name.size());
+
+      for (std::size_t j = 0; j < entity.classNames.size(); ++j)
       {
-        if (!impl_->process.write_line("ATTACH " + base64_encode(className), &localError))
-        {
-          impl_->process.stop();
-          impl_->lastError = "Failed to stream script attachments into the managed host.";
-          impl_->faulted = true;
-          if (errorMessage != nullptr)
-          {
-            *errorMessage = impl_->lastError;
-          }
-          return false;
-        }
+        classNameVec[classNameOffset + j].data = entity.classNames[j].c_str();
+        classNameVec[classNameOffset + j].length = static_cast<int32_t>(entity.classNames[j].size());
       }
+      classNameOffset += entity.classNames.size();
     }
 
-    if (!impl_->process.write_line("END", &localError))
+    InteropLoadResult loadResult{};
+    impl_->loadSceneFn(
+        entityDataVec.data(), static_cast<int32_t>(entityCount),
+        nameVec.data(), classNameVec.data(),
+        &loadResult);
+
+    if (loadResult.success == 0)
     {
-      impl_->process.stop();
-      impl_->lastError = "Failed to finalize script host initialization.";
+      std::string managedError;
+      if (loadResult.errorMessage != nullptr && loadResult.errorLength > 0)
+      {
+        managedError.assign(
+            reinterpret_cast<const char *>(loadResult.errorMessage),
+            static_cast<std::size_t>(loadResult.errorLength));
+      }
+      else
+      {
+        managedError = "The managed script host failed to load the scene.";
+      }
+
+      impl_->lastError = managedError;
       impl_->faulted = true;
       if (errorMessage != nullptr)
       {
-        *errorMessage = impl_->lastError;
-      }
-      return false;
-    }
-
-    std::string response;
-    if (!impl_->process.read_line(response, &localError))
-    {
-      impl_->process.stop();
-      impl_->lastError = "The managed script host exited before it finished loading attached scripts.";
-      impl_->faulted = true;
-      if (errorMessage != nullptr)
-      {
-        *errorMessage = impl_->lastError;
-      }
-      return false;
-    }
-
-    const auto responseFields = split_fields(response);
-    if (!responseFields.empty() && responseFields.front() == "ERROR" && responseFields.size() >= 2)
-    {
-      impl_->process.stop();
-      impl_->lastError = base64_decode(responseFields[1]);
-      impl_->faulted = true;
-      if (errorMessage != nullptr)
-      {
-        *errorMessage = impl_->lastError;
-      }
-      return false;
-    }
-
-    if (response != "READY")
-    {
-      impl_->process.stop();
-      impl_->lastError = "The managed script host returned an unexpected initialization response.";
-      impl_->faulted = true;
-      if (errorMessage != nullptr)
-      {
-        *errorMessage = impl_->lastError;
+        *errorMessage = managedError;
       }
       return false;
     }
@@ -1062,13 +1032,18 @@ namespace Hades.Scripting
   {
     (void)entityManager;
 
-    if (!impl_->running || impl_->trackedEntities.empty())
+    if (!impl_->running || impl_->trackedEntities.empty() || impl_->updateFrameFn == nullptr)
     {
       return;
     }
 
-    for (auto &entity : impl_->trackedEntities)
+    const std::size_t entityCount = impl_->trackedEntities.size();
+
+    // Build input positions.
+    std::vector<InteropEntityPosition> positionsIn(entityCount);
+    for (std::size_t i = 0; i < entityCount; ++i)
     {
+      auto &entity = impl_->trackedEntities[i];
       if (componentManager.hasComponent<PositionComponent3D>(entity.entity))
       {
         const auto &position = componentManager.getComponent<PositionComponent3D>(entity.entity);
@@ -1076,164 +1051,85 @@ namespace Hades.Scripting
         entity.y = position.y;
         entity.z = position.z;
       }
+
+      positionsIn[i].entityId = entity.entity;
+      positionsIn[i].x = entity.x;
+      positionsIn[i].y = entity.y;
+      positionsIn[i].z = entity.z;
     }
 
-    std::string localError;
-    if (!impl_->process.write_line(
-            "FRAME " + format_float(deltaTime) + " " + std::to_string(impl_->trackedEntities.size()),
-            &localError))
-    {
-      impl_->lastError = "The managed script host stopped accepting frame updates.";
-      impl_->faulted = true;
-      impl_->running = false;
-      impl_->process.stop();
-      return;
-    }
+    // Allocate output positions.
+    std::vector<InteropEntityPosition> positionsOut(entityCount);
 
-    for (const auto &entity : impl_->trackedEntities)
+    InteropUpdateResult updateResult{};
+    impl_->updateFrameFn(
+        deltaTime,
+        positionsIn.data(), static_cast<int32_t>(entityCount),
+        positionsOut.data(),
+        &updateResult);
+
+    if (updateResult.success == 0)
     {
-      if (!impl_->process.write_line(
-              "ENTITY " + std::to_string(entity.entity) + " " + format_float(entity.x) + " " +
-                  format_float(entity.y) + " " + format_float(entity.z),
-              &localError))
+      std::string managedError;
+      if (updateResult.errorMessage != nullptr && updateResult.errorLength > 0)
       {
-        impl_->lastError = "Failed to stream frame state into the managed script host.";
-        impl_->faulted = true;
-        impl_->running = false;
-        impl_->process.stop();
-        return;
+        managedError.assign(
+            reinterpret_cast<const char *>(updateResult.errorMessage),
+            static_cast<std::size_t>(updateResult.errorLength));
       }
-    }
+      else
+      {
+        managedError = "A managed script threw an exception during OnUpdate.";
+      }
 
-    if (!impl_->process.write_line("END", &localError))
-    {
-      impl_->lastError = "Failed to finalize the frame state sent to the managed script host.";
+      impl_->lastError = managedError;
       impl_->faulted = true;
       impl_->running = false;
-      impl_->process.stop();
       return;
     }
 
-    std::string response;
-    if (!impl_->process.read_line(response, &localError))
-    {
-      impl_->lastError = "The managed script host terminated during play mode.";
-      impl_->faulted = true;
-      impl_->running = false;
-      impl_->process.stop();
-      return;
-    }
-
-    const auto headerFields = split_fields(response);
-    if (!headerFields.empty() && headerFields.front() == "ERROR" && headerFields.size() >= 2)
-    {
-      impl_->lastError = base64_decode(headerFields[1]);
-      impl_->faulted = true;
-      impl_->running = false;
-      impl_->process.stop();
-      return;
-    }
-
-    if (headerFields.size() != 2 || headerFields[0] != "RESULT")
-    {
-      impl_->lastError = "The managed script host returned an invalid frame response header.";
-      impl_->faulted = true;
-      impl_->running = false;
-      impl_->process.stop();
-      return;
-    }
-
+    // Write back positions from managed code.
     std::unordered_map<Entity::EntityId, ScriptedEntity *> entitiesById;
     for (auto &entity : impl_->trackedEntities)
     {
       entitiesById[entity.entity] = &entity;
     }
 
-    std::size_t resultCount = 0;
-    try
+    const int32_t resultCount = updateResult.entityCount;
+    for (int32_t i = 0; i < resultCount; ++i)
     {
-      resultCount = static_cast<std::size_t>(std::stoul(headerFields[1]));
-    }
-    catch (...)
-    {
-      impl_->lastError = "The managed script host returned an invalid entity count.";
-      impl_->faulted = true;
-      impl_->running = false;
-      impl_->process.stop();
-      return;
-    }
-    for (std::size_t index = 0; index < resultCount; ++index)
-    {
-      if (!impl_->process.read_line(response, &localError))
-      {
-        impl_->lastError = "The managed script host returned an incomplete frame payload.";
-        impl_->faulted = true;
-        impl_->running = false;
-        impl_->process.stop();
-        return;
-      }
-
-      const auto fields = split_fields(response);
-      if (fields.size() != 5 || fields[0] != "ENTITY")
-      {
-        impl_->lastError = "The managed script host returned malformed entity output.";
-        impl_->faulted = true;
-        impl_->running = false;
-        impl_->process.stop();
-        return;
-      }
-
-      const Entity::EntityId entityId = static_cast<Entity::EntityId>(std::stoul(fields[1]));
-      float x = 0.0f;
-      float y = 0.0f;
-      float z = 0.0f;
-      if (!parse_float(fields[2], x) || !parse_float(fields[3], y) || !parse_float(fields[4], z))
-      {
-        impl_->lastError = "The managed script host returned invalid numeric output.";
-        impl_->faulted = true;
-        impl_->running = false;
-        impl_->process.stop();
-        return;
-      }
-
-      const auto trackedEntityIt = entitiesById.find(entityId);
-      if (trackedEntityIt == entitiesById.end())
+      const auto &out = positionsOut[static_cast<std::size_t>(i)];
+      const auto it = entitiesById.find(out.entityId);
+      if (it == entitiesById.end())
       {
         continue;
       }
 
-      ScriptedEntity *trackedEntity = trackedEntityIt->second;
-      trackedEntity->x = x;
-      trackedEntity->y = y;
-      trackedEntity->z = z;
+      ScriptedEntity *tracked = it->second;
+      tracked->x = out.x;
+      tracked->y = out.y;
+      tracked->z = out.z;
 
-      if (componentManager.hasComponent<PositionComponent3D>(entityId))
+      if (componentManager.hasComponent<PositionComponent3D>(out.entityId))
       {
-        auto &position = componentManager.getComponent<PositionComponent3D>(entityId);
-        position.x = x;
-        position.y = y;
-        position.z = z;
+        auto &position = componentManager.getComponent<PositionComponent3D>(out.entityId);
+        position.x = out.x;
+        position.y = out.y;
+        position.z = out.z;
       }
-    }
-
-    if (!impl_->process.read_line(response, &localError) || response != "END")
-    {
-      impl_->lastError = "The managed script host frame response was not terminated correctly.";
-      impl_->faulted = true;
-      impl_->running = false;
-      impl_->process.stop();
-      return;
     }
   }
 
   void ScriptRuntime::stop()
   {
-    if (impl_->process.is_running())
+    if (impl_->shutdownFn != nullptr)
     {
-      std::string ignored;
-      impl_->process.write_line("STOP", &ignored);
+      impl_->shutdownFn();
     }
-    impl_->process.stop();
+    impl_->clrHost.close();
+    impl_->loadSceneFn = nullptr;
+    impl_->updateFrameFn = nullptr;
+    impl_->shutdownFn = nullptr;
     impl_->trackedEntities.clear();
     impl_->running = false;
     impl_->faulted = false;

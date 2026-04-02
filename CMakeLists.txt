@@ -56,6 +56,8 @@ target_link_libraries(
           Vulkan::Vulkan)
 if(WIN32)
   target_link_libraries(${PROJECT_NAME} PRIVATE Ole32 uuid)
+else()
+  target_link_libraries(${PROJECT_NAME} PRIVATE dl)
 endif()
 hades_stage_runtime_dependency(${PROJECT_NAME} assimp)
 
@@ -79,11 +81,15 @@ set(TEST_SUPPORT_SOURCES
   src/engine/components/transform_hierarchy_component.cpp
   src/engine/core/ecs/entity_factory.cpp
   src/engine/core/ecs/entity_manager.cpp
+  src/engine/runtime/clr_host.cpp
   src/engine/runtime/script_runtime.cpp
   src/engine/runtime/subprocess.cpp)
 
 add_executable(hades_tests src/tests/test.cpp ${TEST_SUPPORT_SOURCES})
 target_link_libraries(hades_tests PRIVATE assimp gtest_main)
+if(NOT WIN32)
+  target_link_libraries(hades_tests PRIVATE dl)
+endif()
 hades_stage_runtime_dependency(hades_tests assimp)
 
 enable_testing()
