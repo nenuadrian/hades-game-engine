@@ -76,6 +76,9 @@ function(hades_configure_dependencies)
 
   set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
   set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
+  # Assimp defaults to the system zlib on non-Windows platforms, which breaks
+  # fresh source-only builds like the Docker CI image.
+  set(ASSIMP_BUILD_ZLIB ON CACHE BOOL "" FORCE)
   set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
   set(ASSIMP_WARNINGS_AS_ERRORS OFF CACHE BOOL "" FORCE)
   set(ASSIMP_INJECT_DEBUG_POSTFIX OFF CACHE BOOL "" FORCE)
