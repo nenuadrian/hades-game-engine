@@ -37,6 +37,12 @@ namespace hades
     bool faulted() const;
     const std::string &last_error() const;
 
+    /// Compile the given .cs source files without loading or running them.
+    /// Returns true on success. On failure, sets errorMessage with build output.
+    static bool compile(
+        const std::vector<std::filesystem::path> &sourceFiles,
+        std::string *errorMessage = nullptr);
+
   private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

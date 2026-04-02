@@ -4,9 +4,12 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <future>
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "types.h"
@@ -64,6 +67,17 @@ namespace hades
     std::filesystem::path pendingWorkspaceCreateParentPath_;
     std::array<char, 256> workspaceCreateNameBuffer_{};
     std::string workspaceCreateError_;
+
+    // File watch / background compile state.
+    std::unordered_map<std::string, std::filesystem::file_time_type> scriptModTimes_;
+    std::future<std::string> backgroundCompileResult_;
+    bool backgroundCompileInProgress_ = false;
+    std::string lastCompileError_;
+    bool lastCompileSucceeded_ = true;
+
+    // Parsed public field cache (keyed by resolved script path).
+    std::unordered_map<std::string, std::vector<std::pair<std::string, std::string>>> parsedFieldsCache_;
+    std::unordered_map<std::string, std::filesystem::file_time_type> parsedFieldsModTimes_;
 
     void configure_default_dock_layout(std::uint32_t dockspaceId);
     void refresh_workspace_cache(float deltaTime, const std::filesystem::path &workspacePath);

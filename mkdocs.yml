@@ -2,6 +2,8 @@ site_name: Hades Game Engine
 site_description: Architecture and developer documentation for Hades.
 repo_url: https://github.com/nenuadrian/hades-game-engine
 repo_name: nenuadrian/hades-game-engine
+hooks:
+  - scripts/mkdocs_hooks.py
 
 theme:
   name: material
@@ -27,6 +29,7 @@ theme:
 
 nav:
   - Home: index.md
+  - Scripting: scripting.md
   - Architecture:
     - Overview: architecture.md
     - Class Relationships: generated/class-relationships.md

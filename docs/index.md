@@ -3,41 +3,108 @@ hide:
   - toc
 ---
 
-# Hades Game Engine
+<!-- Generated from README.md by scripts/mkdocs_hooks.py. Do not edit directly. -->
 
-`> source-first docs for the engine, editor, and generated type maps`
+# Hades - Light C++ 3D Game Engine
 
-## Jump In
+[![CMake on multiple platforms](https://github.com/nenuadrian/hades-game-engine/actions/workflows/cmake-multi-platform.yml/badge.svg)](https://github.com/nenuadrian/hades-game-engine/actions/workflows/cmake-multi-platform.yml)
+[![Docs](https://github.com/nenuadrian/hades-game-engine/actions/workflows/docs-pages.yml/badge.svg)](https://github.com/nenuadrian/hades-game-engine/actions/workflows/docs-pages.yml)
+[![Docker test image](https://github.com/nenuadrian/hades-game-engine/actions/workflows/docker-build.yml/badge.svg)](https://github.com/nenuadrian/hades-game-engine/actions/workflows/docker-build.yml)
 
-- [Architecture overview](architecture.md)
-- [Class relationships](generated/class-relationships.md)
+## table of contents
 
-<div class="grid cards" markdown>
+- [table of contents](#table-of-contents)
+- [overview](#overview)
+- [goals](#goals)
+- [features](#features)
+- [Entity-Component-System (ECS)](#entity-component-system-ecs)
+- [Build \& Run \& Test](#build-run-test)
+  - [Build](#build)
+  - [Run](#run)
+  - [Test](#test)
+- [Scripting](#scripting)
+- [Documentation](#documentation)
+- [Previous version](#previous-version)
 
--   ### Architecture overview
+## overview
 
-    Start with the engine/editor boundaries, ECS flow, and rendering structure
-    before dropping into source.
+A game engine written in C++, which has the ability to handle 3D graphics, sound, entity management, and game mechanics using scripts. It currently supports the OpenGL rendering system, but there are plans to include Vulkan as a renderer in the future. The build system used for this engine is cmake.
 
--   ### Generated class map
+The purpose is educational and experimental in nature to explore the intriguing world of game engine development.
 
-    Open the generated relationship map when you need the concrete type-level
-    links between systems.
+Not maintained or supported.
 
--   ### Local workflow
+![logo](logo.png)
 
-    Build and preview the docs locally:
+## goals
 
-    ```bash
-    python3 -m pip install -r requirements-docs.txt
-    python3 scripts/generate_class_diagram.py
-    python3 -m mkdocs serve
-    ```
+- develop C++ software engineering skills
+- understand graphics 2D and 3D rendering pipelines with OpenGL and other frameworks
+- build a usable engine for making a small game
 
-</div>
+## features
 
-## What This Site Covers
+- entity management, with camera and model features
+- C# scripts attachable to entities and compiled on play through the local dotnet SDK
+- save / load project from JSON
+- model loading using assimp and stb
+- sound via miniaudio, with streaming, buses, and basic 3D spatial audio support
+- tests
+- generating shaders dynamically
 
-- engine and editor module boundaries
-- generated class relationships from `src/**/*.h*`
-- the GitHub Pages docs workflow
+## Entity-Component-System (ECS)
+
+Custom built to build up a natural understanding of the pattern. For example, it is not an Entity-Component System, made from entity and components, but one made out of three parts, the system being an essential component of the triad, acting on entities with specific components.
+
+<a id="build-run-test"></a>
+
+## Build & Run & Test
+
+### Build
+
+```bash
+cmake -S . -B build
+cmake --build build
+```
+
+To force fresh downloads instead of using `lib/`:
+
+```bash
+cmake -S . -B build -DHADES_USE_BUNDLED_DEPS=OFF
+cmake --build build
+```
+
+### Run
+
+```bash
+./build/HadesGameEngine
+```
+
+Entity scripts are compiled when Play starts. Install a local `dotnet` SDK if you
+want to attach `.cs` files to entities and run them in play mode on macOS,
+Linux, or Windows.
+
+### Test
+
+```bash
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+## Scripting
+
+For C# scripting workflow, runtime behavior, and the current limitations, see
+[SCRIPTS.md](scripting.md).
+
+## Documentation
+
+```bash
+python3 -m pip install -r requirements-docs.txt
+python3 scripts/generate_class_diagram.py
+python3 -m mkdocs serve
+```
+
+## Previous version
+
+Multiple versions overrode each other in this repository, going through Metal, Vulkan and Open GL (<https://github.com/nenuadrian/hades-game-engine/tree/507e1d5c3bece7e09d78d668d4e3d652be0b2431>).

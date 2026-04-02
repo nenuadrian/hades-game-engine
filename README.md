@@ -1,11 +1,8 @@
-<p align="center">
-  <h1>Hades - Light C++ 3D Game Engine</h1>
+# Hades - Light C++ 3D Game Engine
 
 [![CMake on multiple platforms](https://github.com/nenuadrian/hades-game-engine/actions/workflows/cmake-multi-platform.yml/badge.svg)](https://github.com/nenuadrian/hades-game-engine/actions/workflows/cmake-multi-platform.yml)
 [![Docs](https://github.com/nenuadrian/hades-game-engine/actions/workflows/docs-pages.yml/badge.svg)](https://github.com/nenuadrian/hades-game-engine/actions/workflows/docs-pages.yml)
 [![Docker test image](https://github.com/nenuadrian/hades-game-engine/actions/workflows/docker-build.yml/badge.svg)](https://github.com/nenuadrian/hades-game-engine/actions/workflows/docker-build.yml)
-
-</p>
 
 ## table of contents
 
@@ -14,7 +11,7 @@
 - [goals](#goals)
 - [features](#features)
 - [Entity-Component-System (ECS)](#entity-component-system-ecs)
-- [Build \& Run \& Test](#build--run--test)
+- [Build \& Run \& Test](#build-run-test)
   - [Build](#build)
   - [Run](#run)
   - [Test](#test)
@@ -51,6 +48,8 @@ Not maintained or supported.
 ## Entity-Component-System (ECS)
 
 Custom built to build up a natural understanding of the pattern. For example, it is not an Entity-Component System, made from entity and components, but one made out of three parts, the system being an essential component of the triad, acting on entities with specific components.
+
+<a id="build-run-test"></a>
 
 ## Build & Run & Test
 

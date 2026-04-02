@@ -8,8 +8,12 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <memory>
+#include <set>
+#include <sstream>
 #include <string>
+#include <utility>
 
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -209,10 +213,146 @@ namespace hades
              className +
              " : HadesScript\n"
              "{\n"
+             "    public override void OnStart(EntityContext context)\n"
+             "    {\n"
+             "    }\n"
+             "\n"
              "    public override void OnUpdate(EntityContext context, float deltaTime)\n"
              "    {\n"
              "    }\n"
              "}\n";
+    }
+
+    std::string trim(const std::string &s)
+    {
+      const auto start = s.find_first_not_of(" \t\r\n");
+      if (start == std::string::npos)
+      {
+        return {};
+      }
+      const auto end = s.find_last_not_of(" \t\r\n");
+      return s.substr(start, end - start + 1);
+    }
+
+    std::vector<std::pair<std::string, std::string>> parse_public_fields(
+        const std::filesystem::path &scriptPath)
+    {
+      std::vector<std::pair<std::string, std::string>> fields;
+
+      std::ifstream file(scriptPath);
+      if (!file.is_open())
+      {
+        return fields;
+      }
+
+      bool insideTargetClass = false;
+      int braceDepth = 0;
+      int classBraceDepth = -1;
+
+      std::string line;
+      while (std::getline(file, line))
+      {
+        const std::string trimmed = trim(line);
+
+        // Look for a class that extends HadesScript.
+        if (!insideTargetClass)
+        {
+          if (trimmed.find("HadesScript") != std::string::npos &&
+              trimmed.find("class ") != std::string::npos)
+          {
+            insideTargetClass = true;
+            // Count any opening braces on this line.
+            for (char ch : trimmed)
+            {
+              if (ch == '{')
+              {
+                if (classBraceDepth < 0)
+                {
+                  classBraceDepth = braceDepth;
+                }
+                ++braceDepth;
+              }
+              else if (ch == '}')
+              {
+                --braceDepth;
+              }
+            }
+            continue;
+          }
+        }
+
+        // Track braces.
+        for (char ch : trimmed)
+        {
+          if (ch == '{')
+          {
+            if (insideTargetClass && classBraceDepth < 0)
+            {
+              classBraceDepth = braceDepth;
+            }
+            ++braceDepth;
+          }
+          else if (ch == '}')
+          {
+            --braceDepth;
+            if (insideTargetClass && braceDepth <= classBraceDepth)
+            {
+              // Exited the class body.
+              insideTargetClass = false;
+              classBraceDepth = -1;
+            }
+          }
+        }
+
+        if (!insideTargetClass || classBraceDepth < 0)
+        {
+          continue;
+        }
+
+        // Only look at direct class-body members (one brace level inside the class).
+        if (braceDepth != classBraceDepth + 1)
+        {
+          continue;
+        }
+
+        // Skip lines that are methods, overrides, static, or don't start with public.
+        if (trimmed.find("public") != 0)
+        {
+          continue;
+        }
+        if (trimmed.find("override") != std::string::npos ||
+            trimmed.find("virtual") != std::string::npos ||
+            trimmed.find("static") != std::string::npos ||
+            trimmed.find("(") != std::string::npos ||
+            trimmed.find("void") != std::string::npos ||
+            trimmed.find("class ") != std::string::npos)
+        {
+          continue;
+        }
+
+        // Parse: public <type> <name> [= ...] ;
+        std::istringstream iss(trimmed);
+        std::string keyword;
+        std::string type;
+        std::string name;
+        if (!(iss >> keyword >> type >> name))
+        {
+          continue;
+        }
+
+        // Remove trailing ; or = from name.
+        while (!name.empty() && (name.back() == ';' || name.back() == '='))
+        {
+          name.pop_back();
+        }
+
+        if (!name.empty() && !type.empty())
+        {
+          fields.emplace_back(type, name);
+        }
+      }
+
+      return fields;
     }
 
     bool create_workspace_item(
@@ -470,6 +610,61 @@ namespace hades
   {
     configure_default_dock_layout(gui->render_frame());
     refresh_workspace_cache(deltaTime, workspacePath);
+
+    // File watch: detect script changes and trigger background compile.
+    if (!activeWorkspacePath_.empty() && !workspaceScriptFiles_.empty())
+    {
+      bool scriptsChanged = false;
+      for (const auto &relPath : workspaceScriptFiles_)
+      {
+        const auto fullPath = activeWorkspacePath_ / relPath;
+        std::error_code ec;
+        const auto modTime = std::filesystem::last_write_time(fullPath, ec);
+        if (ec)
+        {
+          continue;
+        }
+        auto it = scriptModTimes_.find(relPath);
+        if (it == scriptModTimes_.end())
+        {
+          scriptModTimes_[relPath] = modTime;
+          scriptsChanged = true;
+        }
+        else if (it->second != modTime)
+        {
+          it->second = modTime;
+          scriptsChanged = true;
+        }
+      }
+
+      if (scriptsChanged && !backgroundCompileInProgress_)
+      {
+        std::vector<std::filesystem::path> sourceFiles;
+        sourceFiles.reserve(workspaceScriptFiles_.size());
+        for (const auto &relPath : workspaceScriptFiles_)
+        {
+          sourceFiles.push_back(activeWorkspacePath_ / relPath);
+        }
+
+        backgroundCompileInProgress_ = true;
+        backgroundCompileResult_ = std::async(std::launch::async,
+            [files = std::move(sourceFiles)]() -> std::string
+            {
+              std::string error;
+              ScriptRuntime::compile(files, &error);
+              return error;
+            });
+      }
+
+      if (backgroundCompileInProgress_ && backgroundCompileResult_.valid() &&
+          backgroundCompileResult_.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+      {
+        lastCompileError_ = backgroundCompileResult_.get();
+        lastCompileSucceeded_ = lastCompileError_.empty();
+        backgroundCompileInProgress_ = false;
+      }
+    }
+
     handle_entity_creation_requests(entityManager, componentManager);
     import_model(entityManager, componentManager);
     handle_play_mode_requests(entityManager, componentManager, scriptRuntime);
@@ -1324,6 +1519,71 @@ namespace hades
           {
             removeAttachmentIndex = index;
           }
+
+          // Display public fields parsed from the script file.
+          if (!attachment.scriptPath.empty() && !activeWorkspacePath_.empty())
+          {
+            const auto resolvedPath = activeWorkspacePath_ / attachment.scriptPath;
+            const std::string pathKey = resolvedPath.string();
+
+            // Check if we need to re-parse (file changed or not yet cached).
+            std::error_code modEc;
+            const auto modTime = std::filesystem::last_write_time(resolvedPath, modEc);
+            bool needsParse = false;
+            if (!modEc)
+            {
+              auto modIt = parsedFieldsModTimes_.find(pathKey);
+              if (modIt == parsedFieldsModTimes_.end() || modIt->second != modTime)
+              {
+                needsParse = true;
+                parsedFieldsModTimes_[pathKey] = modTime;
+              }
+            }
+
+            if (needsParse)
+            {
+              parsedFieldsCache_[pathKey] = parse_public_fields(resolvedPath);
+            }
+
+            auto cacheIt = parsedFieldsCache_.find(pathKey);
+            if (cacheIt != parsedFieldsCache_.end() && !cacheIt->second.empty())
+            {
+              const auto &fields = cacheIt->second;
+
+              // Remove stale entries from publicFieldValues.
+              std::set<std::string> currentFieldNames;
+              for (const auto &[type, name] : fields)
+              {
+                currentFieldNames.insert(name);
+              }
+              for (auto it = attachment.publicFieldValues.begin(); it != attachment.publicFieldValues.end();)
+              {
+                if (currentFieldNames.find(it->first) == currentFieldNames.end())
+                {
+                  it = attachment.publicFieldValues.erase(it);
+                }
+                else
+                {
+                  ++it;
+                }
+              }
+
+              ImGui::Separator();
+              ImGui::TextDisabled("Public Fields:");
+              for (const auto &[type, name] : fields)
+              {
+                auto &value = attachment.publicFieldValues[name];
+                std::array<char, 256> fieldBuffer{};
+                std::snprintf(fieldBuffer.data(), fieldBuffer.size(), "%s", value.c_str());
+
+                const std::string fieldLabel = name + " (" + type + ")";
+                if (ImGui::InputText(fieldLabel.c_str(), fieldBuffer.data(), fieldBuffer.size()))
+                {
+                  value = fieldBuffer.data();
+                }
+              }
+            }
+          }
         }
 
         ImGui::PopID();
@@ -1336,6 +1596,23 @@ namespace hades
 
       ImGui::TextDisabled("Scripts compile when Play starts using dotnet and must derive from Hades.Scripting.HadesScript.");
       ImGui::TextDisabled("Relative script paths resolve from the active workspace folder.");
+
+      if (backgroundCompileInProgress_)
+      {
+        ImGui::TextDisabled("Compiling scripts...");
+      }
+      else if (!lastCompileSucceeded_)
+      {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.3f, 0.3f, 1.0f));
+        ImGui::TextWrapped("Compile error: %s", lastCompileError_.c_str());
+        ImGui::PopStyleColor();
+      }
+      else if (!scriptComponent.attachments.empty())
+      {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.3f, 1.0f, 0.3f, 1.0f));
+        ImGui::TextDisabled("Scripts compiled successfully.");
+        ImGui::PopStyleColor();
+      }
     }
 
     ImGui::End();

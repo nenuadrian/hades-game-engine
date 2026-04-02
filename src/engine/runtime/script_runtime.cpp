@@ -1150,4 +1150,17 @@ namespace Hades.Scripting
   {
     return impl_->lastError;
   }
+
+  bool ScriptRuntime::compile(
+      const std::vector<std::filesystem::path> &sourceFiles,
+      std::string *errorMessage)
+  {
+    if (sourceFiles.empty())
+    {
+      return true;
+    }
+
+    BuildArtifacts artifacts;
+    return prepare_build(sourceFiles, artifacts, errorMessage);
+  }
 }
