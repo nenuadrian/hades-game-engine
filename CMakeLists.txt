@@ -52,7 +52,9 @@ set(TEST_SUPPORT_SOURCES
   src/engine/components/position_component_3d.cpp
   src/engine/components/transform_hierarchy_component.cpp
   src/engine/core/ecs/entity_factory.cpp
-  src/engine/core/ecs/entity_manager.cpp)
+  src/engine/core/ecs/entity_manager.cpp
+  src/engine/runtime/script_runtime.cpp
+  src/engine/runtime/subprocess.cpp)
 
 add_executable(hades_tests src/tests/test.cpp ${TEST_SUPPORT_SOURCES})
 target_link_libraries(hades_tests PRIVATE assimp gtest_main)

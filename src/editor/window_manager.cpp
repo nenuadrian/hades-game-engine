@@ -440,7 +440,10 @@ namespace hades
       : renderer(std::make_unique<VulkanRenderer>()),
         audio_engine(std::make_unique<AudioEngine>()) {}
 
-  WindowManager::~WindowManager() = default;
+  WindowManager::~WindowManager()
+  {
+    scriptRuntime.stop();
+  }
 
   void WindowManager::request_quit()
   {
@@ -561,10 +564,24 @@ namespace hades
     imgui_session.begin_frame();
 
     ImGuiIO &io = ImGui::GetIO();
-    editor.render(io.DeltaTime, entityManager, componentManager);
+    editor.render(io.DeltaTime, entityManager, componentManager, scriptRuntime);
     if (editor.state.isPlaying)
     {
-      systemManager.updateSystems(io.DeltaTime, componentManager, entityManager);
+      scriptRuntime.update(io.DeltaTime, componentManager, entityManager);
+      if (scriptRuntime.faulted())
+      {
+        editor.state.isPlaying = false;
+        editor.state.activeCamera.reset();
+        editor.state.playModeMessage = scriptRuntime.last_error();
+        if (audio_engine != nullptr)
+        {
+          audio_engine->stop_all();
+        }
+      }
+      else
+      {
+        systemManager.updateSystems(io.DeltaTime, componentManager, entityManager);
+      }
     }
     else if (wasPlayingLastFrame && audio_engine != nullptr)
     {

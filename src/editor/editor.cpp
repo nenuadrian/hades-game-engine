@@ -18,12 +18,14 @@
 #include "../engine/components/position_component_3d.hpp"
 #include "../engine/components/primitive_component.hpp"
 #include "../engine/components/render_component.hpp"
+#include "../engine/components/script_component.hpp"
 #include "../engine/components/transform_hierarchy_component.hpp"
 #include "../engine/core/ecs/component_manager.hpp"
 #include "../engine/core/ecs/entity_factory.hpp"
 #include "../engine/core/ecs/entity_manager.hpp"
 #include "../engine/gui/imgui.hpp"
 #include "../engine/runtime/main_camera_selection.hpp"
+#include "../engine/runtime/script_runtime.hpp"
 
 namespace hades
 {
@@ -217,16 +219,20 @@ namespace hades
 
   Editor::~Editor() = default;
 
-  void Editor::render(float deltaTime, EntityManager &entityManager, ComponentManager &componentManager)
+  void Editor::render(
+      float deltaTime,
+      EntityManager &entityManager,
+      ComponentManager &componentManager,
+      ScriptRuntime &scriptRuntime)
   {
     configure_default_dock_layout(gui->render_frame());
     handle_entity_creation_requests(entityManager, componentManager);
     import_model(entityManager, componentManager);
-    handle_play_mode_requests(entityManager, componentManager);
+    handle_play_mode_requests(entityManager, componentManager, scriptRuntime);
     entities(entityManager, componentManager);
     properties(entityManager, componentManager);
     components(componentManager);
-    game(entityManager, componentManager);
+    game(entityManager, componentManager, scriptRuntime);
     debug(deltaTime);
   }
 
@@ -350,24 +356,30 @@ namespace hades
     ImGui::EndPopup();
   }
 
-  void Editor::handle_play_mode_requests(EntityManager &entityManager, ComponentManager &componentManager)
+  void Editor::handle_play_mode_requests(
+      EntityManager &entityManager,
+      ComponentManager &componentManager,
+      ScriptRuntime &scriptRuntime)
   {
     switch (state.pendingPlayAction)
     {
     case EditorPlayAction::None:
       return;
     case EditorPlayAction::Start:
-      start_play_mode(entityManager, componentManager);
+      start_play_mode(entityManager, componentManager, scriptRuntime);
       break;
     case EditorPlayAction::Stop:
-      stop_play_mode();
+      stop_play_mode(scriptRuntime);
       break;
     }
 
     state.pendingPlayAction = EditorPlayAction::None;
   }
 
-  void Editor::start_play_mode(EntityManager &entityManager, ComponentManager &componentManager)
+  void Editor::start_play_mode(
+      EntityManager &entityManager,
+      ComponentManager &componentManager,
+      ScriptRuntime &scriptRuntime)
   {
     const auto selection = select_main_camera(entityManager, componentManager);
     if (selection.status != MainCameraSelectionStatus::Ready || !selection.entity.has_value())
@@ -378,13 +390,23 @@ namespace hades
       return;
     }
 
+    std::string scriptError;
+    if (!scriptRuntime.start(componentManager, entityManager, &scriptError))
+    {
+      state.isPlaying = false;
+      state.activeCamera.reset();
+      state.playModeMessage = scriptError;
+      return;
+    }
+
     state.isPlaying = true;
     state.activeCamera = selection.entity;
     state.playModeMessage.clear();
   }
 
-  void Editor::stop_play_mode()
+  void Editor::stop_play_mode(ScriptRuntime &scriptRuntime)
   {
+    scriptRuntime.stop();
     state.isPlaying = false;
     state.activeCamera.reset();
     state.playModeMessage.clear();
@@ -631,6 +653,72 @@ namespace hades
       ImGui::Separator();
     }
 
+    if (!componentManager.hasComponent<ScriptComponent>(entity))
+    {
+      if (ImGui::Button("Add Script Component"))
+      {
+        componentManager.addComponent(entity, ScriptComponent());
+      }
+    }
+    else
+    {
+      auto &scriptComponent = componentManager.getComponent<ScriptComponent>(entity);
+      ImGui::TextUnformatted("Scripts");
+
+      std::optional<std::size_t> removeAttachmentIndex;
+      for (std::size_t index = 0; index < scriptComponent.attachments.size(); ++index)
+      {
+        auto &attachment = scriptComponent.attachments[index];
+        ImGui::PushID(static_cast<int>(index));
+
+        std::array<char, 260> pathBuffer{};
+        std::snprintf(pathBuffer.data(), pathBuffer.size(), "%s", attachment.scriptPath.c_str());
+        std::array<char, 160> classBuffer{};
+        std::snprintf(classBuffer.data(), classBuffer.size(), "%s", attachment.className.c_str());
+
+        ImGui::SeparatorText(("Attachment " + std::to_string(index + 1)).c_str());
+        ImGui::Checkbox("Enabled", &attachment.enabled);
+        if (ImGui::InputText("Script Path", pathBuffer.data(), pathBuffer.size()))
+        {
+          attachment.scriptPath = pathBuffer.data();
+          if (attachment.className.empty() && !attachment.scriptPath.empty())
+          {
+            attachment.className = std::filesystem::path(attachment.scriptPath).stem().string();
+          }
+        }
+        if (ImGui::InputText("Class Name", classBuffer.data(), classBuffer.size()))
+        {
+          attachment.className = classBuffer.data();
+        }
+
+        if (ImGui::Button("Use File Name"))
+        {
+          attachment.className = std::filesystem::path(attachment.scriptPath).stem().string();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Remove Attachment"))
+        {
+          removeAttachmentIndex = index;
+        }
+
+        ImGui::PopID();
+      }
+
+      if (removeAttachmentIndex.has_value())
+      {
+        scriptComponent.attachments.erase(scriptComponent.attachments.begin() + static_cast<std::ptrdiff_t>(*removeAttachmentIndex));
+      }
+
+      if (ImGui::Button("Add Script Attachment"))
+      {
+        scriptComponent.attachments.push_back(ScriptAttachment());
+      }
+
+      ImGui::TextDisabled("Scripts compile when Play starts using dotnet and must derive from Hades.Scripting.HadesScript.");
+      ImGui::TextDisabled("Relative script paths resolve from the engine process working directory.");
+      ImGui::Separator();
+    }
+
     ImGui::End();
   }
 
@@ -687,6 +775,10 @@ namespace hades
     {
       render_component_entry("Render");
     }
+    if (componentManager.hasComponent<ScriptComponent>(entity))
+    {
+      render_component_entry("Script");
+    }
 
     if (componentManager.hasComponent<TransformHierarchyComponent>(entity))
     {
@@ -727,7 +819,10 @@ namespace hades
     ImGui::End();
   }
 
-  void Editor::game(EntityManager &entityManager, ComponentManager &componentManager)
+  void Editor::game(
+      EntityManager &entityManager,
+      ComponentManager &componentManager,
+      ScriptRuntime &scriptRuntime)
   {
     ImGui::Begin(GAME_WINDOW_TITLE);
 
@@ -735,11 +830,11 @@ namespace hades
     {
       if (state.isPlaying)
       {
-        stop_play_mode();
+        stop_play_mode(scriptRuntime);
       }
       else
       {
-        start_play_mode(entityManager, componentManager);
+        start_play_mode(entityManager, componentManager, scriptRuntime);
       }
     }
 

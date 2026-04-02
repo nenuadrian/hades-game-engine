@@ -15,6 +15,7 @@ namespace hades
   class ComponentManager;
   class EntityManager;
   class GUI;
+  class ScriptRuntime;
 
   class Editor
   {
@@ -25,7 +26,11 @@ namespace hades
     Editor();
     ~Editor();
 
-    void render(float deltaTime, EntityManager &entityManager, ComponentManager &componentManager);
+    void render(
+        float deltaTime,
+        EntityManager &entityManager,
+        ComponentManager &componentManager,
+        ScriptRuntime &scriptRuntime);
 
   private:
     bool dockLayoutInitialized = false;
@@ -36,16 +41,16 @@ namespace hades
     void configure_default_dock_layout(std::uint32_t dockspaceId);
     void handle_entity_creation_requests(EntityManager &entityManager, ComponentManager &componentManager);
     void import_model(EntityManager &entityManager, ComponentManager &componentManager);
-    void handle_play_mode_requests(EntityManager &entityManager, ComponentManager &componentManager);
-    void start_play_mode(EntityManager &entityManager, ComponentManager &componentManager);
-    void stop_play_mode();
+    void handle_play_mode_requests(EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime);
+    void start_play_mode(EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime);
+    void stop_play_mode(ScriptRuntime &scriptRuntime);
     void set_main_camera(Entity::EntityId entity, EntityManager &entityManager, ComponentManager &componentManager);
     std::optional<Entity::EntityId> get_selected_parent(ComponentManager &componentManager) const;
     std::string entity_label(Entity::EntityId entity, ComponentManager &componentManager) const;
     void entities(EntityManager &entityManager, ComponentManager &componentManager);
     void properties(EntityManager &entityManager, ComponentManager &componentManager);
     void components(ComponentManager &componentManager);
-    void game(EntityManager &entityManager, ComponentManager &componentManager);
+    void game(EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime);
     void render_hierarchy(Entity::EntityId entity, ComponentManager &componentManager);
     void render_hierarchies(EntityManager &entityManager, ComponentManager &componentManager);
     void debug(float deltaTime);

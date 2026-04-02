@@ -7,6 +7,7 @@
 #include "../engine/core/ecs/component_manager.hpp"
 #include "../engine/core/ecs/entity_manager.hpp"
 #include "../engine/core/ecs/system_manager.hpp"
+#include "../engine/runtime/script_runtime.hpp"
 #include "editor.hpp"
 
 struct SDL_Window;
@@ -54,6 +55,7 @@ namespace hades
     EntityManager entityManager;
     ComponentManager componentManager;
     SystemManager systemManager;
+    ScriptRuntime scriptRuntime;
     Editor editor;
     // Keep destruction order: ImGui, audio, renderer, SDL window, then SDL itself.
     SdlSession sdl_session;

@@ -11,11 +11,13 @@
 #include "../engine/components/name_component.hpp"
 #include "../engine/components/position_component_3d.hpp"
 #include "../engine/components/primitive_component.hpp"
+#include "../engine/components/script_component.hpp"
 #include "../engine/components/transform_hierarchy_component.hpp"
 #include "../engine/core/ecs/component_manager.hpp"
 #include "../engine/core/ecs/entity_factory.hpp"
 #include "../engine/core/ecs/entity_manager.hpp"
 #include "../engine/runtime/main_camera_selection.hpp"
+#include "../engine/runtime/script_runtime.hpp"
 
 namespace hades
 {
@@ -231,6 +233,42 @@ namespace hades
       ASSERT_EQ(selection.status, MainCameraSelectionStatus::Ready);
       ASSERT_TRUE(selection.entity.has_value());
       EXPECT_EQ(selection.entity.value(), secondCamera);
+    }
+
+    TEST(ScriptRuntimeTest, StartWithoutAttachedScriptsDoesNothing)
+    {
+      EntityManager entityManager;
+      ComponentManager componentManager;
+      ScriptRuntime scriptRuntime;
+
+      EntityFactory::createCube(entityManager, componentManager);
+
+      std::string errorMessage;
+      EXPECT_TRUE(scriptRuntime.start(componentManager, entityManager, &errorMessage));
+      EXPECT_FALSE(scriptRuntime.is_running());
+      EXPECT_FALSE(scriptRuntime.faulted());
+      EXPECT_TRUE(errorMessage.empty());
+    }
+
+    TEST(ScriptRuntimeTest, StartRejectsMissingScriptFile)
+    {
+      EntityManager entityManager;
+      ComponentManager componentManager;
+      ScriptRuntime scriptRuntime;
+
+      const auto cube = EntityFactory::createCube(entityManager, componentManager);
+      ScriptComponent scriptComponent;
+      scriptComponent.attachments.push_back(ScriptAttachment{
+          "missing-script.cs",
+          "MissingScript",
+          true});
+      componentManager.addComponent(cube, scriptComponent);
+
+      std::string errorMessage;
+      EXPECT_FALSE(scriptRuntime.start(componentManager, entityManager, &errorMessage));
+      EXPECT_FALSE(scriptRuntime.is_running());
+      EXPECT_TRUE(scriptRuntime.faulted());
+      EXPECT_NE(errorMessage.find("Script file does not exist"), std::string::npos);
     }
   }
 }
