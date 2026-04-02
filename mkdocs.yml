@@ -7,9 +7,20 @@ theme:
   name: material
   logo: logo.jpeg
   favicon: logo.jpeg
+  palette:
+    scheme: slate
+    primary: black
+    accent: cyan
+  font:
+    text: Space Grotesk
+    code: JetBrains Mono
   features:
+    - navigation.instant
     - navigation.sections
+    - navigation.expand
+    - navigation.tracking
     - navigation.top
+    - toc.integrate
     - content.code.copy
     - search.suggest
     - search.highlight
@@ -23,6 +34,7 @@ nav:
 markdown_extensions:
   - admonition
   - attr_list
+  - md_in_html
   - toc:
       permalink: true
   - pymdownx.highlight
@@ -31,3 +43,9 @@ markdown_extensions:
         - name: mermaid
           class: mermaid
           format: !!python/name:pymdownx.superfences.fence_code_format
+
+extra:
+  generator: false
+
+extra_css:
+  - stylesheets/extra.css

@@ -1,12 +1,46 @@
 # Architecture Overview
 
-Hades is split into a few core areas:
+Hades is split into a small set of core areas so runtime systems, rendering,
+and editor code stay easy to trace.
 
-- `src/engine/core/ecs`: entity/component/system management primitives
-- `src/engine/components`: data-only gameplay/render components
-- `src/engine/systems`: ECS systems operating on components
-- `src/engine/rendering`: renderer abstraction and Vulkan implementation
-- `src/editor`: editor and window/runtime coordination
+<div class="grid cards architecture-grid" markdown>
+
+-   ### ECS core
+
+    `src/engine/core/ecs`
+
+    Entity, component, and system management primitives.
+
+-   ### Components
+
+    `src/engine/components`
+
+    Data-only gameplay and render state definitions.
+
+-   ### Systems
+
+    `src/engine/systems`
+
+    Runtime behavior that operates across component sets.
+
+-   ### Rendering
+
+    `src/engine/rendering`
+
+    Renderer abstraction plus the Vulkan implementation.
+
+-   ### Editor
+
+    `src/editor`
+
+    Editor, window management, and runtime coordination.
+
+</div>
+
+## Reading Order
+
+Start here for the module map, then use the generated class relationship page
+when you need to trace concrete dependencies between types.
 
 ## Diagram Generation
 
