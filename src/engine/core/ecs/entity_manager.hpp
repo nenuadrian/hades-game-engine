@@ -18,43 +18,11 @@ namespace hades
     std::unordered_map<Entity::EntityId, std::bitset<MAX_COMPONENTS>> entityComponentSignatures;
 
   public:
-    Entity::EntityId createEntity()
-    {
-      Entity::EntityId id;
-      if (!availableEntities.empty())
-      {
-        id = availableEntities.front();
-        availableEntities.pop();
-      }
-      else
-      {
-        id = activeEntities.size();
-      }
-      activeEntities.push_back(id);
-
-      return id;
-    }
-
-    void destroyEntity(Entity::EntityId entity)
-    {
-      availableEntities.push(entity);
-      entityComponentSignatures.erase(entity);
-    }
-
-    void setComponentSignature(Entity::EntityId entity, std::bitset<MAX_COMPONENTS> signature)
-    {
-      entityComponentSignatures[entity] = signature;
-    }
-
-    const std::bitset<MAX_COMPONENTS> &getComponentSignature(Entity::EntityId entity) const
-    {
-      return entityComponentSignatures.at(entity);
-    }
-
-    std::vector<Entity::EntityId> getAllEntities()
-    {
-      return activeEntities;
-    }
+    Entity::EntityId createEntity();
+    void destroyEntity(Entity::EntityId entity);
+    void setComponentSignature(Entity::EntityId entity, std::bitset<MAX_COMPONENTS> signature);
+    const std::bitset<MAX_COMPONENTS> &getComponentSignature(Entity::EntityId entity) const;
+    std::vector<Entity::EntityId> getAllEntities();
   };
 }
 #endif

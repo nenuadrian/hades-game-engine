@@ -9,18 +9,17 @@
 
 ## table of contents
 
-- [Hades - Light C++ 3D Game Engine](#hades---light-c-3d-game-engine)
-  - [table of contents](#table-of-contents)
-  - [overview](#overview)
-  - [goals](#goals)
-  - [features](#features)
-  - [Entity-Component-System (ECS)](#entity-component-system-ecs)
-  - [Build \& Run \& Test](#build--run--test)
-    - [Build](#build)
-    - [Run](#run)
-    - [Test](#test)
-  - [Documentation (MkDocs Material)](#documentation-mkdocs-material)
-  - [Previous version](#previous-version)
+- [table of contents](#table-of-contents)
+- [overview](#overview)
+- [goals](#goals)
+- [features](#features)
+- [Entity-Component-System (ECS)](#entity-component-system-ecs)
+- [Build \& Run \& Test](#build--run--test)
+  - [Build](#build)
+  - [Run](#run)
+  - [Test](#test)
+- [Documentation](#documentation)
+- [Previous version](#previous-version)
 
 ## overview
 
@@ -81,15 +80,13 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-## Documentation (MkDocs Material)
+## Documentation
 
 ```bash
 python3 -m pip install -r requirements-docs.txt
 python3 scripts/generate_class_diagram.py
 mkdocs serve
 ```
-
-Deployments to GitHub Pages are automated by `.github/workflows/docs-pages.yml` on pushes to `main`.
 
 ## Previous version
 

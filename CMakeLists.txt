@@ -11,17 +11,18 @@ find_package(Vulkan REQUIRED)
 hades_configure_dependencies()
 
 # Define the source directory.
-set(SRC_DIR "${CMAKE_SOURCE_DIR}/src/engine")
+set(SRC_DIR "${CMAKE_SOURCE_DIR}/src")
 
-# Automatically find all engine source and header files.
+# Automatically find application source and header files.
+file(GLOB_RECURSE APP_SOURCE_FILES CONFIGURE_DEPENDS "${SRC_DIR}/*.cpp")
+list(REMOVE_ITEM APP_SOURCE_FILES "${CMAKE_SOURCE_DIR}/src/tests/test.cpp")
 file(
-  GLOB_RECURSE SRC_FILES
+  GLOB_RECURSE HEADER_FILES
   CONFIGURE_DEPENDS
-  "${SRC_DIR}/*.cpp"
   "${SRC_DIR}/*.h"
   "${SRC_DIR}/*.hpp")
 
-set(SOURCES ${SRC_FILES} ${CMAKE_SOURCE_DIR}/src/main.cpp)
+set(SOURCES ${APP_SOURCE_FILES} ${HEADER_FILES})
 
 add_executable(${PROJECT_NAME} ${SOURCES})
 target_link_libraries(

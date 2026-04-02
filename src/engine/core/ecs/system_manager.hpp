@@ -27,13 +27,7 @@ namespace hades
       return system;
     }
 
-    void updateSystems(float deltaTime, ComponentManager &componentManager, EntityManager &entityManager)
-    {
-      for (auto &system : systems)
-      {
-        system.second->update(deltaTime, componentManager, entityManager);
-      }
-    }
+    void updateSystems(float deltaTime, ComponentManager &componentManager, EntityManager &entityManager);
   };
 }
 
