@@ -6,18 +6,19 @@
 
 ## table of contents
 
-- [table of contents](#table-of-contents)
-- [overview](#overview)
-- [goals](#goals)
-- [features](#features)
-- [Entity-Component-System (ECS)](#entity-component-system-ecs)
-- [Build \& Run \& Test](#build-run-test)
-  - [Build](#build)
-  - [Run](#run)
-  - [Test](#test)
-- [Scripting](#scripting)
-- [Documentation](#documentation)
-- [Previous version](#previous-version)
+- [Hades - Light C++ 3D Game Engine](#hades---light-c-3d-game-engine)
+  - [table of contents](#table-of-contents)
+  - [overview](#overview)
+  - [goals](#goals)
+  - [features](#features)
+  - [Entity-Component-System (ECS)](#entity-component-system-ecs)
+  - [Build \& Run \& Test](#build--run--test)
+    - [Build](#build)
+    - [Run](#run)
+    - [Test](#test)
+  - [Scripting](#scripting)
+  - [Documentation](#documentation)
+  - [Previous version](#previous-version)
 
 ## overview
 
@@ -44,6 +45,9 @@ Not maintained or supported.
 - sound via miniaudio, with streaming, buses, and basic 3D spatial audio support
 - tests
 - generating shaders dynamically
+
+![editor](assets/editor.png)
+![workspace](assets/workspace.png)
 
 ## Entity-Component-System (ECS)
 
