@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         build_type: [Release]
         c_compiler: [gcc, clang, cl]
         include:
@@ -26,6 +26,9 @@ jobs:
           - os: ubuntu-latest
             c_compiler: clang
             cpp_compiler: clang++
+          - os: macos-latest
+            c_compiler: clang
+            cpp_compiler: clang++
         exclude:
           - os: windows-latest
             c_compiler: gcc
@@ -33,12 +36,16 @@ jobs:
             c_compiler: clang
           - os: ubuntu-latest
             c_compiler: cl
+          - os: macos-latest
+            c_compiler: gcc
+          - os: macos-latest
+            c_compiler: cl
 
     steps:
       - uses: actions/checkout@v4
 
-      # Install dependencies and Vulkan SDK on Ubuntu
-      - name: Install dependencies and Vulkan (Ubuntu)
+      # Install build dependencies on Ubuntu.
+      - name: Install dependencies (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
@@ -46,30 +53,20 @@ jobs:
           libglu1-mesa-dev freeglut3-dev mesa-common-dev \
           xorg-dev libvulkan-dev vulkan-tools
 
-          # Optionally, download the Vulkan SDK from LunarG (replace with the latest version)
-          wget -qO vulkansdk.tar.gz https://sdk.lunarg.com/sdk/download/latest/linux/vulkan-sdk.tar.gz
-          mkdir -p $HOME/vulkan-sdk
-          tar -xzf vulkansdk.tar.gz -C $HOME/vulkan-sdk --strip-components=1
-          source $HOME/vulkan-sdk/setup-env.sh
-
       # Install Vulkan SDK on Windows
       - name: Install Vulkan SDK (Windows)
         if: matrix.os == 'windows-latest'
+        shell: pwsh
         run: |
-          # Use PowerShell to download the Vulkan SDK installer
-          powershell -Command "Invoke-WebRequest -Uri 'https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-sdk.exe' -OutFile 'vulkan-sdk.exe'"
+          Invoke-WebRequest -Uri 'https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-sdk.exe' -OutFile 'vulkan-sdk.exe'
 
-          # Run the Vulkan SDK installer silently
-          ./vulkan-sdk.exe /S /D=C:\VulkanSDK
-          $exitCode = $?
+          $process = Start-Process -FilePath '.\vulkan-sdk.exe' -ArgumentList '/S', '/D=C:\VulkanSDK' -Wait -PassThru
 
-          # Check if the installation succeeded
-          if ($exitCode -ne 0) {
-              Write-Host "Error: Vulkan SDK installation failed with exit code $exitCode."
+          if ($process.ExitCode -ne 0) {
+              Write-Host "Error: Vulkan SDK installation failed with exit code $($process.ExitCode)."
               exit 1
           }
 
-          # Wait for the Vulkan SDK folder to be created
           $maxRetries = 10
           $retryCount = 0
           while (-Not (Test-Path 'C:\VulkanSDK') -and $retryCount -lt $maxRetries) {
@@ -82,19 +79,45 @@ jobs:
               exit 1
           }
 
-          # Automatically detect the Vulkan SDK version
-          $vulkanVersion = Get-ChildItem 'C:\VulkanSDK' | Sort-Object Name -Descending | Select-Object -First 1 | ForEach-Object { $_.Name }
+          $vulkanVersion = (Get-ChildItem 'C:\VulkanSDK' -Directory | Sort-Object Name -Descending | Select-Object -First 1).Name
 
           if (-Not $vulkanVersion) {
               Write-Host "Error: Vulkan SDK version detection failed."
               exit 1
           }
 
-          # Set the Vulkan SDK environment variable using the detected version
-          echo "VULKAN_SDK=C:\VulkanSDK\$vulkanVersion" >> $GITHUB_ENV
+          "VULKAN_SDK=C:\VulkanSDK\$vulkanVersion" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-          # Add Vulkan SDK's Bin directory to the PATH
-          echo "C:\VulkanSDK\$vulkanVersion\Bin" >> $GITHUB_PATH
+          "C:\VulkanSDK\$vulkanVersion\Bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install Vulkan SDK (macOS)
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          sdk_tmp_dir="$(mktemp -d)"
+          curl --fail --location -o "$sdk_tmp_dir/vulkan-sdk.zip" https://sdk.lunarg.com/sdk/download/latest/mac/vulkan-sdk.zip
+          unzip -q "$sdk_tmp_dir/vulkan-sdk.zip" -d "$sdk_tmp_dir"
+
+          sdk_app="$(find "$sdk_tmp_dir" -maxdepth 2 -name 'vulkansdk-macOS-*.app' -print -quit)"
+          if [ -z "$sdk_app" ]; then
+            echo "Failed to locate the Vulkan SDK installer app."
+            exit 1
+          fi
+
+          sdk_version="$(basename "$sdk_app" .app | sed 's/^vulkansdk-macOS-//')"
+          sdk_root="$HOME/VulkanSDK/$sdk_version"
+
+          "$sdk_app/Contents/MacOS/vulkansdk-macOS-$sdk_version" \
+            --root "$sdk_root" \
+            --accept-licenses \
+            --default-answer \
+            --confirm-command \
+            install \
+            copy_only=1 \
+            com.lunarg.vulkan.core
+
+          echo "VULKAN_SDK=$sdk_root/macOS" >> "$GITHUB_ENV"
+          echo "$sdk_root/macOS/bin" >> "$GITHUB_PATH"
 
       - name: Set reusable strings
         id: strings
@@ -103,15 +126,13 @@ jobs:
           echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
 
       - name: Configure CMake
-        run: |
-          cmake -S ${{ github.workspace }} \
-            -B ${{ steps.strings.outputs.build-output-dir }} \
-            -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }} \
-            -DCMAKE_C_COMPILER=${{ matrix.c_compiler }} \
-            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-            -DHADES_USE_BUNDLED_DEPS=OFF \
-            -DVulkan_INCLUDE_DIR=$VULKAN_SDK/Include \
-            -DVulkan_LIBRARY=$VULKAN_SDK/Lib
+        run: >-
+          cmake -S "${{ github.workspace }}"
+          -B "${{ steps.strings.outputs.build-output-dir }}"
+          -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
+          -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DHADES_USE_BUNDLED_DEPS=OFF
 
       - name: Build
         run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }}

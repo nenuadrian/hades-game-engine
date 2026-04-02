@@ -13,7 +13,8 @@ option(
 
 set(HADES_CLI11_TAG "v2.4.2" CACHE STRING "CLI11 git tag or branch.")
 set(HADES_GOOGLETEST_TAG "v1.15.2" CACHE STRING "GoogleTest git tag or branch.")
-set(HADES_IMGUI_TAG "v1.91.4" CACHE STRING "Dear ImGui git tag or branch.")
+# Docking APIs live on Dear ImGui's docking release branch.
+set(HADES_IMGUI_TAG "v1.91.4-docking" CACHE STRING "Dear ImGui git tag or branch.")
 # The vendored SDL snapshot is 2.31.0, which was a prerelease line.
 # Use the nearest stable release tag for on-demand downloads.
 set(HADES_SDL2_TAG "release-2.32.0" CACHE STRING "SDL2 git tag or branch.")

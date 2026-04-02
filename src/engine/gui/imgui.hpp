@@ -9,9 +9,11 @@ namespace hades
 {
   class ImGui_GUI : public GUI
   {
-
+  public:
     void render_frame()
     {
+      ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
+
       if (ImGui::BeginMainMenuBar())
       {
         for (const auto &item : menu_bar_items)
