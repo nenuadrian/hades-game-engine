@@ -29,7 +29,7 @@ The purpose is educational and experimental in nature to explore the intriguing 
 
 Not maintained or supported.
 
-![logo](docs/logo.jpeg)
+![logo](docs/logo.png)
 
 ## goals
 
