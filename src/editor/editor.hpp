@@ -24,7 +24,13 @@ namespace hades
     Editor()
     {
       auto file = MenuBarItem{.title = "File"};
-      auto exit = MenuBarItem{.title = "Exit"};
+      auto exit = MenuBarItem{
+          .title = "Exit",
+          .on_activate =
+              [this]()
+          {
+            state.events.push(EDITOR_QUIT);
+          }};
       file.children_menu_items.push_back(exit);
       gui->menu_bar_items.push_back(file);
     }

@@ -14,9 +14,7 @@
   - [overview](#overview)
   - [goals](#goals)
   - [features](#features)
-  - [Libraries](#libraries)
   - [Entity-Component-System (ECS)](#entity-component-system-ecs)
-    - [Example](#example)
   - [Build \& Run \& Test](#build--run--test)
     - [Build](#build)
     - [Run](#run)
@@ -49,26 +47,9 @@ Not maintained or supported.
 - tests
 - generating shaders dynamically
 
-## Libraries
-
-The build now supports two dependency modes:
-
-- Prefer bundled copies under `lib/` when they are present.
-- Download pinned sources into `build/_deps` during CMake configure when local copies are missing, or when you force downloads with `-DHADES_USE_BUNDLED_DEPS=OFF`.
-
-Current third-party libraries used by the build:
-
-- SDL2
-- Dear ImGui
-- CLI11
-- tinyobjloader
-- googletest
-
 ## Entity-Component-System (ECS)
 
 Custom built to build up a natural understanding of the pattern. For example, it is not an Entity-Component System, made from entity and components, but one made out of three parts, the system being an essential component of the triad, acting on entities with specific components.
-
-### Example
 
 ## Build & Run & Test
 

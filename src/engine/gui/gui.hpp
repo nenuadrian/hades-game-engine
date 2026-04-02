@@ -1,6 +1,7 @@
 #ifndef GUI_H
 #define GUI_H
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -10,6 +11,7 @@ namespace hades
   {
     std::string title;
     std::vector<MenuBarItem> children_menu_items;
+    std::function<void()> on_activate;
   };
 
   class GUI

@@ -26,6 +26,20 @@ namespace hades
     Editor editor;
     std::unique_ptr<Renderer> renderer = std::make_unique<VulkanRenderer>();
 
+    void process_editor_events()
+    {
+      while (!editor.state.events.empty())
+      {
+        const auto event = editor.state.events.front();
+        editor.state.events.pop();
+
+        if (event == EDITOR_QUIT)
+        {
+          running = false;
+        }
+      }
+    }
+
   public:
     bool running = true;
 
@@ -61,6 +75,7 @@ namespace hades
       ImGuiIO &io = ImGui::GetIO();
 
       editor.render(io.DeltaTime, entityManager, componentManager);
+      process_editor_events();
 
       // Rendering
       ImGui::Render();

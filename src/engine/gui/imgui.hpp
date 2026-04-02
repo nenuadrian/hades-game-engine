@@ -24,9 +24,13 @@ namespace hades
             {
               if (ImGui::MenuItem(child_item.title.c_str()))
               {
+                if (child_item.on_activate)
+                {
+                  child_item.on_activate();
+                }
               }
-              ImGui::EndMenu();
             }
+            ImGui::EndMenu();
           }
         }
 
