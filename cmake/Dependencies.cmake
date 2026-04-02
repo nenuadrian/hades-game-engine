@@ -76,9 +76,13 @@ function(hades_configure_dependencies)
 
   set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
   set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
-  # Assimp defaults to the system zlib on non-Windows platforms, which breaks
-  # fresh source-only builds like the Docker CI image.
-  set(ASSIMP_BUILD_ZLIB ON CACHE BOOL "" FORCE)
+  # Assimp's bundled zlib keeps Linux source-only builds self-contained, but it
+  # fails under current Xcode/macOS SDKs, so prefer the platform zlib there.
+  if(APPLE)
+    set(ASSIMP_BUILD_ZLIB OFF CACHE BOOL "" FORCE)
+  else()
+    set(ASSIMP_BUILD_ZLIB ON CACHE BOOL "" FORCE)
+  endif()
   set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
   set(ASSIMP_WARNINGS_AS_ERRORS OFF CACHE BOOL "" FORCE)
   set(ASSIMP_INJECT_DEBUG_POSTFIX OFF CACHE BOOL "" FORCE)
