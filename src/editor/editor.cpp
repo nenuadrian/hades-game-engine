@@ -72,8 +72,10 @@ namespace hades
     parsedFieldsCache_.clear();
     parsedFieldsModTimes_.clear();
     lastCompileError_.clear();
-    lastCompileSucceeded_ = true;
+    scriptCompileStatus_ = ScriptCompileStatus::Unknown;
     backgroundCompileInProgress_ = false;
+    currentCompileRequestId_ = 0;
+    nextCompileRequestId_ = 0;
   }
 
   void Editor::render(
@@ -91,9 +93,15 @@ namespace hades
     if (backgroundCompileInProgress_ && backgroundCompileResult_.valid() &&
         backgroundCompileResult_.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
     {
-      lastCompileError_ = backgroundCompileResult_.get();
-      lastCompileSucceeded_ = lastCompileError_.empty();
+      BackgroundCompileTaskResult result = backgroundCompileResult_.get();
       backgroundCompileInProgress_ = false;
+      if (result.requestId == currentCompileRequestId_)
+      {
+        lastCompileError_ = std::move(result.error);
+        scriptCompileStatus_ = lastCompileError_.empty()
+                                   ? ScriptCompileStatus::Succeeded
+                                   : ScriptCompileStatus::Failed;
+      }
     }
 
     bool scriptsChanged = workspaceScriptListDirty_;

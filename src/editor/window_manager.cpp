@@ -164,29 +164,6 @@ namespace
     return std::nullopt;
   }
 
-  class ImGuiContextScope
-  {
-  public:
-    explicit ImGuiContextScope(ImGuiContext *context)
-        : previousContext_(ImGui::GetCurrentContext()),
-          currentContext_(context)
-    {
-      ImGui::SetCurrentContext(context);
-    }
-
-    ~ImGuiContextScope()
-    {
-      if (previousContext_ != currentContext_)
-      {
-        ImGui::SetCurrentContext(previousContext_);
-      }
-    }
-
-  private:
-    ImGuiContext *previousContext_ = nullptr;
-    ImGuiContext *currentContext_ = nullptr;
-  };
-
   void build_workspace_logo_preview(
       SDL_Surface *logoSurface,
       std::vector<std::uint32_t> &pixels,
@@ -405,7 +382,7 @@ namespace hades
 
     IMGUI_CHECKVERSION();
     context_ = ImGui::CreateContext();
-    ImGuiContextScope contextScope(context_);
+    ImGui::SetCurrentContext(context_);
 
     ImGuiIO &io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
@@ -439,7 +416,7 @@ namespace hades
       return;
     }
 
-    ImGuiContextScope contextScope(context_);
+    ImGui::SetCurrentContext(context_);
     ImGui_ImplSDL2_ProcessEvent(&event);
   }
 
@@ -450,7 +427,7 @@ namespace hades
       return;
     }
 
-    ImGuiContextScope contextScope(context_);
+    ImGui::SetCurrentContext(context_);
     renderer_->start_imgui_frame();
     ImGui_ImplSDL2_NewFrame();
     ImGui::NewFrame();
@@ -463,7 +440,7 @@ namespace hades
       return;
     }
 
-    ImGuiContextScope contextScope(context_);
+    ImGui::SetCurrentContext(context_);
     ImGui::Render();
     ImDrawData *draw_data = ImGui::GetDrawData();
     const bool is_minimized = (draw_data->DisplaySize.x <= 0.0f || draw_data->DisplaySize.y <= 0.0f);
@@ -496,10 +473,19 @@ namespace hades
       return;
     }
 
-    ImGuiContextScope contextScope(context_);
+    ImGuiContext *previousContext = ImGui::GetCurrentContext();
+    ImGui::SetCurrentContext(context_);
     renderer_->shutdown_imgui_backend();
     ImGui_ImplSDL2_Shutdown();
     ImGui::DestroyContext(context_);
+    if (previousContext != context_)
+    {
+      ImGui::SetCurrentContext(previousContext);
+    }
+    else
+    {
+      ImGui::SetCurrentContext(nullptr);
+    }
     context_ = nullptr;
     renderer_ = nullptr;
     enableViewports_ = false;
@@ -508,13 +494,21 @@ namespace hades
 
   WindowManager::DetachedScriptEditorWindow::~DetachedScriptEditorWindow()
   {
-    close();
+    destroy();
   }
 
   bool WindowManager::DetachedScriptEditorWindow::open(std::string *errorMessage)
   {
-    if (is_open())
+    if (window_ != nullptr && renderer_ != nullptr)
     {
+      visible_ = true;
+      SDL_RestoreWindow(window_.get());
+      SDL_ShowWindow(window_.get());
+      SDL_RaiseWindow(window_.get());
+      if (errorMessage != nullptr)
+      {
+        errorMessage->clear();
+      }
       return true;
     }
 
@@ -561,6 +555,8 @@ namespace hades
 
     window_ = std::move(window);
     renderer_ = std::move(renderer);
+    visible_ = true;
+    SDL_RestoreWindow(window_.get());
     SDL_ShowWindow(window_.get());
     SDL_RaiseWindow(window_.get());
     if (errorMessage != nullptr)
@@ -572,9 +568,11 @@ namespace hades
 
   void WindowManager::DetachedScriptEditorWindow::close()
   {
-    imgui_session_.close();
-    renderer_.reset();
-    window_.reset();
+    visible_ = false;
+    if (window_ != nullptr)
+    {
+      SDL_HideWindow(window_.get());
+    }
   }
 
   bool WindowManager::DetachedScriptEditorWindow::is_open() const
@@ -599,7 +597,7 @@ namespace hades
 
   void WindowManager::DetachedScriptEditorWindow::render(Editor &editor)
   {
-    if (!is_open())
+    if (!is_open() || !visible_)
     {
       return;
     }
@@ -614,6 +612,14 @@ namespace hades
     imgui_session_.begin_frame();
     editor.render_script_editor_window();
     imgui_session_.render();
+  }
+
+  void WindowManager::DetachedScriptEditorWindow::destroy()
+  {
+    visible_ = false;
+    imgui_session_.close();
+    renderer_.reset();
+    window_.reset();
   }
 
   WindowManager::WindowManager()
@@ -1144,6 +1150,7 @@ namespace hades
   {
     const Uint32 editorWindowId = window != nullptr ? SDL_GetWindowID(window.get()) : 0U;
     const auto scriptEditorWindowId = scriptEditorWindow.window_id();
+    bool closedAuxiliaryWindowThisFrame = false;
     SDL_Event event;
     while (SDL_PollEvent(&event))
     {
@@ -1159,7 +1166,10 @@ namespace hades
       }
       if (event.type == SDL_QUIT)
       {
-        running = false;
+        if (!closedAuxiliaryWindowThisFrame)
+        {
+          running = false;
+        }
       }
       if (event.type == SDL_WINDOWEVENT &&
           event.window.event == SDL_WINDOWEVENT_CLOSE)
@@ -1171,12 +1181,14 @@ namespace hades
         else if (scriptEditorWindowId.has_value() &&
                  event.window.windowID == *scriptEditorWindowId)
         {
+          closedAuxiliaryWindowThisFrame = true;
           editor.set_script_editor_window_open(false);
           scriptEditorWindow.close();
         }
         else if (playWindowId.has_value() &&
                  event.window.windowID == *playWindowId)
         {
+          closedAuxiliaryWindowThisFrame = true;
           stop_active_play_mode();
         }
       }

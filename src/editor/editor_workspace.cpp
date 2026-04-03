@@ -407,6 +407,9 @@ namespace hades
       scriptModTimes_.clear();
       parsedFieldsCache_.clear();
       parsedFieldsModTimes_.clear();
+      lastCompileError_.clear();
+      scriptCompileStatus_ = ScriptCompileStatus::Unknown;
+      currentCompileRequestId_ = ++nextCompileRequestId_;
       nextWorkspaceScanTime_ = 0.0;
     }
 
@@ -1041,6 +1044,12 @@ namespace hades
         ".";
     scriptEditorStatusIsError_ = false;
 
+    if (!triggerCompile)
+    {
+      lastCompileError_.clear();
+      scriptCompileStatus_ = ScriptCompileStatus::Unknown;
+    }
+
     if (triggerCompile)
     {
       queue_workspace_script_compile();
@@ -1096,7 +1105,7 @@ namespace hades
     if (workspaceScriptFiles_.empty())
     {
       lastCompileError_.clear();
-      lastCompileSucceeded_ = true;
+      scriptCompileStatus_ = ScriptCompileStatus::Unknown;
       workspaceScriptListDirty_ = false;
       return;
     }
@@ -1114,14 +1123,18 @@ namespace hades
       sourceFiles.push_back(activeWorkspacePath_ / relPath);
     }
 
+    lastCompileError_.clear();
+    scriptCompileStatus_ = ScriptCompileStatus::Unknown;
     backgroundCompileInProgress_ = true;
     workspaceScriptListDirty_ = false;
+    const std::uint64_t requestId = ++nextCompileRequestId_;
+    currentCompileRequestId_ = requestId;
     backgroundCompileResult_ = std::async(std::launch::async,
-        [files = std::move(sourceFiles)]() -> std::string
+        [files = std::move(sourceFiles), requestId]() -> BackgroundCompileTaskResult
         {
           std::string error;
           ScriptRuntime::compile(files, &error);
-          return error;
+          return BackgroundCompileTaskResult{requestId, std::move(error)};
         });
   }
 
@@ -1425,13 +1438,18 @@ namespace hades
       {
         ImGui::TextDisabled("Compiling scripts...");
       }
-      else if (!lastCompileSucceeded_)
+      else if (scriptCompileStatus_ == ScriptCompileStatus::Failed)
       {
         ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "%s", lastCompileError_.c_str());
       }
-      else if (!workspaceScriptFiles_.empty())
+      else if (scriptCompileStatus_ == ScriptCompileStatus::Succeeded &&
+               !workspaceScriptFiles_.empty())
       {
         ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.3f, 1.0f), "Workspace scripts compiled successfully.");
+      }
+      else if (!workspaceScriptFiles_.empty())
+      {
+        ImGui::TextDisabled("Workspace scripts have not been compiled yet.");
       }
 
       ImGui::Separator();

@@ -735,6 +735,28 @@ namespace Hades.Scripting
              "}\n";
     }
 
+    std::string common_compile_hints(const std::vector<std::filesystem::path> &sourceFiles)
+    {
+      for (const auto &sourceFile : sourceFiles)
+      {
+        std::ifstream input(sourceFile, std::ios::binary);
+        if (!input)
+        {
+          continue;
+        }
+
+        std::ostringstream contents;
+        contents << input.rdbuf();
+        const std::string sourceText = contents.str();
+        if (sourceText.find("System.out.println") != std::string::npos)
+        {
+          return "\nHint: Hades scripts use C#. Replace System.out.println(...) with System.Console.WriteLine(...).";
+        }
+      }
+
+      return {};
+    }
+
     bool prepare_build(
         const std::vector<std::filesystem::path> &sourceFiles,
         BuildArtifacts &artifacts,
@@ -839,7 +861,8 @@ namespace Hades.Scripting
       {
         if (errorMessage != nullptr)
         {
-          *errorMessage = "C# script compilation failed.\n" + buildResult.output;
+          *errorMessage = "C# script compilation failed.\n" + buildResult.output +
+                          common_compile_hints(sourceFiles);
         }
         return false;
       }

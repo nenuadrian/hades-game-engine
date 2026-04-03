@@ -81,9 +81,12 @@ namespace hades
       void render(Editor &editor);
 
     private:
+      void destroy();
+
       WindowPtr window_{nullptr};
       std::unique_ptr<Renderer> renderer_;
       ImGuiSession imgui_session_;
+      bool visible_ = false;
     };
 
     EntityManager entityManager;

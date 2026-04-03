@@ -682,17 +682,22 @@ namespace hades
       {
         ImGui::TextDisabled("Compiling scripts...");
       }
-      else if (!lastCompileSucceeded_)
+      else if (scriptCompileStatus_ == ScriptCompileStatus::Failed)
       {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.3f, 0.3f, 1.0f));
         ImGui::TextWrapped("Compile error: %s", lastCompileError_.c_str());
         ImGui::PopStyleColor();
       }
-      else if (!scriptComponent.attachments.empty())
+      else if (scriptCompileStatus_ == ScriptCompileStatus::Succeeded &&
+               !scriptComponent.attachments.empty())
       {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.3f, 1.0f, 0.3f, 1.0f));
         ImGui::TextDisabled("Scripts compiled successfully.");
         ImGui::PopStyleColor();
+      }
+      else if (!scriptComponent.attachments.empty())
+      {
+        ImGui::TextDisabled("Attached scripts have not been compiled yet.");
       }
     }
 

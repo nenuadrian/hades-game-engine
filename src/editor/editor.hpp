@@ -65,6 +65,19 @@ namespace hades
     void render_script_editor_window();
 
   private:
+    enum class ScriptCompileStatus
+    {
+      Unknown,
+      Succeeded,
+      Failed,
+    };
+
+    struct BackgroundCompileTaskResult
+    {
+      std::uint64_t requestId = 0;
+      std::string error;
+    };
+
     struct ScriptEditorTab
     {
       std::filesystem::path path;
@@ -128,10 +141,12 @@ namespace hades
 
     // File watch / background compile state.
     std::unordered_map<std::string, std::filesystem::file_time_type> scriptModTimes_;
-    std::future<std::string> backgroundCompileResult_;
+    std::future<BackgroundCompileTaskResult> backgroundCompileResult_;
     bool backgroundCompileInProgress_ = false;
     std::string lastCompileError_;
-    bool lastCompileSucceeded_ = true;
+    ScriptCompileStatus scriptCompileStatus_ = ScriptCompileStatus::Unknown;
+    std::uint64_t currentCompileRequestId_ = 0;
+    std::uint64_t nextCompileRequestId_ = 0;
 
     // Parsed public field cache (keyed by resolved script path).
     std::unordered_map<std::string, std::vector<std::pair<std::string, std::string>>> parsedFieldsCache_;
