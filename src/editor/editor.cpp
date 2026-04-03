@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -80,6 +81,53 @@ namespace hades
     backgroundCompileInProgress_ = false;
     currentCompileRequestId_ = 0;
     nextCompileRequestId_ = 0;
+    state.debugConsoleMessages.clear();
+    openDebugConsoleWindow_ = false;
+    focusDebugConsoleWindow_ = false;
+  }
+
+  void Editor::log_message(DebugMessageLevel level, const std::string &text)
+  {
+    const char *prefix = "INFO";
+    if (level == DebugMessageLevel::Warning)
+    {
+      prefix = "WARNING";
+    }
+    else if (level == DebugMessageLevel::Error)
+    {
+      prefix = "ERROR";
+    }
+    std::fprintf(stderr, "[%s] %s\n", prefix, text.c_str());
+
+    state.debugConsoleMessages.push_front(
+        DebugMessage{level, text, std::chrono::steady_clock::now()});
+
+    constexpr std::size_t MAX_DEBUG_MESSAGES = 500;
+    while (state.debugConsoleMessages.size() > MAX_DEBUG_MESSAGES)
+    {
+      state.debugConsoleMessages.pop_back();
+    }
+
+    if (level == DebugMessageLevel::Error)
+    {
+      openDebugConsoleWindow_ = true;
+      focusDebugConsoleWindow_ = true;
+    }
+  }
+
+  void Editor::log_info(const std::string &text)
+  {
+    log_message(DebugMessageLevel::Info, text);
+  }
+
+  void Editor::log_warning(const std::string &text)
+  {
+    log_message(DebugMessageLevel::Warning, text);
+  }
+
+  void Editor::log_error(const std::string &text)
+  {
+    log_message(DebugMessageLevel::Error, text);
   }
 
   void Editor::render(
@@ -319,6 +367,25 @@ namespace hades
       }
     };
     windowsMenu.children_menu_items.push_back(std::move(settingsWindow));
+
+    MenuBarItem debugConsoleWindow;
+    debugConsoleWindow.title = "Debug Console";
+    debugConsoleWindow.selected = is_plugin_visible("debug-console");
+    debugConsoleWindow.on_activate = [this]()
+    {
+      if (is_plugin_visible("debug-console"))
+      {
+        if (EditorPlugin *plugin = find_plugin("debug-console"))
+        {
+          plugin->set_visible(*this, false);
+        }
+      }
+      else
+      {
+        show_plugin("debug-console");
+      }
+    };
+    windowsMenu.children_menu_items.push_back(std::move(debugConsoleWindow));
     gui->menu_bar_items.push_back(std::move(windowsMenu));
 
     MenuBarItem pluginsMenu;
@@ -328,7 +395,8 @@ namespace hades
     {
       if (!plugin->listed_in_menu() ||
           plugin->id() == "settings" ||
-          plugin->id() == "script-editor-window")
+          plugin->id() == "script-editor-window" ||
+          plugin->id() == "debug-console")
       {
         continue;
       }
@@ -379,11 +447,13 @@ namespace hades
     const ImGuiID entitiesDockId = ImGui::DockBuilderSplitNode(workspaceDockId, ImGuiDir_Down, 0.56f, nullptr, &workspaceDockId);
     ImGuiID inspectorDockId = ImGui::DockBuilderSplitNode(mainDockId, ImGuiDir_Right, 0.34f, nullptr, &mainDockId);
     const ImGuiID componentsDockId = ImGui::DockBuilderSplitNode(inspectorDockId, ImGuiDir_Right, 0.45f, nullptr, &inspectorDockId);
+    const ImGuiID consoleDockId = ImGui::DockBuilderSplitNode(mainDockId, ImGuiDir_Down, 0.25f, nullptr, &mainDockId);
     ImGui::DockBuilderDockWindow(WORKSPACE_WINDOW_TITLE, workspaceDockId);
     ImGui::DockBuilderDockWindow(ENTITY_WINDOW_TITLE, entitiesDockId);
     ImGui::DockBuilderDockWindow(PROPERTIES_WINDOW_TITLE, inspectorDockId);
     ImGui::DockBuilderDockWindow(COMPONENTS_WINDOW_TITLE, componentsDockId);
     ImGui::DockBuilderDockWindow(SCENE_WINDOW_TITLE, mainDockId);
+    ImGui::DockBuilderDockWindow("Debug Console", consoleDockId);
     ImGui::DockBuilderFinish(dockspaceId);
   }
 
@@ -399,7 +469,7 @@ namespace hades
     std::string error;
     if (!hades::save_all_worlds(activeWorkspacePath_, entityManager, componentManager, &error))
     {
-      std::fprintf(stderr, "Failed to save worlds: %s\n", error.c_str());
+      log_error("Failed to save worlds: " + error);
     }
   }
 
@@ -446,7 +516,7 @@ namespace hades
     auto worldEntity = hades::load_world_from_file(filePath, entityManager, componentManager, &error);
     if (!worldEntity.has_value())
     {
-      std::fprintf(stderr, "Failed to load world '%s': %s\n", worldName.c_str(), error.c_str());
+      log_error("Failed to load world '" + worldName + "': " + error);
       return;
     }
 

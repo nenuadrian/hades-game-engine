@@ -27,6 +27,7 @@ namespace hades
   {
     constexpr char SCENE_WINDOW_TITLE[] = "World";
     constexpr char SETTINGS_WINDOW_TITLE[] = "Settings";
+    constexpr char DEBUG_CONSOLE_WINDOW_TITLE[] = "Debug Console";
     constexpr float PI = 3.14159265358979323846f;
     constexpr float CUBE_HALF_EXTENT = 0.5f;
     constexpr float EDITOR_SCENE_CAMERA_TARGET_X = 0.0f;
@@ -1854,6 +1855,103 @@ namespace hades
     {
       reset_scene_camera();
     }
+
+    ImGui::End();
+  }
+
+  void Editor::render_debug_console_window()
+  {
+    if (!openDebugConsoleWindow_)
+    {
+      return;
+    }
+
+    ImGui::SetNextWindowSize(ImVec2(600.0f, 300.0f), ImGuiCond_FirstUseEver);
+    if (focusDebugConsoleWindow_)
+    {
+      ImGui::SetNextWindowFocus();
+      focusDebugConsoleWindow_ = false;
+    }
+
+    if (!ImGui::Begin(DEBUG_CONSOLE_WINDOW_TITLE, &openDebugConsoleWindow_))
+    {
+      ImGui::End();
+      return;
+    }
+
+    if (ImGui::Button("Clear"))
+    {
+      state.debugConsoleMessages.clear();
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("Copy All"))
+    {
+      std::string allText;
+      for (const auto &message : state.debugConsoleMessages)
+      {
+        const char *prefix = "[INFO]";
+        if (message.level == DebugMessageLevel::Error)
+        {
+          prefix = "[ERROR]";
+        }
+        else if (message.level == DebugMessageLevel::Warning)
+        {
+          prefix = "[WARNING]";
+        }
+        allText += prefix;
+        allText += ' ';
+        allText += message.text;
+        allText += '\n';
+      }
+      ImGui::SetClipboardText(allText.c_str());
+    }
+
+    ImGui::Separator();
+
+    ImGui::BeginChild("DebugConsoleMessages", ImVec2(0.0f, 0.0f), false);
+    ImGui::PushTextWrapPos(0.0f);
+    for (std::size_t i = 0; i < state.debugConsoleMessages.size(); ++i)
+    {
+      const auto &message = state.debugConsoleMessages[i];
+      ImVec4 color;
+      const char *prefix;
+      switch (message.level)
+      {
+      case DebugMessageLevel::Error:
+        color = ImVec4(1.0f, 0.3f, 0.3f, 1.0f);
+        prefix = "[ERROR]";
+        break;
+      case DebugMessageLevel::Warning:
+        color = ImVec4(1.0f, 0.85f, 0.0f, 1.0f);
+        prefix = "[WARNING]";
+        break;
+      case DebugMessageLevel::Info:
+      default:
+        color = ImVec4(0.7f, 0.7f, 0.7f, 1.0f);
+        prefix = "[INFO]";
+        break;
+      }
+
+      const std::string fullText = std::string(prefix) + " " + message.text;
+      ImGui::PushStyleColor(ImGuiCol_Text, color);
+      ImGui::PushID(static_cast<int>(i));
+      ImGui::Selectable("", false, ImGuiSelectableFlags_AllowOverlap);
+      if (ImGui::BeginPopupContextItem())
+      {
+        if (ImGui::MenuItem("Copy"))
+        {
+          ImGui::SetClipboardText(message.text.c_str());
+        }
+        ImGui::EndPopup();
+      }
+      ImGui::SameLine(0.0f, 0.0f);
+      ImGui::TextWrapped("%s", fullText.c_str());
+      ImGui::PopID();
+      ImGui::PopStyleColor();
+    }
+    ImGui::PopTextWrapPos();
+    ImGui::EndChild();
 
     ImGui::End();
   }

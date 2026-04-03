@@ -1022,6 +1022,10 @@ namespace hades
     editor.state.activeWorld.reset();
     editor.state.activeCamera.reset();
     editor.state.playModeMessage = message;
+    if (!message.empty())
+    {
+      editor.log_error("Play mode stopped: " + message);
+    }
     playWindow.close();
 
     if (audio_engine != nullptr)
@@ -1073,7 +1077,7 @@ namespace hades
       editor.set_script_editor_window_open(false);
       if (!errorMessage.empty())
       {
-        std::fprintf(stderr, "Script editor window error: %s\n", errorMessage.c_str());
+        editor.log_error("Script editor window error: " + errorMessage);
       }
       return;
     }

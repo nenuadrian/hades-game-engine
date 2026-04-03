@@ -235,6 +235,32 @@ namespace hades
         }));
 
     register_plugin(std::make_unique<CallbackEditorPlugin>(
+        "debug-console",
+        "Debug Console",
+        EditorPluginPhase::PostEntityDeletion,
+        75,
+        [this](EditorPluginContext &context)
+        {
+          (void)context;
+          render_debug_console_window();
+        },
+        false,
+        [this](const Editor &editor)
+        {
+          return editor.openDebugConsoleWindow_;
+        },
+        [this](Editor &editor, bool visible)
+        {
+          editor.openDebugConsoleWindow_ = visible;
+          editor.focusDebugConsoleWindow_ = visible;
+        },
+        [this](Editor &editor)
+        {
+          editor.openDebugConsoleWindow_ = true;
+          editor.focusDebugConsoleWindow_ = true;
+        }));
+
+    register_plugin(std::make_unique<CallbackEditorPlugin>(
         "debug",
         "Debug",
         EditorPluginPhase::PostEntityDeletion,

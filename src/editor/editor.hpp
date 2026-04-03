@@ -63,6 +63,10 @@ namespace hades
     void set_script_editor_window_open(bool open);
     bool consume_script_editor_focus_request();
     void render_script_editor_window();
+    void log_message(DebugMessageLevel level, const std::string &text);
+    void log_info(const std::string &text);
+    void log_warning(const std::string &text);
+    void log_error(const std::string &text);
 
   private:
     enum class ScriptCompileStatus
@@ -119,6 +123,8 @@ namespace hades
     bool openWorkspaceDeleteDialog_ = false;
     bool openSettingsWindow_ = false;
     bool focusSettingsWindow_ = false;
+    bool openDebugConsoleWindow_ = false;
+    bool focusDebugConsoleWindow_ = false;
     std::filesystem::path pendingWorkspaceDeletePath_;
     std::string workspaceDeleteError_;
     std::optional<Entity::EntityId> pendingEntityDeletion_;
@@ -170,6 +176,7 @@ namespace hades
     void render_workspace_delete_dialog(EntityManager &entityManager, ComponentManager &componentManager);
     void render_workspace_dialogs(EntityManager &entityManager, ComponentManager &componentManager);
     void render_settings_window();
+    void render_debug_console_window();
     void render_workspace_tree_node(const WorkspaceTreeNode &node);
     void render_script_editor();
     std::optional<std::size_t> find_script_editor_tab_index(const std::filesystem::path &scriptPath) const;

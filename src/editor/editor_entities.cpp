@@ -281,6 +281,7 @@ namespace hades
     {
       stop_play_mode(scriptRuntime);
       state.playModeMessage = "Play mode stopped because an entity hierarchy was deleted.";
+      log_warning(state.playModeMessage);
     }
 
     const auto hierarchy = componentManager.getComponent<TransformHierarchyComponent>(entity);
@@ -389,6 +390,8 @@ namespace hades
     case EditorPlayAction::None:
       return;
     case EditorPlayAction::Start:
+      openDebugConsoleWindow_ = true;
+      focusDebugConsoleWindow_ = true;
       start_play_mode(entityManager, componentManager, scriptRuntime);
       break;
     case EditorPlayAction::Stop:
@@ -411,7 +414,7 @@ namespace hades
       state.activeWorld.reset();
       state.activeCamera.reset();
       state.playModeMessage = "No world available for play mode.";
-      std::fprintf(stderr, "Play mode failed: %s\n", state.playModeMessage.c_str());
+      log_error("Play mode failed: " + state.playModeMessage);
       return;
     }
 
@@ -422,7 +425,7 @@ namespace hades
       state.activeWorld.reset();
       state.activeCamera.reset();
       state.playModeMessage = main_camera_selection_message(selection.status);
-      std::fprintf(stderr, "Play mode failed: %s\n", state.playModeMessage.c_str());
+      log_error("Play mode failed: " + state.playModeMessage);
       return;
     }
 
@@ -433,7 +436,7 @@ namespace hades
       state.activeWorld.reset();
       state.activeCamera.reset();
       state.playModeMessage = scriptError;
-      std::fprintf(stderr, "Play mode failed: %s\n", scriptError.c_str());
+      log_error("Play mode failed: " + scriptError);
       return;
     }
 

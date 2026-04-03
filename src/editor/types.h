@@ -1,6 +1,8 @@
 #ifndef EDITOR_TYPES_H
 #define EDITOR_TYPES_H
 
+#include <chrono>
+#include <deque>
 #include <optional>
 #include <queue>
 #include <string>
@@ -40,6 +42,20 @@ namespace hades
     Z,
   };
 
+  enum class DebugMessageLevel
+  {
+    Info,
+    Warning,
+    Error,
+  };
+
+  struct DebugMessage
+  {
+    DebugMessageLevel level = DebugMessageLevel::Info;
+    std::string text;
+    std::chrono::steady_clock::time_point timestamp;
+  };
+
   struct EditorState
   {
     std::queue<EDITOR_EventType> events = std::queue<EDITOR_EventType>();
@@ -52,6 +68,7 @@ namespace hades
     std::optional<Entity::EntityId> activeWorld;
     std::optional<Entity::EntityId> activeCamera;
     std::string playModeMessage;
+    std::deque<DebugMessage> debugConsoleMessages;
   };
 }
 
