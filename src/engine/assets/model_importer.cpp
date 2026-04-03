@@ -79,7 +79,8 @@ namespace hades
         aiProcess_Triangulate |
             aiProcess_JoinIdenticalVertices |
             aiProcess_SortByPType |
-            aiProcess_ImproveCacheLocality);
+            aiProcess_ImproveCacheLocality |
+            aiProcess_PreTransformVertices);
 
     if (scene == nullptr || scene->mRootNode == nullptr)
     {
@@ -116,14 +117,16 @@ namespace hades
       importedMesh.vertexCount = mesh->mNumVertices;
       importedMesh.faceCount = mesh->mNumFaces;
       importedMesh.materialIndex = mesh->mMaterialIndex;
+      importedMesh.vertices.reserve(mesh->mNumVertices);
+      importedMesh.triangles.reserve(mesh->mNumFaces);
 
       model.totalVertexCount += importedMesh.vertexCount;
       model.totalFaceCount += importedMesh.faceCount;
-      model.meshes.push_back(std::move(importedMesh));
 
       for (unsigned int vertexIndex = 0; vertexIndex < mesh->mNumVertices; ++vertexIndex)
       {
         const aiVector3D &vertex = mesh->mVertices[vertexIndex];
+        importedMesh.vertices.push_back(ImportedVertex{vertex.x, vertex.y, vertex.z});
         minX = std::min(minX, vertex.x);
         minY = std::min(minY, vertex.y);
         minZ = std::min(minZ, vertex.z);
@@ -132,6 +135,24 @@ namespace hades
         maxZ = std::max(maxZ, vertex.z);
         foundAnyVertex = true;
       }
+
+      for (unsigned int faceIndex = 0; faceIndex < mesh->mNumFaces; ++faceIndex)
+      {
+        const aiFace &face = mesh->mFaces[faceIndex];
+        if (face.mNumIndices != 3 || face.mIndices == nullptr)
+        {
+          continue;
+        }
+
+        importedMesh.triangles.push_back(ImportedTriangle{
+            face.mIndices[0],
+            face.mIndices[1],
+            face.mIndices[2]});
+      }
+
+      importedMesh.vertexCount = importedMesh.vertices.size();
+      importedMesh.faceCount = importedMesh.triangles.size();
+      model.meshes.push_back(std::move(importedMesh));
     }
 
     model.materials.reserve(scene->mNumMaterials);

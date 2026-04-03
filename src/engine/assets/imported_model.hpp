@@ -2,17 +2,34 @@
 #define HADES_ENGINE_ASSETS_IMPORTED_MODEL_HPP
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
 namespace hades
 {
+  struct ImportedVertex
+  {
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+  };
+
+  struct ImportedTriangle
+  {
+    std::uint32_t a = 0;
+    std::uint32_t b = 0;
+    std::uint32_t c = 0;
+  };
+
   struct ImportedMesh
   {
     std::string name;
     std::size_t vertexCount = 0;
     std::size_t faceCount = 0;
     std::size_t materialIndex = 0;
+    std::vector<ImportedVertex> vertices;
+    std::vector<ImportedTriangle> triangles;
   };
 
   struct ImportedMaterial

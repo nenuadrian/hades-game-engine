@@ -1,5 +1,6 @@
 #include "detached_play_window.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 
@@ -12,6 +13,7 @@
 #include "../engine/core/ecs/component_manager.hpp"
 #include "../engine/core/ecs/entity_manager.hpp"
 #include "../engine/core/ecs/world_utils.hpp"
+#include "../engine/rendering/model_preview.hpp"
 
 namespace
 {
@@ -230,6 +232,114 @@ namespace
     return visible;
   }
 
+  SDL_Color shaded_preview_color(
+      std::uint8_t red,
+      std::uint8_t green,
+      std::uint8_t blue,
+      float shade,
+      std::uint8_t alpha)
+  {
+    return SDL_Color{
+        hades::preview::scale_color_channel(red, shade),
+        hades::preview::scale_color_channel(green, shade),
+        hades::preview::scale_color_channel(blue, shade),
+        alpha};
+  }
+
+  bool draw_model_mesh(
+      SDL_Renderer *renderer,
+      const hades::PositionComponent3D &cameraPosition,
+      const hades::CameraComponent &camera,
+      int width,
+      int height,
+      const hades::PositionComponent3D &position,
+      const hades::ImportedModel &model)
+  {
+    const auto projectedTriangles = hades::preview::project_model_triangles(
+        model,
+        position,
+        [&](const hades::preview::Vec3 &worldPoint)
+        {
+          return hades::preview::make_vec3(
+              worldPoint.x - cameraPosition.x,
+              worldPoint.y - cameraPosition.y,
+              worldPoint.z - cameraPosition.z);
+        },
+        [&](const hades::preview::Vec3 &cameraPoint, hades::preview::Vec2 &screenPoint)
+        {
+          SDL_FPoint projectedPoint{};
+          if (!project_camera_space_point(
+                  make_vec3(cameraPoint.x, cameraPoint.y, cameraPoint.z),
+                  camera,
+                  width,
+                  height,
+                  projectedPoint))
+          {
+            return false;
+          }
+
+          screenPoint.x = projectedPoint.x;
+          screenPoint.y = projectedPoint.y;
+          return true;
+        });
+
+    if (projectedTriangles.empty())
+    {
+      return false;
+    }
+
+    bool drewTriangle = false;
+    for (const auto &triangle : projectedTriangles)
+    {
+      const SDL_Color fillColor = shaded_preview_color(157, 172, 191, triangle.shade, 220);
+      const SDL_Color outlineColor = shaded_preview_color(226, 232, 238, std::min(triangle.shade + 0.1f, 1.0f), 255);
+      const SDL_Vertex vertices[3] = {
+          {
+              SDL_FPoint{triangle.points[0].x, triangle.points[0].y},
+              fillColor,
+              SDL_FPoint{0.0f, 0.0f},
+          },
+          {
+              SDL_FPoint{triangle.points[1].x, triangle.points[1].y},
+              fillColor,
+              SDL_FPoint{0.0f, 0.0f},
+          },
+          {
+              SDL_FPoint{triangle.points[2].x, triangle.points[2].y},
+              fillColor,
+              SDL_FPoint{0.0f, 0.0f},
+          }};
+
+      if (SDL_RenderGeometry(renderer, nullptr, vertices, 3, nullptr, 0) == 0)
+      {
+        drewTriangle = true;
+      }
+
+      SDL_SetRenderDrawColor(renderer, outlineColor.r, outlineColor.g, outlineColor.b, outlineColor.a);
+      SDL_RenderDrawLine(
+          renderer,
+          static_cast<int>(std::lround(triangle.points[0].x)),
+          static_cast<int>(std::lround(triangle.points[0].y)),
+          static_cast<int>(std::lround(triangle.points[1].x)),
+          static_cast<int>(std::lround(triangle.points[1].y)));
+      SDL_RenderDrawLine(
+          renderer,
+          static_cast<int>(std::lround(triangle.points[1].x)),
+          static_cast<int>(std::lround(triangle.points[1].y)),
+          static_cast<int>(std::lround(triangle.points[2].x)),
+          static_cast<int>(std::lround(triangle.points[2].y)));
+      SDL_RenderDrawLine(
+          renderer,
+          static_cast<int>(std::lround(triangle.points[2].x)),
+          static_cast<int>(std::lround(triangle.points[2].y)),
+          static_cast<int>(std::lround(triangle.points[0].x)),
+          static_cast<int>(std::lround(triangle.points[0].y)));
+      drewTriangle = true;
+    }
+
+    return drewTriangle;
+  }
+
   void render_world_preview(
       SDL_Renderer *renderer,
       hades::EntityManager &entityManager,
@@ -286,6 +396,19 @@ namespace
       }
 
       const auto &model = componentManager.getComponent<hades::ModelComponent>(entity).model;
+      if (hades::preview::has_renderable_geometry(model) &&
+          draw_model_mesh(
+              renderer,
+              cameraPosition,
+              camera,
+              width,
+              height,
+              position,
+              model))
+      {
+        continue;
+      }
+
       const Vec3 minCorner = model.hasBounds
                                  ? make_vec3(model.minX, model.minY, model.minZ)
                                  : make_vec3(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT);

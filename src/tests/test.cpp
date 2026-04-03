@@ -328,6 +328,10 @@ namespace hades
       EXPECT_GT(model->totalVertexCount, 0U);
       EXPECT_GT(model->totalFaceCount, 0U);
       EXPECT_FALSE(model->sourcePath.empty());
+      EXPECT_FALSE(model->meshes.front().vertices.empty());
+      EXPECT_FALSE(model->meshes.front().triangles.empty());
+      EXPECT_EQ(model->meshes.front().vertexCount, model->meshes.front().vertices.size());
+      EXPECT_EQ(model->meshes.front().faceCount, model->meshes.front().triangles.size());
     }
 
     TEST(EntityFactoryTest, CreateRootCameraAddsDefaultComponents)

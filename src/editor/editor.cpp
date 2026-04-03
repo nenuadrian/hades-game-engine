@@ -1,5 +1,6 @@
 #include "editor.hpp"
 #include "native_dialogs.hpp"
+#include "script_document.hpp"
 #include "workspace_file_operations.hpp"
 
 #include <array>
@@ -19,6 +20,7 @@
 
 #include "imgui.h"
 #include "imgui_internal.h"
+#include "misc/cpp/imgui_stdlib.h"
 #include "../engine/components/audio_listener_component.hpp"
 #include "../engine/components/audio_source_component.hpp"
 #include "../engine/components/camera_component.hpp"
@@ -36,6 +38,7 @@
 #include "../engine/core/ecs/entity_manager.hpp"
 #include "../engine/core/ecs/world_utils.hpp"
 #include "../engine/gui/imgui.hpp"
+#include "../engine/rendering/model_preview.hpp"
 #include "../engine/runtime/main_camera_selection.hpp"
 #include "../engine/runtime/script_runtime.hpp"
 
@@ -48,11 +51,13 @@ namespace hades
     constexpr char PROPERTIES_WINDOW_TITLE[] = "Properties";
     constexpr char COMPONENTS_WINDOW_TITLE[] = "Components";
     constexpr char SCENE_WINDOW_TITLE[] = "World";
+    constexpr char SCRIPT_EDITOR_WINDOW_TITLE[] = "Script Editor";
     constexpr char SETTINGS_WINDOW_TITLE[] = "Settings";
     constexpr char IMPORT_MODEL_POPUP_TITLE[] = "Import Model";
     constexpr char WORKSPACE_CREATE_POPUP_TITLE[] = "Create Workspace Item";
     constexpr char WORKSPACE_IMPORT_POPUP_TITLE[] = "Import Into Workspace";
     constexpr char WORKSPACE_DELETE_POPUP_TITLE[] = "Delete Workspace Item";
+    constexpr char SCRIPT_EDITOR_UNSAVED_POPUP_TITLE[] = "Unsaved Script Changes";
     constexpr float PI = 3.14159265358979323846f;
     constexpr float CUBE_HALF_EXTENT = 0.5f;
     constexpr float EDITOR_SCENE_CAMERA_TARGET_X = 0.0f;
@@ -493,6 +498,110 @@ namespace hades
       };
     }
 
+    hades::preview::Vec3 to_preview_vec3(const Vec3 &value)
+    {
+      return hades::preview::make_vec3(value.x, value.y, value.z);
+    }
+
+    Vec3 from_preview_vec3(const hades::preview::Vec3 &value)
+    {
+      return make_vec3(value.x, value.y, value.z);
+    }
+
+    ImU32 shaded_preview_color(
+        std::uint8_t red,
+        std::uint8_t green,
+        std::uint8_t blue,
+        float shade,
+        std::uint8_t alpha)
+    {
+      return IM_COL32(
+          hades::preview::scale_color_channel(red, shade),
+          hades::preview::scale_color_channel(green, shade),
+          hades::preview::scale_color_channel(blue, shade),
+          alpha);
+    }
+
+    bool draw_model_mesh(
+        ImDrawList *drawList,
+        const EditorSceneViewCamera &sceneCamera,
+        const CameraComponent &camera,
+        const ImVec2 &canvasOrigin,
+        const ImVec2 &canvasSize,
+        const PositionComponent3D &position,
+        const ImportedModel &model,
+        const std::string *label = nullptr,
+        ImU32 labelColor = IM_COL32(205, 210, 218, 255))
+    {
+      const auto projectedTriangles = hades::preview::project_model_triangles(
+          model,
+          position,
+          [&](const hades::preview::Vec3 &worldPoint)
+          {
+            return to_preview_vec3(world_to_camera_space(from_preview_vec3(worldPoint), sceneCamera));
+          },
+          [&](const hades::preview::Vec3 &cameraPoint, hades::preview::Vec2 &screenPoint)
+          {
+            ImVec2 projectedPoint;
+            if (!project_camera_space_point(
+                    from_preview_vec3(cameraPoint),
+                    camera,
+                    canvasOrigin,
+                    canvasSize,
+                    projectedPoint))
+            {
+              return false;
+            }
+
+            screenPoint.x = projectedPoint.x;
+            screenPoint.y = projectedPoint.y;
+            return true;
+          });
+
+      if (projectedTriangles.empty())
+      {
+        return false;
+      }
+
+      for (const auto &triangle : projectedTriangles)
+      {
+        const ImVec2 points[3] = {
+            ImVec2(triangle.points[0].x, triangle.points[0].y),
+            ImVec2(triangle.points[1].x, triangle.points[1].y),
+            ImVec2(triangle.points[2].x, triangle.points[2].y)};
+        drawList->AddConvexPolyFilled(
+            points,
+            3,
+            shaded_preview_color(182, 194, 208, triangle.shade, 230));
+        drawList->AddPolyline(
+            points,
+            3,
+            shaded_preview_color(227, 232, 238, std::min(triangle.shade + 0.1f, 1.0f), 255),
+            ImDrawFlags_Closed,
+            1.0f);
+      }
+
+      if (label != nullptr)
+      {
+        const Vec3 labelAnchor = model.hasBounds
+                                     ? box_center(
+                                           make_vec3(model.minX, model.minY, model.minZ),
+                                           make_vec3(model.maxX, model.maxY, model.maxZ),
+                                           position)
+                                     : make_vec3(position.x, position.y, position.z);
+        ImVec2 centerPoint;
+        if (project_point(labelAnchor, sceneCamera, camera, canvasOrigin, canvasSize, centerPoint))
+        {
+          drawList->AddText(
+              ImVec2(centerPoint.x + 6.0f, centerPoint.y + 6.0f),
+              labelColor,
+              label->c_str());
+        }
+      }
+
+      return true;
+    }
+
     bool draw_camera_frustum(
         ImDrawList *drawList,
         const EditorSceneViewCamera &sceneCamera,
@@ -720,6 +829,22 @@ namespace hades
         if (componentManager.hasComponent<ModelComponent>(entity))
         {
           const auto &model = componentManager.getComponent<ModelComponent>(entity).model;
+          if (hades::preview::has_renderable_geometry(model) &&
+              draw_model_mesh(
+                  drawList,
+                  sceneCamera,
+                  camera,
+                  canvasOrigin,
+                  canvasSize,
+                  position,
+                  model,
+                  &label,
+                  IM_COL32(205, 210, 218, 255)))
+          {
+            ++visibleRenderableCount;
+            continue;
+          }
+
           const Vec3 minCorner = model.hasBounds
                                      ? make_vec3(model.minX, model.minY, model.minZ)
                                      : make_vec3(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT);
@@ -785,6 +910,34 @@ namespace hades
     bool has_path_separator(const std::string &name)
     {
       return name.find('/') != std::string::npos || name.find('\\') != std::string::npos;
+    }
+
+    bool path_is_same_or_within(
+        const std::filesystem::path &parentPath,
+        const std::filesystem::path &candidatePath)
+    {
+      const std::filesystem::path normalizedParent = parentPath.lexically_normal();
+      const std::filesystem::path normalizedCandidate = candidatePath.lexically_normal();
+      if (normalizedParent == normalizedCandidate)
+      {
+        return true;
+      }
+
+      const std::filesystem::path relativePath = normalizedCandidate.lexically_relative(normalizedParent);
+      if (relativePath.empty())
+      {
+        return false;
+      }
+
+      for (const auto &segment : relativePath)
+      {
+        if (segment == "..")
+        {
+          return false;
+        }
+      }
+
+      return true;
     }
 
     template <std::size_t Size>
@@ -1255,6 +1408,17 @@ namespace hades
     workspaceTreeRoot_.reset();
     workspaceScriptFiles_.clear();
     workspaceScanError_.clear();
+    activeScriptEditorPath_.reset();
+    activeScriptEditorRelativePath_.clear();
+    activeScriptEditorContents_.clear();
+    activeScriptEditorSavedWriteTime_.reset();
+    activeScriptEditorDirty_ = false;
+    scriptEditorStatusMessage_.clear();
+    scriptEditorStatusIsError_ = false;
+    focusScriptEditorWindow_ = false;
+    openScriptEditorUnsavedChangesDialog_ = false;
+    pendingScriptEditorPath_.reset();
+    pendingScriptEditorRelativePath_.clear();
     nextWorkspaceScanTime_ = 0.0;
     workspaceScriptListDirty_ = false;
     scriptModTimes_.clear();
@@ -1305,35 +1469,7 @@ namespace hades
 
       if (scriptsChanged)
       {
-        if (workspaceScriptFiles_.empty())
-        {
-          lastCompileError_.clear();
-          lastCompileSucceeded_ = true;
-          workspaceScriptListDirty_ = false;
-        }
-        else if (!backgroundCompileInProgress_)
-        {
-          std::vector<std::filesystem::path> sourceFiles;
-          sourceFiles.reserve(workspaceScriptFiles_.size());
-          for (const auto &relPath : workspaceScriptFiles_)
-          {
-            sourceFiles.push_back(activeWorkspacePath_ / relPath);
-          }
-
-          backgroundCompileInProgress_ = true;
-          workspaceScriptListDirty_ = false;
-          backgroundCompileResult_ = std::async(std::launch::async,
-              [files = std::move(sourceFiles)]() -> std::string
-              {
-                std::string error;
-                ScriptRuntime::compile(files, &error);
-                return error;
-              });
-        }
-        else
-        {
-          workspaceScriptListDirty_ = true;
-        }
+        queue_workspace_script_compile();
       }
     }
 
@@ -1349,6 +1485,7 @@ namespace hades
     import_model(entityManager, componentManager);
     handle_play_mode_requests(entityManager, componentManager, scriptRuntime);
     workspace(entityManager, componentManager);
+    render_script_editor();
     entities(entityManager, componentManager);
     handle_entity_deletion_requests(entityManager, componentManager, scriptRuntime);
     scene(entityManager, componentManager);
@@ -1462,12 +1599,14 @@ namespace hades
     ImGuiID mainDockId = dockspaceId;
     ImGuiID workspaceDockId = ImGui::DockBuilderSplitNode(mainDockId, ImGuiDir_Left, 0.22f, nullptr, &mainDockId);
     const ImGuiID entitiesDockId = ImGui::DockBuilderSplitNode(workspaceDockId, ImGuiDir_Down, 0.56f, nullptr, &workspaceDockId);
+    const ImGuiID scriptEditorDockId = ImGui::DockBuilderSplitNode(mainDockId, ImGuiDir_Down, 0.38f, nullptr, &mainDockId);
     ImGuiID inspectorDockId = ImGui::DockBuilderSplitNode(mainDockId, ImGuiDir_Right, 0.34f, nullptr, &mainDockId);
     const ImGuiID componentsDockId = ImGui::DockBuilderSplitNode(inspectorDockId, ImGuiDir_Right, 0.45f, nullptr, &inspectorDockId);
     ImGui::DockBuilderDockWindow(WORKSPACE_WINDOW_TITLE, workspaceDockId);
     ImGui::DockBuilderDockWindow(ENTITY_WINDOW_TITLE, entitiesDockId);
     ImGui::DockBuilderDockWindow(PROPERTIES_WINDOW_TITLE, inspectorDockId);
     ImGui::DockBuilderDockWindow(COMPONENTS_WINDOW_TITLE, componentsDockId);
+    ImGui::DockBuilderDockWindow(SCRIPT_EDITOR_WINDOW_TITLE, scriptEditorDockId);
     ImGui::DockBuilderDockWindow(SCENE_WINDOW_TITLE, mainDockId);
     ImGui::DockBuilderFinish(dockspaceId);
   }
@@ -1481,6 +1620,17 @@ namespace hades
       workspaceTreeRoot_.reset();
       workspaceScriptFiles_.clear();
       workspaceScanError_.clear();
+      activeScriptEditorPath_.reset();
+      activeScriptEditorRelativePath_.clear();
+      activeScriptEditorContents_.clear();
+      activeScriptEditorSavedWriteTime_.reset();
+      activeScriptEditorDirty_ = false;
+      scriptEditorStatusMessage_.clear();
+      scriptEditorStatusIsError_ = false;
+      focusScriptEditorWindow_ = false;
+      openScriptEditorUnsavedChangesDialog_ = false;
+      pendingScriptEditorPath_.reset();
+      pendingScriptEditorRelativePath_.clear();
       workspaceScriptListDirty_ = false;
       scriptModTimes_.clear();
       parsedFieldsCache_.clear();

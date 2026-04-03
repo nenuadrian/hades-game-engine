@@ -144,6 +144,7 @@ function(hades_configure_dependencies)
       hades_imgui STATIC
       ${imgui_SOURCE_DIR}/imgui.cpp
       ${imgui_SOURCE_DIR}/imgui_draw.cpp
+      ${imgui_SOURCE_DIR}/misc/cpp/imgui_stdlib.cpp
       ${imgui_SOURCE_DIR}/imgui_tables.cpp
       ${imgui_SOURCE_DIR}/imgui_widgets.cpp
       ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl2.cpp

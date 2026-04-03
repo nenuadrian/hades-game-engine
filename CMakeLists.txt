@@ -75,6 +75,7 @@ if(TARGET SDL2::SDL2main)
 endif()
 
 set(TEST_SUPPORT_SOURCES
+  src/editor/script_document.cpp
   src/editor/workspace_manager.cpp
   src/editor/workspace_file_operations.cpp
   src/engine/assets/model_importer.cpp
