@@ -1,0 +1,34 @@
+#pragma once
+
+#include <chrono>
+#include <filesystem>
+#include <string>
+
+namespace hades::test_support
+{
+  struct ScopedDirectoryCleanup
+  {
+    explicit ScopedDirectoryCleanup(std::filesystem::path directoryPath)
+        : directory(std::move(directoryPath)) {}
+
+    ~ScopedDirectoryCleanup()
+    {
+      std::error_code errorCode;
+      std::filesystem::remove_all(directory, errorCode);
+    }
+
+    std::filesystem::path directory;
+  };
+
+  inline std::filesystem::path unique_test_directory(const char *prefix)
+  {
+    const auto uniqueSuffix = std::to_string(
+        std::chrono::high_resolution_clock::now().time_since_epoch().count());
+    return std::filesystem::temp_directory_path() / (std::string(prefix) + "-" + uniqueSuffix);
+  }
+
+  inline std::filesystem::path backpack_model_path()
+  {
+    return std::filesystem::path(__FILE__).parent_path() / "backpack/12305_backpack_v2_l3.obj";
+  }
+}

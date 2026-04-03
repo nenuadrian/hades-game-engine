@@ -36,7 +36,8 @@ set(SRC_DIR "${CMAKE_SOURCE_DIR}/src")
 
 # Automatically find application source and header files.
 file(GLOB_RECURSE APP_SOURCE_FILES CONFIGURE_DEPENDS "${SRC_DIR}/*.cpp")
-list(REMOVE_ITEM APP_SOURCE_FILES "${CMAKE_SOURCE_DIR}/src/tests/test.cpp")
+file(GLOB_RECURSE TEST_SOURCE_FILES CONFIGURE_DEPENDS "${SRC_DIR}/tests/*.cpp")
+list(REMOVE_ITEM APP_SOURCE_FILES ${TEST_SOURCE_FILES})
 file(
   GLOB_RECURSE HEADER_FILES
   CONFIGURE_DEPENDS
@@ -88,7 +89,7 @@ set(TEST_SUPPORT_SOURCES
   src/engine/runtime/script_runtime.cpp
   src/engine/runtime/subprocess.cpp)
 
-add_executable(hades_tests src/tests/test.cpp ${TEST_SUPPORT_SOURCES})
+add_executable(hades_tests ${TEST_SOURCE_FILES} ${TEST_SUPPORT_SOURCES})
 target_link_libraries(hades_tests PRIVATE assimp gtest_main)
 if(NOT WIN32)
   target_link_libraries(hades_tests PRIVATE dl)
