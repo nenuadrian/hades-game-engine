@@ -91,6 +91,7 @@ target_link_libraries(
           hades_imgui
           hades_imgui_textedit
           miniaudio
+          nlohmann_json::nlohmann_json
           tinyobjloader
           Vulkan::Vulkan)
 if(WIN32)
@@ -123,6 +124,7 @@ set(TEST_SUPPORT_SOURCES
   src/engine/components/transform_hierarchy_component.cpp
   src/engine/core/ecs/entity_factory.cpp
   src/engine/core/ecs/entity_manager.cpp
+  src/engine/core/ecs/scene_serializer.cpp
   src/engine/rendering/vector_text.cpp
   src/engine/runtime/clr_host.cpp
   src/engine/runtime/script_runtime.cpp
@@ -130,7 +132,7 @@ set(TEST_SUPPORT_SOURCES
 
 add_executable(hades_tests ${TEST_SOURCE_FILES} ${TEST_SUPPORT_SOURCES})
 target_include_directories(hades_tests PRIVATE "${CMAKE_BINARY_DIR}/generated")
-target_link_libraries(hades_tests PRIVATE assimp gtest_main)
+target_link_libraries(hades_tests PRIVATE assimp gtest_main nlohmann_json::nlohmann_json)
 if(NOT WIN32)
   target_link_libraries(hades_tests PRIVATE dl)
 endif()

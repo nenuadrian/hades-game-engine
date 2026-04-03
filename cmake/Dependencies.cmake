@@ -22,6 +22,7 @@ set(HADES_SDL2_TAG "release-2.32.0" CACHE STRING "SDL2 git tag or branch.")
 set(HADES_ASSIMP_TAG "v6.0.4" CACHE STRING "Assimp git tag or branch.")
 set(HADES_TINYOBJLOADER_TAG "v2.0.0rc13" CACHE STRING "tinyobjloader git tag or branch.")
 set(HADES_IMGUI_TEXTEDIT_TAG "master" CACHE STRING "ImGuiColorTextEdit git tag or branch.")
+set(HADES_NLOHMANN_JSON_TAG "v3.11.3" CACHE STRING "nlohmann/json git tag or branch.")
 
 function(hades_prefer_local_source fetch_name local_dir)
   string(TOUPPER "${fetch_name}" fetch_name_upper)
@@ -53,6 +54,7 @@ function(hades_configure_dependencies)
   hades_prefer_local_source(assimp "${CMAKE_SOURCE_DIR}/lib/assimp")
   hades_prefer_local_source(tinyobjloader "${CMAKE_SOURCE_DIR}/lib/tinyobjloader")
   hades_prefer_local_source(imgui_color_text_edit "${CMAKE_SOURCE_DIR}/lib/ImGuiColorTextEdit")
+  hades_prefer_local_source(nlohmann_json "${CMAKE_SOURCE_DIR}/lib/json")
 
   set(CLI11_BUILD_DOCS OFF CACHE BOOL "" FORCE)
   set(CLI11_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -134,7 +136,16 @@ function(hades_configure_dependencies)
     GIT_TAG ${HADES_IMGUI_TEXTEDIT_TAG}
     GIT_SHALLOW TRUE)
 
-  FetchContent_MakeAvailable(cli11 googletest miniaudio sdl2 assimp tinyobjloader imgui_color_text_edit)
+  set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
+  set(JSON_Install OFF CACHE BOOL "" FORCE)
+  set(JSON_MultipleHeaders OFF CACHE BOOL "" FORCE)
+  FetchContent_Declare(
+    nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG ${HADES_NLOHMANN_JSON_TAG}
+    GIT_SHALLOW TRUE)
+
+  FetchContent_MakeAvailable(cli11 googletest miniaudio sdl2 assimp tinyobjloader imgui_color_text_edit nlohmann_json)
 
   FetchContent_GetProperties(imgui)
   if(NOT imgui_POPULATED)

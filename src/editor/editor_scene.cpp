@@ -1535,6 +1535,11 @@ namespace hades
       ImGui::TextDisabled("No world is loaded.");
     }
 
+    if (!state.playModeMessage.empty())
+    {
+      ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "%s", state.playModeMessage.c_str());
+    }
+
     if (!sceneWorld.has_value())
     {
       ImGui::End();
@@ -1866,6 +1871,10 @@ namespace hades
     if (state.activeCamera.has_value())
     {
       ImGui::Text("Active Camera: %u", *state.activeCamera);
+    }
+    if (!state.playModeMessage.empty())
+    {
+      ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "Play error: %s", state.playModeMessage.c_str());
     }
     ImGui::End();
   }

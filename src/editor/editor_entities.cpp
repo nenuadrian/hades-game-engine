@@ -410,6 +410,8 @@ namespace hades
       state.isPlaying = false;
       state.activeWorld.reset();
       state.activeCamera.reset();
+      state.playModeMessage = "No world available for play mode.";
+      std::fprintf(stderr, "Play mode failed: %s\n", state.playModeMessage.c_str());
       return;
     }
 
@@ -419,6 +421,8 @@ namespace hades
       state.isPlaying = false;
       state.activeWorld.reset();
       state.activeCamera.reset();
+      state.playModeMessage = main_camera_selection_message(selection.status);
+      std::fprintf(stderr, "Play mode failed: %s\n", state.playModeMessage.c_str());
       return;
     }
 
@@ -429,6 +433,7 @@ namespace hades
       state.activeWorld.reset();
       state.activeCamera.reset();
       state.playModeMessage = scriptError;
+      std::fprintf(stderr, "Play mode failed: %s\n", scriptError.c_str());
       return;
     }
 

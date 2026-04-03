@@ -913,6 +913,13 @@ namespace hades
         workspaceManager.current_workspace().has_value()
             ? workspaceManager.current_workspace()->path
             : std::filesystem::path();
+
+    // Save ImGui layout to current workspace before switching away.
+    if (!previousWorkspacePath.empty() && !imguiIniPath_.empty())
+    {
+      ImGui::SaveIniSettingsToDisk(imguiIniPath_.c_str());
+    }
+
     std::string errorMessage;
     const auto workspace = workspaceManager.open_workspace(std::filesystem::path(trim_copy(workspacePath)), &errorMessage);
     if (!workspace.has_value())
@@ -924,6 +931,16 @@ namespace hades
     if (workspace->path != previousWorkspacePath)
     {
       reset_workspace_session();
+    }
+
+    // Point ImGui ini at the workspace .hades directory.
+    {
+      const auto hadesDir = workspace->path / ".hades";
+      std::error_code ec;
+      std::filesystem::create_directories(hadesDir, ec);
+      imguiIniPath_ = (hadesDir / "imgui.ini").string();
+      ImGui::GetIO().IniFilename = imguiIniPath_.c_str();
+      ImGui::LoadIniSettingsFromDisk(imguiIniPath_.c_str());
     }
 
     creatingWorkspace = false;
@@ -938,6 +955,12 @@ namespace hades
         workspaceManager.current_workspace().has_value()
             ? workspaceManager.current_workspace()->path
             : std::filesystem::path();
+
+    if (!previousWorkspacePath.empty() && !imguiIniPath_.empty())
+    {
+      ImGui::SaveIniSettingsToDisk(imguiIniPath_.c_str());
+    }
+
     std::string errorMessage;
     const auto workspace = workspaceManager.create_workspace(
         std::filesystem::path(trim_copy(createWorkspaceParentBuffer.data())),
@@ -952,6 +975,15 @@ namespace hades
     if (workspace->path != previousWorkspacePath)
     {
       reset_workspace_session();
+    }
+
+    {
+      const auto hadesDir = workspace->path / ".hades";
+      std::error_code ec;
+      std::filesystem::create_directories(hadesDir, ec);
+      imguiIniPath_ = (hadesDir / "imgui.ini").string();
+      ImGui::GetIO().IniFilename = imguiIniPath_.c_str();
+      ImGui::LoadIniSettingsFromDisk(imguiIniPath_.c_str());
     }
 
     creatingWorkspace = false;

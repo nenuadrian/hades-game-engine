@@ -1,13 +1,17 @@
 #include "editor.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <memory>
 #include <string>
+#include <unordered_map>
 
 #include "imgui.h"
 #include "imgui_internal.h"
+#include "../engine/components/name_component.hpp"
 #include "../engine/core/ecs/component_manager.hpp"
 #include "../engine/core/ecs/entity_manager.hpp"
+#include "../engine/core/ecs/scene_serializer.hpp"
 #include "../engine/core/ecs/world_utils.hpp"
 #include "../engine/gui/imgui.hpp"
 #include "../engine/runtime/script_runtime.hpp"
@@ -173,15 +177,43 @@ namespace hades
       state.events.push(EDITOR_QUIT);
     };
 
+    MenuBarItem save;
+    save.title = "Save";
+    save.on_activate = [this, &entityManager, &componentManager]()
+    {
+      save_worlds(entityManager, componentManager);
+    };
+
     file.children_menu_items.push_back(newWorld);
+    file.children_menu_items.push_back(save);
     file.children_menu_items.push_back(exit);
     gui->menu_bar_items.push_back(file);
 
     MenuBarItem worlds;
     worlds.title = "Worlds";
 
-    const auto worldEntities = find_world_entities(entityManager, componentManager);
-    if (worldEntities.empty())
+    // Collect in-memory world names so we can mark them as loaded.
+    const auto memoryWorlds = find_world_entities(entityManager, componentManager);
+    std::unordered_map<std::string, Entity::EntityId> memoryWorldsByName;
+    for (Entity::EntityId world : memoryWorlds)
+    {
+      memoryWorldsByName[entity_label(world, componentManager)] = world;
+    }
+
+    // List worlds saved on disk.
+    const auto diskWorlds = list_saved_worlds(activeWorkspacePath_);
+
+    // Build a combined list: disk worlds first, then any unsaved in-memory worlds.
+    std::vector<std::string> allWorldNames = diskWorlds;
+    for (const auto &[name, id] : memoryWorldsByName)
+    {
+      if (std::find(allWorldNames.begin(), allWorldNames.end(), name) == allWorldNames.end())
+      {
+        allWorldNames.push_back(name);
+      }
+    }
+
+    if (allWorldNames.empty())
     {
       MenuBarItem emptyWorlds;
       emptyWorlds.title = "No Worlds Available";
@@ -189,15 +221,40 @@ namespace hades
     }
     else
     {
-      for (const Entity::EntityId world : worldEntities)
+      const bool hasDiskWorlds = !diskWorlds.empty();
+      for (const auto &worldName : allWorldNames)
       {
         MenuBarItem worldItem;
-        worldItem.title = entity_label(world, componentManager);
-        worldItem.selected = state.loadedWorld.has_value() && *state.loadedWorld == world;
-        worldItem.on_activate = [this, &componentManager, world]()
+        worldItem.title = worldName;
+
+        auto memIt = memoryWorldsByName.find(worldName);
+        const bool inMemory = memIt != memoryWorldsByName.end();
+        const bool onDisk = hasDiskWorlds &&
+                            std::find(diskWorlds.begin(), diskWorlds.end(), worldName) != diskWorlds.end();
+
+        if (inMemory)
         {
-          load_world(world, componentManager);
-        };
+          worldItem.selected = state.loadedWorld.has_value() && *state.loadedWorld == memIt->second;
+        }
+
+        if (onDisk)
+        {
+          // Always load from disk when selected.
+          worldItem.on_activate = [this, worldName, &entityManager, &componentManager]()
+          {
+            open_world_from_disk(worldName, entityManager, componentManager);
+          };
+        }
+        else if (inMemory)
+        {
+          // Unsaved world: just switch to it.
+          Entity::EntityId worldId = memIt->second;
+          worldItem.on_activate = [this, &componentManager, worldId]()
+          {
+            load_world(worldId, componentManager);
+          };
+        }
+
         worlds.children_menu_items.push_back(std::move(worldItem));
       }
     }
@@ -328,5 +385,71 @@ namespace hades
     ImGui::DockBuilderDockWindow(COMPONENTS_WINDOW_TITLE, componentsDockId);
     ImGui::DockBuilderDockWindow(SCENE_WINDOW_TITLE, mainDockId);
     ImGui::DockBuilderFinish(dockspaceId);
+  }
+
+  void Editor::save_worlds(
+      EntityManager &entityManager,
+      ComponentManager &componentManager)
+  {
+    if (activeWorkspacePath_.empty())
+    {
+      return;
+    }
+
+    std::string error;
+    if (!hades::save_all_worlds(activeWorkspacePath_, entityManager, componentManager, &error))
+    {
+      std::fprintf(stderr, "Failed to save worlds: %s\n", error.c_str());
+    }
+  }
+
+  void Editor::open_world_from_disk(
+      const std::string &worldName,
+      EntityManager &entityManager,
+      ComponentManager &componentManager)
+  {
+    if (activeWorkspacePath_.empty())
+    {
+      return;
+    }
+
+    const auto filePath = activeWorkspacePath_ / ".hades" / "worlds" / (worldName + ".json");
+
+    // Destroy any existing in-memory world with the same name.
+    for (Entity::EntityId entity : entityManager.getAllEntities())
+    {
+      if (!componentManager.hasComponent<WorldComponent>(entity))
+      {
+        continue;
+      }
+      if (!componentManager.hasComponent<NameComponent>(entity))
+      {
+        continue;
+      }
+      if (componentManager.getComponent<NameComponent>(entity).value == worldName)
+      {
+        if (state.loadedWorld.has_value() && *state.loadedWorld == entity)
+        {
+          state.loadedWorld.reset();
+          state.activeCamera.reset();
+        }
+        if (state.selectedEntity.has_value())
+        {
+          state.selectedEntity.reset();
+        }
+        destroy_world_tree(entity, entityManager, componentManager);
+        break;
+      }
+    }
+
+    std::string error;
+    auto worldEntity = hades::load_world_from_file(filePath, entityManager, componentManager, &error);
+    if (!worldEntity.has_value())
+    {
+      std::fprintf(stderr, "Failed to load world '%s': %s\n", worldName.c_str(), error.c_str());
+      return;
+    }
+
+    load_world(*worldEntity, componentManager);
   }
 }

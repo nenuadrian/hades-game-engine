@@ -114,6 +114,7 @@ namespace hades
     std::vector<std::uint32_t> workspaceLogoPixels;
     int workspaceLogoWidth = 0;
     int workspaceLogoHeight = 0;
+    std::string imguiIniPath_;
 
     void request_quit();
     void process_editor_events();

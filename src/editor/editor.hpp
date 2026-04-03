@@ -208,6 +208,8 @@ namespace hades
     void render_hierarchy(Entity::EntityId entity, EntityManager &entityManager, ComponentManager &componentManager);
     void render_hierarchies(EntityManager &entityManager, ComponentManager &componentManager);
     void debug(float deltaTime);
+    void save_worlds(EntityManager &entityManager, ComponentManager &componentManager);
+    void open_world_from_disk(const std::string &worldName, EntityManager &entityManager, ComponentManager &componentManager);
   };
 
 }
