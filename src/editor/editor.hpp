@@ -7,13 +7,16 @@
 #include <future>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "types.h"
+#include "plugins/editor_plugin.hpp"
 #include "../engine/core/ecs/entity.hpp"
+#include "TextEditor.h"
 
 namespace hades
 {
@@ -54,7 +57,23 @@ namespace hades
         ComponentManager &componentManager,
         ScriptRuntime &scriptRuntime);
 
+    void show_plugin(std::string_view pluginId);
+    bool is_plugin_visible(std::string_view pluginId) const;
+    bool is_script_editor_window_open() const;
+    void set_script_editor_window_open(bool open);
+    void render_script_editor_window();
+
   private:
+    struct ScriptEditorTab
+    {
+      std::filesystem::path path;
+      std::string relativePath;
+      std::string contents;
+      std::unique_ptr<TextEditor> textEditor;
+      std::optional<std::filesystem::file_time_type> savedWriteTime;
+      bool dirty = false;
+    };
+
     bool dockLayoutInitialized = false;
     bool openImportModelDialog = false;
     std::array<char, 512> importModelPathBuffer{};
@@ -63,17 +82,14 @@ namespace hades
     std::optional<WorkspaceTreeNode> workspaceTreeRoot_;
     std::vector<std::string> workspaceScriptFiles_;
     std::string workspaceScanError_;
-    std::optional<std::filesystem::path> activeScriptEditorPath_;
-    std::string activeScriptEditorRelativePath_;
-    std::string activeScriptEditorContents_;
-    std::optional<std::filesystem::file_time_type> activeScriptEditorSavedWriteTime_;
-    bool activeScriptEditorDirty_ = false;
+    std::vector<ScriptEditorTab> openScriptEditorTabs_;
+    std::optional<std::size_t> activeScriptEditorTabIndex_;
     std::string scriptEditorStatusMessage_;
     bool scriptEditorStatusIsError_ = false;
+    bool openScriptEditorWindow_ = false;
     bool focusScriptEditorWindow_ = false;
     bool openScriptEditorUnsavedChangesDialog_ = false;
-    std::optional<std::filesystem::path> pendingScriptEditorPath_;
-    std::string pendingScriptEditorRelativePath_;
+    std::optional<std::filesystem::path> pendingScriptEditorClosePath_;
     double nextWorkspaceScanTime_ = 0.0;
     bool workspaceScriptListDirty_ = false;
     bool openWorkspaceCreateDialog_ = false;
@@ -108,7 +124,13 @@ namespace hades
     // Parsed public field cache (keyed by resolved script path).
     std::unordered_map<std::string, std::vector<std::pair<std::string, std::string>>> parsedFieldsCache_;
     std::unordered_map<std::string, std::filesystem::file_time_type> parsedFieldsModTimes_;
+    std::vector<std::unique_ptr<EditorPlugin>> plugins_;
 
+    void register_builtin_plugins();
+    void register_plugin(std::unique_ptr<EditorPlugin> plugin);
+    EditorPlugin *find_plugin(std::string_view pluginId);
+    const EditorPlugin *find_plugin(std::string_view pluginId) const;
+    void render_plugins(EditorPluginPhase phase, EditorPluginContext &context);
     void sync_menu_bar(EntityManager &entityManager, ComponentManager &componentManager);
     void configure_default_dock_layout(std::uint32_t dockspaceId);
     void refresh_workspace_cache(float deltaTime, const std::filesystem::path &workspacePath);
@@ -119,12 +141,20 @@ namespace hades
     void render_workspace_create_dialog();
     void render_workspace_import_dialog();
     void render_workspace_delete_dialog(EntityManager &entityManager, ComponentManager &componentManager);
+    void render_workspace_dialogs(EntityManager &entityManager, ComponentManager &componentManager);
     void render_settings_window();
     void render_workspace_tree_node(const WorkspaceTreeNode &node);
     void render_script_editor();
+    std::optional<std::size_t> find_script_editor_tab_index(const std::filesystem::path &scriptPath) const;
+    ScriptEditorTab *active_script_editor_tab();
+    const ScriptEditorTab *active_script_editor_tab() const;
+    void activate_script_editor_tab(std::size_t index);
+    void close_script_editor_tab(std::size_t index);
     void request_script_editor_open(const std::filesystem::path &scriptPath, const std::string &relativePath);
     bool open_script_document(const std::filesystem::path &scriptPath, const std::string &relativePath, std::string *errorMessage = nullptr);
     bool save_active_script_document(bool triggerCompile, std::string *errorMessage = nullptr);
+    bool save_script_document_at_index(std::size_t index, bool triggerCompile, std::string *errorMessage = nullptr);
+    bool save_all_script_documents(bool triggerCompile, std::string *errorMessage = nullptr);
     void queue_workspace_script_compile();
     void reset_scene_camera();
     void ensure_world_state(EntityManager &entityManager, ComponentManager &componentManager);

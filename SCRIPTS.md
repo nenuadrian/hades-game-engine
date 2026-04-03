@@ -104,6 +104,13 @@ The `dotnet` CLI is still required for **compilation** (`dotnet build`), but the
 compiled assembly is loaded and executed in-process rather than via
 `dotnet HadesScriptHost.dll`.
 
+When CMake can resolve `dotnet` during configure, the engine stores that
+absolute SDK path and uses it at runtime before falling back to `PATH`. If the
+SDK is installed or moved after the initial configure step, rerun CMake so the
+captured path stays in sync. You can also override discovery with
+`-DHADES_DOTNET_EXECUTABLE=/absolute/path/to/dotnet` and, if needed,
+`-DHADES_DOTNET_ROOT=/absolute/path/to/dotnet/root`.
+
 ## Cross-Platform Strategy
 
 The scripting path is cross-platform:

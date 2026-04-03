@@ -1,4 +1,5 @@
 #include "clr_host.hpp"
+#include "dotnet_config.hpp"
 
 #include <cstdint>
 #include <filesystem>
@@ -124,10 +125,15 @@ namespace hades
 
       // Also check DOTNET_ROOT environment variable.
       std::vector<std::filesystem::path> searchRoots;
+      if (dotnet_config::configured_dotnet_root[0] != '\0')
+      {
+        searchRoots.emplace_back(dotnet_config::configured_dotnet_root);
+      }
+
       const char *envRoot = std::getenv("DOTNET_ROOT");
       if (envRoot != nullptr && envRoot[0] != '\0')
       {
-        searchRoots.emplace_back(envRoot);
+        searchRoots.insert(searchRoots.begin(), std::filesystem::path(envRoot));
       }
       searchRoots.insert(searchRoots.end(), roots.begin(), roots.end());
 

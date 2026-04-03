@@ -16,6 +16,7 @@
     - [Build](#build)
     - [Run](#run)
     - [Test](#test)
+  - [ECS Benchmark](#ecs-benchmark)
   - [Scripting](#scripting)
   - [Documentation](#documentation)
   - [Previous version](#previous-version)
@@ -79,7 +80,10 @@ cmake --build build
 
 Entity scripts are compiled when Play starts. Install a local `dotnet` SDK if you
 want to attach `.cs` files to entities and run them in play mode on macOS,
-Linux, or Windows.
+Linux, or Windows. CMake captures the resolved `dotnet` path at configure time
+when available, so rerun `cmake -S . -B build` after installing or moving the
+SDK. You can also point CMake at it explicitly with
+`-DHADES_DOTNET_EXECUTABLE=/absolute/path/to/dotnet`.
 
 ### Test
 
@@ -87,6 +91,42 @@ Linux, or Windows.
 cmake -S . -B build
 cmake --build build
 ctest --test-dir build --output-on-failure
+```
+
+## ECS Benchmark
+
+`scripts/run_ecs_benchmark.py` builds a small standalone benchmark binary around
+the ECS core (`EntityManager`, `ComponentManager`, `SystemManager`) with an
+optimized compiler invocation, so you can profile ECS hot paths without pulling
+in the full editor or renderer build.
+
+Run the default benchmark suite:
+
+```bash
+python3 scripts/run_ecs_benchmark.py
+```
+
+Tune the workload:
+
+```bash
+python3 scripts/run_ecs_benchmark.py --entities 250000 --frames 1000 --iterations 5 --warmup 1
+```
+
+The runner expects a C++17 compiler on `PATH` and writes the compiled binary to
+`build/benchmarks/ecs_benchmark`.
+
+Results captured on April 3, 2026 on `Darwin arm64` with `Apple clang 17.0.0`
+using the default benchmark settings (`100000` entities, `500` frames,
+`5` measured iterations, `1` warmup iteration):
+
+```text
+Hades ECS benchmark
+config: entities=100000, frames=500, iterations=5, warmup=1
+
+spawn_entities                       avg     0.447 ms  min     0.390 ms  max     0.487 ms  throughput 223734368.24 entities/s
+spawn_and_attach_position_velocity   avg    64.682 ms  min    56.758 ms  max    76.831 ms  throughput   1546034.33 entities/s
+system_update_position_velocity      avg  1598.043 ms  (  3.196 ms/frame)  min  1401.624 ms  max  2007.233 ms  throughput  31288267.51 entity updates/s
+destroy_entities                     avg   314.592 ms  min   299.797 ms  max   331.084 ms  throughput    317871.80 entities/s
 ```
 
 ## Scripting

@@ -384,6 +384,7 @@ namespace hades
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
     apply_editor_theme();
 
     if (!ImGui_ImplSDL2_InitForVulkan(window))
@@ -424,6 +425,13 @@ namespace hades
     if (!is_minimized)
     {
       renderer_->render_imgui(draw_data);
+    }
+
+    ImGuiIO &io = ImGui::GetIO();
+    if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
+    {
+      ImGui::UpdatePlatformWindows();
+      ImGui::RenderPlatformWindowsDefault();
     }
   }
 
@@ -955,10 +963,7 @@ namespace hades
     {
       const auto targetWindowId = event_window_id(event);
       const auto playWindowId = playWindow.window_id();
-      if (!targetWindowId.has_value() || *targetWindowId == editorWindowId)
-      {
-        ImGui_ImplSDL2_ProcessEvent(&event);
-      }
+      ImGui_ImplSDL2_ProcessEvent(&event);
       if (event.type == SDL_QUIT)
       {
         running = false;
@@ -976,12 +981,6 @@ namespace hades
           stop_active_play_mode();
         }
       }
-    }
-
-    if (SDL_GetWindowFlags(window.get()) & SDL_WINDOW_MINIMIZED)
-    {
-      SDL_Delay(10);
-      return;
     }
 
     renderer->render_frame(window.get());

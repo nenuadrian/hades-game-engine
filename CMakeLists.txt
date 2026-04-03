@@ -31,6 +31,42 @@ endfunction()
 find_package(Vulkan REQUIRED)
 hades_configure_dependencies()
 
+set(HADES_DOTNET_EXECUTABLE "" CACHE FILEPATH "Absolute path to the dotnet executable used by runtime scripting")
+set(HADES_DOTNET_ROOT "" CACHE PATH "Absolute path to DOTNET_ROOT used by runtime scripting")
+
+set(HADES_DOTNET_EXECUTABLE_PATH "${HADES_DOTNET_EXECUTABLE}")
+if(NOT HADES_DOTNET_EXECUTABLE_PATH)
+  find_program(HADES_DOTNET_EXECUTABLE_PATH NAMES dotnet)
+  if(HADES_DOTNET_EXECUTABLE_PATH)
+    set(HADES_DOTNET_EXECUTABLE "${HADES_DOTNET_EXECUTABLE_PATH}" CACHE FILEPATH "Absolute path to the dotnet executable used by runtime scripting" FORCE)
+  endif()
+endif()
+
+if(NOT HADES_DOTNET_ROOT AND HADES_DOTNET_EXECUTABLE_PATH)
+  get_filename_component(HADES_DOTNET_ROOT_PATH "${HADES_DOTNET_EXECUTABLE_PATH}" DIRECTORY)
+  set(HADES_DOTNET_ROOT "${HADES_DOTNET_ROOT_PATH}" CACHE PATH "Absolute path to DOTNET_ROOT used by runtime scripting" FORCE)
+endif()
+
+set(HADES_DOTNET_EXECUTABLE_CONFIG "${HADES_DOTNET_EXECUTABLE}")
+set(HADES_DOTNET_ROOT_CONFIG "${HADES_DOTNET_ROOT}")
+if(HADES_DOTNET_EXECUTABLE_CONFIG)
+  file(TO_CMAKE_PATH "${HADES_DOTNET_EXECUTABLE_CONFIG}" HADES_DOTNET_EXECUTABLE_CONFIG)
+endif()
+if(HADES_DOTNET_ROOT_CONFIG)
+  file(TO_CMAKE_PATH "${HADES_DOTNET_ROOT_CONFIG}" HADES_DOTNET_ROOT_CONFIG)
+endif()
+
+if(HADES_DOTNET_EXECUTABLE_CONFIG)
+  message(STATUS "Using dotnet SDK at: ${HADES_DOTNET_EXECUTABLE_CONFIG}")
+else()
+  message(STATUS "dotnet SDK not found during configure; scripting falls back to runtime PATH/DOTNET_ROOT lookup")
+endif()
+
+configure_file(
+  "${CMAKE_SOURCE_DIR}/cmake/dotnet_config.hpp.in"
+  "${CMAKE_BINARY_DIR}/generated/dotnet_config.hpp"
+  @ONLY)
+
 # Define the source directory.
 set(SRC_DIR "${CMAKE_SOURCE_DIR}/src")
 
@@ -47,11 +83,13 @@ file(
 set(SOURCES ${APP_SOURCE_FILES} ${HEADER_FILES})
 
 add_executable(${PROJECT_NAME} ${SOURCES})
+target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(
   ${PROJECT_NAME}
   PRIVATE CLI11::CLI11
           assimp
           hades_imgui
+          hades_imgui_textedit
           miniaudio
           tinyobjloader
           Vulkan::Vulkan)
@@ -76,6 +114,7 @@ if(TARGET SDL2::SDL2main)
 endif()
 
 set(TEST_SUPPORT_SOURCES
+  src/editor/plugins/editor_plugin.cpp
   src/editor/script_document.cpp
   src/editor/workspace_manager.cpp
   src/editor/workspace_file_operations.cpp
@@ -90,6 +129,7 @@ set(TEST_SUPPORT_SOURCES
   src/engine/runtime/subprocess.cpp)
 
 add_executable(hades_tests ${TEST_SOURCE_FILES} ${TEST_SUPPORT_SOURCES})
+target_include_directories(hades_tests PRIVATE "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(hades_tests PRIVATE assimp gtest_main)
 if(NOT WIN32)
   target_link_libraries(hades_tests PRIVATE dl)

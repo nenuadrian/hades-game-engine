@@ -16,7 +16,11 @@ namespace hades
         {
           for (const auto &child_item : item.children_menu_items)
           {
-            if (ImGui::MenuItem(child_item.title.c_str()))
+            if (ImGui::MenuItem(
+                    child_item.title.c_str(),
+                    nullptr,
+                    child_item.selected,
+                    child_item.enabled))
             {
               if (child_item.on_activate)
               {

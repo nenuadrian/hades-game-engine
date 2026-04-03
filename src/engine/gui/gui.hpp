@@ -13,6 +13,8 @@ namespace hades
     std::string title;
     std::vector<MenuBarItem> children_menu_items;
     std::function<void()> on_activate;
+    bool selected = false;
+    bool enabled = true;
   };
 
   class GUI
