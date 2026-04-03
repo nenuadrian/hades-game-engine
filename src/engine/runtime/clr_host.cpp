@@ -246,9 +246,16 @@ namespace hades
     }
 
     // Step 3: Initialize for the runtime config.
+    // hostfxr returns 0 on first init and 0x00000001 (Success_HostAlreadyInitialized)
+    // when the .NET runtime is already loaded in this process (e.g. second play run).
+    // Both are valid; the returned host context handle is usable in either case.
+    constexpr int32_t Success = 0;
+    constexpr int32_t Success_HostAlreadyInitialized = 1;
+
     const std::string configPathStr = runtimeConfigPath.string();
     const int32_t initResult = impl_->initFn(configPathStr.c_str(), nullptr, &impl_->hostContext);
-    if (initResult != 0 || impl_->hostContext == nullptr)
+    if ((initResult != Success && initResult != Success_HostAlreadyInitialized) ||
+        impl_->hostContext == nullptr)
     {
       if (errorMessage != nullptr)
       {
@@ -306,11 +313,16 @@ namespace hades
       return false;
     }
 
+    // The sentinel value (const char*)(-1) tells the hosting API that the
+    // target method is marked with [UnmanagedCallersOnly], matching the
+    // UNMANAGEDCALLERSONLY_METHOD define from coreclr_delegates.h.
+    const char_t *unmanagedCallersOnly = reinterpret_cast<const char_t *>(static_cast<intptr_t>(-1));
+
     const int32_t result = impl_->loadAssemblyFn(
         assemblyPath.c_str(),
         typeName.c_str(),
         methodName.c_str(),
-        nullptr, // UNMANAGEDCALLERSONLY_METHOD
+        unmanagedCallersOnly,
         nullptr,
         functionPointer);
 

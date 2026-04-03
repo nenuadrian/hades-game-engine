@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <fstream>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -489,6 +490,41 @@ namespace hades
     return entitiesToLoad.front().first;
   }
 
+  std::vector<Entity::EntityId> load_all_worlds(
+      const std::filesystem::path &workspacePath,
+      EntityManager &entityManager,
+      ComponentManager &componentManager,
+      std::string *errorMessage)
+  {
+    std::vector<Entity::EntityId> loadedWorlds;
+    std::string combinedErrors;
+
+    for (const auto &worldName : list_saved_worlds(workspacePath))
+    {
+      std::string worldError;
+      const auto filePath = worlds_directory(workspacePath) / (worldName + ".json");
+      auto worldEntity = load_world_from_file(filePath, entityManager, componentManager, &worldError);
+      if (worldEntity.has_value())
+      {
+        loadedWorlds.push_back(*worldEntity);
+        continue;
+      }
+
+      if (!combinedErrors.empty())
+      {
+        combinedErrors += '\n';
+      }
+      combinedErrors += "Failed to load world '" + worldName + "': " + worldError;
+    }
+
+    if (errorMessage != nullptr)
+    {
+      *errorMessage = std::move(combinedErrors);
+    }
+
+    return loadedWorlds;
+  }
+
   bool save_all_worlds(
       const std::filesystem::path &workspacePath,
       EntityManager &entityManager,
@@ -496,6 +532,18 @@ namespace hades
       std::string *errorMessage)
   {
     const auto dir = worlds_directory(workspacePath);
+    std::error_code errorCode;
+    std::filesystem::create_directories(dir, errorCode);
+    if (errorCode)
+    {
+      if (errorMessage != nullptr)
+      {
+        *errorMessage = "Failed to create world save directory '" + dir.string() + "': " + errorCode.message();
+      }
+      return false;
+    }
+
+    std::unordered_set<std::string> savedWorldFiles;
 
     for (Entity::EntityId entity : entityManager.getAllEntities())
     {
@@ -510,9 +558,57 @@ namespace hades
         worldName = componentManager.getComponent<NameComponent>(entity).value;
       }
 
-      const auto filePath = dir / (sanitize_filename(worldName) + ".json");
+      const std::string fileName = sanitize_filename(worldName) + ".json";
+      savedWorldFiles.insert(fileName);
+      const auto filePath = dir / fileName;
       if (!save_world(filePath, entity, entityManager, componentManager, errorMessage))
       {
+        return false;
+      }
+    }
+
+    errorCode.clear();
+    for (std::filesystem::directory_iterator iterator(dir, errorCode);
+         !errorCode && iterator != std::filesystem::directory_iterator();
+         iterator.increment(errorCode))
+    {
+      if (errorCode)
+      {
+        if (errorMessage != nullptr)
+        {
+          *errorMessage = "Failed to inspect saved worlds in '" + dir.string() + "': " + errorCode.message();
+        }
+        return false;
+      }
+
+      std::error_code entryError;
+      const bool isRegularFile = iterator->is_regular_file(entryError);
+      if (entryError)
+      {
+        if (errorMessage != nullptr)
+        {
+          *errorMessage = "Failed to inspect saved world entry in '" + dir.string() + "': " + entryError.message();
+        }
+        return false;
+      }
+
+      if (!isRegularFile || iterator->path().extension() != ".json")
+      {
+        continue;
+      }
+
+      if (savedWorldFiles.find(iterator->path().filename().string()) != savedWorldFiles.end())
+      {
+        continue;
+      }
+
+      std::filesystem::remove(iterator->path(), errorCode);
+      if (errorCode)
+      {
+        if (errorMessage != nullptr)
+        {
+          *errorMessage = "Failed to remove stale world file '" + iterator->path().string() + "': " + errorCode.message();
+        }
         return false;
       }
     }

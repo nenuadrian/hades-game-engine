@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
@@ -75,7 +76,9 @@ namespace hades
 
       bool open(std::string *errorMessage = nullptr);
       void close();
+      void show();
       bool is_open() const;
+      bool is_visible() const;
       std::optional<std::uint32_t> window_id() const;
       void process_event(const SDL_Event &event);
       void render(Editor &editor);
@@ -117,6 +120,7 @@ namespace hades
     std::string imguiIniPath_;
 
     void request_quit();
+    bool persist_workspace_state(const std::filesystem::path &workspacePath, std::string *errorMessage = nullptr);
     void process_editor_events();
     void render_workspace_logo() const;
     void render_workspace_selector();

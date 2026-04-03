@@ -393,6 +393,7 @@ namespace hades
     if (workspacePath != activeWorkspacePath_)
     {
       activeWorkspacePath_ = workspacePath;
+      pendingSavedWorldRestore_ = !activeWorkspacePath_.empty();
       workspaceTreeRoot_.reset();
       workspaceScriptFiles_.clear();
       workspaceScanError_.clear();

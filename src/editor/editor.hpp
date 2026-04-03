@@ -144,6 +144,7 @@ namespace hades
     float sceneGizmoAxisScreenDirectionX_ = 0.0f;
     float sceneGizmoAxisScreenDirectionY_ = 0.0f;
     float sceneGizmoPixelsPerWorldUnit_ = 1.0f;
+    bool pendingSavedWorldRestore_ = false;
 
     // File watch / background compile state.
     std::unordered_map<std::string, std::filesystem::file_time_type> scriptModTimes_;
@@ -191,6 +192,7 @@ namespace hades
     bool save_all_script_documents(bool triggerCompile, std::string *errorMessage = nullptr);
     void queue_workspace_script_compile();
     void reset_scene_camera();
+    void restore_saved_worlds_if_needed(EntityManager &entityManager, ComponentManager &componentManager);
     void ensure_world_state(EntityManager &entityManager, ComponentManager &componentManager);
     Entity::EntityId create_world(EntityManager &entityManager, ComponentManager &componentManager);
     void load_world(Entity::EntityId world, ComponentManager &componentManager);

@@ -4,55 +4,79 @@
 [![Docs](https://github.com/nenuadrian/hades-game-engine/actions/workflows/docs-pages.yml/badge.svg)](https://github.com/nenuadrian/hades-game-engine/actions/workflows/docs-pages.yml)
 [![Docker test image](https://github.com/nenuadrian/hades-game-engine/actions/workflows/docker-build.yml/badge.svg)](https://github.com/nenuadrian/hades-game-engine/actions/workflows/docker-build.yml)
 
-## table of contents
+## Overview
 
-- [Hades - Light C++ 3D Game Engine](#hades---light-c-3d-game-engine)
-  - [table of contents](#table-of-contents)
-  - [overview](#overview)
-  - [goals](#goals)
-  - [features](#features)
-  - [Entity-Component-System (ECS)](#entity-component-system-ecs)
-  - [Build \& Run \& Test](#build--run--test)
-    - [Build](#build)
-    - [Run](#run)
-    - [Test](#test)
-  - [ECS Benchmark](#ecs-benchmark)
-  - [Scripting](#scripting)
-  - [Documentation](#documentation)
-  - [Previous version](#previous-version)
-
-## overview
-
-A game engine written in C++, which has the ability to handle 3D graphics, sound, entity management, and game mechanics using scripts. It currently supports the OpenGL rendering system, but there are plans to include Vulkan as a renderer in the future. The build system used for this engine is cmake.
+A C++ 3D game engine with a Vulkan renderer, in-process C# scripting, spatial audio, and an ImGui-based editor. Built around a custom Entity-Component-System architecture.
 
 The purpose is educational and experimental in nature to explore the intriguing world of game engine development.
 
-Not maintained or supported.
-
 ![logo](docs/logo.png)
 
-## goals
+## Features
 
-- develop C++ software engineering skills
-- understand graphics 2D and 3D rendering pipelines with OpenGL and other frameworks
-- build a usable engine for making a small game
+**Rendering**
 
-## features
+- Vulkan-based renderer with swapchain management, frame synchronization, and debug validation layers
+- ImGui integration with docking and multi-viewport support
+- Software-rasterized 3D model preview (wireframe and flat-shaded)
+- Vector-based 3D text rendering with wrapping, line spacing, and Euler angle rotation
 
-- entity management, with camera and model features
-- C# scripts attachable to entities and compiled on play through the local dotnet SDK
-- save / load project from JSON
-- model loading using assimp and stb
-- sound via miniaudio, with streaming, buses, and basic 3D spatial audio support
-- tests
-- generating shaders dynamically
+**Entity-Component-System**
+
+- Custom ECS with `EntityManager`, `ComponentManager`, and `SystemManager`
+- 13 component types: `PositionComponent2D`, `PositionComponent3D`, `TransformHierarchyComponent`, `CameraComponent`, `ModelComponent`, `RenderComponent`, `PrimitiveComponent`, `TextComponent`, `AudioSourceComponent`, `AudioListenerComponent`, `NameComponent`, `WorldComponent`, `ScriptComponent`
+- 3 runtime systems: `AudioSystem`, `MovementSystem`, `RenderSystem`
+- Parent-child entity hierarchy via `TransformHierarchyComponent`
+- Multi-world scene management with default world selection
+- JSON serialization for worlds and entities
+
+**Scripting**
+
+- C# scripting via in-process .NET CoreCLR embedding (hostfxr hosting API)
+- Scripts compiled on play start via local `dotnet build` (SDK 7.0+)
+- Zero-IPC overhead: managed code runs in-engine via native function pointers
+- Blittable struct data exchange (no serialization)
+- Background workspace script compilation with error reporting
+- See [SCRIPTS.md](SCRIPTS.md) for details
+
+**Audio**
+
+- miniaudio-based audio engine with 3D spatial audio
+- 4 audio buses: Master, Music, Sfx, Voice with independent volume control
+- Per-source properties: volume, pitch, looping, streaming, spatialization
+- Distance-based attenuation with min/max range and rolloff control
+
+**Asset Importing**
+
+- 3D model loading via Assimp (FBX, glTF, OBJ, DAE, 3DS, Blender, USD, and 40+ formats)
+- Post-processing: triangulation, vertex deduplication, cache optimization
+- Bounding box computation for imported models
+
+**Editor**
+
+- Workspace-based project management with file tree navigation
+- Entity hierarchy panel with drag-based re-parenting
+- 3D scene viewport with orbit camera and transform gizmos (per-axis drag)
+- Properties and Components inspector with per-component editing
+- Integrated script editor with syntax highlighting, multi-tab editing, and unsaved changes tracking
+- Play mode with main camera validation, script runtime, and detached play window
+- Debug Console panel with centralized error/warning/info logging, auto-open on errors, right-click copy, and "Copy All" button
+- Settings panel with scene camera controls
+- Plugin system for extending the editor with custom panels
+
+**Build & Platform**
+
+- CMake build system targeting C++17
+- Cross-platform: macOS, Linux, Windows
+- Unit tests via GoogleTest
+- ECS benchmark tool
 
 ![editor](assets/editor.png)
 ![workspace](assets/workspace.png)
 
 ## Entity-Component-System (ECS)
 
-Custom built to build up a natural understanding of the pattern. For example, it is not an Entity-Component System, made from entity and components, but one made out of three parts, the system being an essential component of the triad, acting on entities with specific components.
+Custom built to build up a natural understanding of the pattern. The system is an essential component of the triad, acting on entities with specific components.
 
 <a id="build-run-test"></a>
 
@@ -142,6 +166,6 @@ python3 scripts/generate_class_diagram.py
 python3 -m mkdocs serve
 ```
 
-## Previous version
+## Previous Versions
 
-Multiple versions overrode each other in this repository, going through Metal, Vulkan and Open GL (<https://github.com/nenuadrian/hades-game-engine/tree/507e1d5c3bece7e09d78d668d4e3d652be0b2431>).
+The engine has gone through several renderer backends in this repository: Metal, OpenGL, and now Vulkan (<https://github.com/nenuadrian/hades-game-engine/tree/507e1d5c3bece7e09d78d668d4e3d652be0b2431>).

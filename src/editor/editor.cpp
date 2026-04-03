@@ -58,6 +58,7 @@ namespace hades
     sceneGizmoAxisScreenDirectionX_ = 0.0f;
     sceneGizmoAxisScreenDirectionY_ = 0.0f;
     sceneGizmoPixelsPerWorldUnit_ = 1.0f;
+    pendingSavedWorldRestore_ = false;
 
     activeWorkspacePath_.clear();
     workspaceTreeRoot_.reset();
@@ -138,6 +139,7 @@ namespace hades
       ScriptRuntime &scriptRuntime)
   {
     refresh_workspace_cache(deltaTime, workspacePath);
+    restore_saved_worlds_if_needed(entityManager, componentManager);
     ensure_world_state(entityManager, componentManager);
     sync_menu_bar(entityManager, componentManager);
     configure_default_dock_layout(gui->render_frame());
@@ -471,6 +473,50 @@ namespace hades
     {
       log_error("Failed to save worlds: " + error);
     }
+  }
+
+  void Editor::restore_saved_worlds_if_needed(
+      EntityManager &entityManager,
+      ComponentManager &componentManager)
+  {
+    if (!pendingSavedWorldRestore_ || activeWorkspacePath_.empty())
+    {
+      return;
+    }
+
+    pendingSavedWorldRestore_ = false;
+
+    if (!find_world_entities(entityManager, componentManager).empty())
+    {
+      return;
+    }
+
+    std::string error;
+    const auto loadedWorlds = hades::load_all_worlds(activeWorkspacePath_, entityManager, componentManager, &error);
+    if (!error.empty())
+    {
+      if (loadedWorlds.empty())
+      {
+        log_error(error);
+      }
+      else
+      {
+        log_warning(error);
+      }
+    }
+
+    if (loadedWorlds.empty())
+    {
+      return;
+    }
+
+    if (const auto defaultWorld = normalize_default_world(entityManager, componentManager); defaultWorld.has_value())
+    {
+      load_world(*defaultWorld, componentManager);
+      return;
+    }
+
+    load_world(loadedWorlds.front(), componentManager);
   }
 
   void Editor::open_world_from_disk(

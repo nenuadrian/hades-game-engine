@@ -450,7 +450,7 @@ namespace Hades.Scripting
         public int ErrorLength;
     }
 
-    internal static class ScriptHost
+    public static class ScriptHost
     {
         private sealed class ScriptInstance
         {

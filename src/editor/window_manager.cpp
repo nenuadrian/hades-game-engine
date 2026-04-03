@@ -17,6 +17,7 @@
 #include "native_dialogs.hpp"
 #include "imgui.h"
 #include "imgui_impl_sdl2.h"
+#include "../engine/core/ecs/scene_serializer.hpp"
 #include "../engine/audio/audio_engine.hpp"
 #include "../engine/rendering/renderer.hpp"
 #include "../engine/rendering/vulkan.hpp"
@@ -575,9 +576,26 @@ namespace hades
     }
   }
 
+  void WindowManager::DetachedScriptEditorWindow::show()
+  {
+    if (window_ == nullptr)
+    {
+      return;
+    }
+    visible_ = true;
+    SDL_RestoreWindow(window_.get());
+    SDL_ShowWindow(window_.get());
+    SDL_RaiseWindow(window_.get());
+  }
+
   bool WindowManager::DetachedScriptEditorWindow::is_open() const
   {
     return window_ != nullptr && renderer_ != nullptr;
+  }
+
+  bool WindowManager::DetachedScriptEditorWindow::is_visible() const
+  {
+    return visible_;
   }
 
   std::optional<std::uint32_t> WindowManager::DetachedScriptEditorWindow::window_id() const
@@ -638,6 +656,22 @@ namespace hades
     SDL_Event quit_event{};
     quit_event.type = SDL_QUIT;
     SDL_PushEvent(&quit_event);
+  }
+
+  bool WindowManager::persist_workspace_state(
+      const std::filesystem::path &workspacePath,
+      std::string *errorMessage)
+  {
+    if (workspacePath.empty())
+    {
+      if (errorMessage != nullptr)
+      {
+        errorMessage->clear();
+      }
+      return true;
+    }
+
+    return hades::save_all_worlds(workspacePath, entityManager, componentManager, errorMessage);
   }
 
   void WindowManager::process_editor_events()
@@ -914,6 +948,15 @@ namespace hades
             ? workspaceManager.current_workspace()->path
             : std::filesystem::path();
 
+    if (!previousWorkspacePath.empty())
+    {
+      std::string saveError;
+      if (!persist_workspace_state(previousWorkspacePath, &saveError))
+      {
+        workspaceStatusMessage = "Failed to save current workspace: " + saveError;
+      }
+    }
+
     // Save ImGui layout to current workspace before switching away.
     if (!previousWorkspacePath.empty() && !imguiIniPath_.empty())
     {
@@ -955,6 +998,15 @@ namespace hades
         workspaceManager.current_workspace().has_value()
             ? workspaceManager.current_workspace()->path
             : std::filesystem::path();
+
+    if (!previousWorkspacePath.empty())
+    {
+      std::string saveError;
+      if (!persist_workspace_state(previousWorkspacePath, &saveError))
+      {
+        workspaceStatusMessage = "Failed to save current workspace: " + saveError;
+      }
+    }
 
     if (!previousWorkspacePath.empty() && !imguiIniPath_.empty())
     {
@@ -1080,6 +1132,11 @@ namespace hades
         editor.log_error("Script editor window error: " + errorMessage);
       }
       return;
+    }
+
+    if (scriptEditorWindow.is_open() && !scriptEditorWindow.is_visible())
+    {
+      scriptEditorWindow.show();
     }
 
     scriptEditorWindow.render(editor);
@@ -1287,6 +1344,20 @@ namespace hades
     while (running)
     {
       render_frame();
+    }
+
+    if (!imguiIniPath_.empty())
+    {
+      ImGui::SaveIniSettingsToDisk(imguiIniPath_.c_str());
+    }
+
+    if (workspaceManager.current_workspace().has_value())
+    {
+      std::string errorMessage;
+      if (!persist_workspace_state(workspaceManager.current_workspace()->path, &errorMessage))
+      {
+        std::fprintf(stderr, "Warning: failed to save workspace on shutdown: %s\n", errorMessage.c_str());
+      }
     }
 
     return EXIT_SUCCESS;

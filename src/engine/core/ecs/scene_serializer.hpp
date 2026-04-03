@@ -26,6 +26,12 @@ namespace hades
       ComponentManager &componentManager,
       std::string *errorMessage = nullptr);
 
+  std::vector<Entity::EntityId> load_all_worlds(
+      const std::filesystem::path &workspacePath,
+      EntityManager &entityManager,
+      ComponentManager &componentManager,
+      std::string *errorMessage = nullptr);
+
   bool save_all_worlds(
       const std::filesystem::path &workspacePath,
       EntityManager &entityManager,
