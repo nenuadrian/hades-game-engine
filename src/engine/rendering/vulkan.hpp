@@ -61,6 +61,7 @@ namespace hades
     bool vulkan_initialized = false;
     bool window_initialized = false;
     bool imgui_backend_initialized = false;
+    bool vsync_ = true;
 
     void destroy();
     bool IsExtensionAvailable(const ImVector<VkExtensionProperties> &properties, const char *extension);
@@ -83,6 +84,7 @@ namespace hades
 
   public:
     VulkanRenderer() = default;
+    explicit VulkanRenderer(bool enableVsync) : vsync_(enableVsync) {}
     ~VulkanRenderer() override;
 
     VkAllocationCallbacks *g_Allocator = nullptr;

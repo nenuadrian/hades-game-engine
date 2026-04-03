@@ -538,7 +538,7 @@ namespace hades
     SurfacePtr logoSurface = load_logo_surface();
     set_window_icon(window.get(), logoSurface.get());
 
-    auto renderer = std::make_unique<VulkanRenderer>();
+    auto renderer = std::make_unique<VulkanRenderer>(false);
     if (!renderer->init(window.get()))
     {
       if (errorMessage != nullptr)

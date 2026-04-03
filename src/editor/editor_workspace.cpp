@@ -18,6 +18,7 @@
 #include "../engine/components/script_component.hpp"
 #include "../engine/core/ecs/component_manager.hpp"
 #include "../engine/core/ecs/entity_manager.hpp"
+#include "../engine/core/ecs/scene_serializer.hpp"
 #include "../engine/core/ecs/world_utils.hpp"
 #include "../engine/runtime/script_runtime.hpp"
 
@@ -413,9 +414,8 @@ namespace hades
     }
   }
 
-  void Editor::refresh_workspace_cache(float deltaTime, const std::filesystem::path &workspacePath)
+  void Editor::refresh_workspace_cache(const std::filesystem::path &workspacePath)
   {
-    const double now = ImGui::GetTime();
     if (workspacePath != activeWorkspacePath_)
     {
       activeWorkspacePath_ = workspacePath;
@@ -431,57 +431,34 @@ namespace hades
       openScriptEditorUnsavedChangesDialog_ = false;
       pendingScriptEditorClosePath_.reset();
       workspaceScriptListDirty_ = false;
-      scriptModTimes_.clear();
       parsedScriptCache_.clear();
       parsedScriptModTimes_.clear();
       lastCompileError_.clear();
       scriptCompileStatus_ = ScriptCompileStatus::Unknown;
       currentCompileRequestId_ = ++nextCompileRequestId_;
-      nextWorkspaceScanTime_ = 0.0;
+      cachedDiskWorlds_.clear();
     }
 
-    if (activeWorkspacePath_.empty() || (workspaceTreeRoot_.has_value() && now < nextWorkspaceScanTime_))
+    if (activeWorkspacePath_.empty() || workspaceTreeRoot_.has_value())
     {
       return;
     }
-
-    const bool isInitialWorkspaceLoad =
-        workspaceScriptFiles_.empty() &&
-        scriptModTimes_.empty() &&
-        !workspaceTreeRoot_.has_value();
 
     WorkspaceTreeNode rootNode;
     std::vector<std::string> scriptFiles;
     std::string scanError;
     build_workspace_tree(activeWorkspacePath_, activeWorkspacePath_, rootNode, scriptFiles, &scanError);
     std::sort(scriptFiles.begin(), scriptFiles.end());
-    if (scriptFiles != workspaceScriptFiles_)
-    {
-      workspaceScriptListDirty_ = !isInitialWorkspaceLoad;
-
-      std::unordered_map<std::string, std::filesystem::file_time_type> retainedModTimes;
-      retainedModTimes.reserve(scriptFiles.size());
-      for (const auto &relPath : scriptFiles)
-      {
-        const auto existing = scriptModTimes_.find(relPath);
-        if (existing != scriptModTimes_.end())
-        {
-          retainedModTimes.emplace(existing->first, existing->second);
-        }
-      }
-      scriptModTimes_ = std::move(retainedModTimes);
-    }
-    workspaceTreeRoot_ = std::move(rootNode);
     workspaceScriptFiles_ = std::move(scriptFiles);
+    workspaceTreeRoot_ = std::move(rootNode);
     workspaceScanError_ = std::move(scanError);
-    nextWorkspaceScanTime_ = now + std::max(static_cast<double>(deltaTime), 1.0);
+    cachedDiskWorlds_ = list_saved_worlds(activeWorkspacePath_);
   }
 
   void Editor::invalidate_workspace_cache()
   {
     workspaceTreeRoot_.reset();
     workspaceScanError_.clear();
-    nextWorkspaceScanTime_ = 0.0;
   }
 
   void Editor::request_workspace_item_creation(WorkspaceCreateKind kind, const std::filesystem::path &parentPath)
@@ -690,7 +667,6 @@ namespace hades
       {
         for (const auto &relativeScriptPath : deleteResult.removedScriptPaths)
         {
-          scriptModTimes_.erase(relativeScriptPath);
           const std::string pathKey = (activeWorkspacePath_ / relativeScriptPath).string();
           parsedScriptCache_.erase(pathKey);
           parsedScriptModTimes_.erase(pathKey);
@@ -1069,10 +1045,6 @@ namespace hades
     if (snapshot.hasLastWriteTime)
     {
       tab.savedWriteTime = snapshot.lastWriteTime;
-      if (!tab.relativePath.empty())
-      {
-        scriptModTimes_[tab.relativePath] = snapshot.lastWriteTime;
-      }
     }
     else
     {

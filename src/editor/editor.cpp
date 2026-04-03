@@ -73,9 +73,8 @@ namespace hades
     focusScriptEditorWindow_ = false;
     openScriptEditorUnsavedChangesDialog_ = false;
     pendingScriptEditorClosePath_.reset();
-    nextWorkspaceScanTime_ = 0.0;
+    cachedDiskWorlds_.clear();
     workspaceScriptListDirty_ = false;
-    scriptModTimes_.clear();
     parsedScriptCache_.clear();
     parsedScriptModTimes_.clear();
     lastCompileError_.clear();
@@ -157,7 +156,7 @@ namespace hades
       ComponentManager &componentManager,
       ScriptRuntime &scriptRuntime)
   {
-    refresh_workspace_cache(deltaTime, workspacePath);
+    refresh_workspace_cache(workspacePath);
     restore_saved_worlds_if_needed(entityManager, componentManager);
     ensure_world_state(entityManager, componentManager);
     sync_menu_bar(entityManager, componentManager);
@@ -174,36 +173,6 @@ namespace hades
         scriptCompileStatus_ = lastCompileError_.empty()
                                    ? ScriptCompileStatus::Succeeded
                                    : ScriptCompileStatus::Failed;
-      }
-    }
-
-    bool scriptsChanged = workspaceScriptListDirty_;
-    if (!activeWorkspacePath_.empty())
-    {
-      for (const auto &relPath : workspaceScriptFiles_)
-      {
-        const auto fullPath = activeWorkspacePath_ / relPath;
-        std::error_code ec;
-        const auto modTime = std::filesystem::last_write_time(fullPath, ec);
-        if (ec)
-        {
-          continue;
-        }
-        auto it = scriptModTimes_.find(relPath);
-        if (it == scriptModTimes_.end())
-        {
-          scriptModTimes_[relPath] = modTime;
-        }
-        else if (it->second != modTime)
-        {
-          it->second = modTime;
-          scriptsChanged = true;
-        }
-      }
-
-      if (scriptsChanged)
-      {
-        queue_workspace_script_compile();
       }
     }
 
@@ -269,8 +238,7 @@ namespace hades
       memoryWorldsByName[entity_label(world, componentManager)] = world;
     }
 
-    // List worlds saved on disk.
-    const auto diskWorlds = list_saved_worlds(activeWorkspacePath_);
+    const auto &diskWorlds = cachedDiskWorlds_;
 
     // Build a combined list: disk worlds first, then any unsaved in-memory worlds.
     std::vector<std::string> allWorldNames = diskWorlds;
@@ -453,6 +421,8 @@ namespace hades
       log_error("Failed to save worlds: " + error);
       return;
     }
+
+    cachedDiskWorlds_ = list_saved_worlds(activeWorkspacePath_);
 
     if (!save_workspace_settings(activeWorkspacePath_, &error))
     {

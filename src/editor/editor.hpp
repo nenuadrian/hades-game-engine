@@ -120,7 +120,7 @@ namespace hades
     bool focusScriptEditorWindow_ = false;
     bool openScriptEditorUnsavedChangesDialog_ = false;
     std::optional<std::filesystem::path> pendingScriptEditorClosePath_;
-    double nextWorkspaceScanTime_ = 0.0;
+    std::vector<std::string> cachedDiskWorlds_;
     bool workspaceScriptListDirty_ = false;
     bool openWorkspaceCreateDialog_ = false;
     WorkspaceCreateKind pendingWorkspaceCreateKind_ = WorkspaceCreateKind::None;
@@ -158,8 +158,7 @@ namespace hades
     float sceneGizmoPixelsPerWorldUnit_ = 1.0f;
     bool pendingSavedWorldRestore_ = false;
 
-    // File watch / background compile state.
-    std::unordered_map<std::string, std::filesystem::file_time_type> scriptModTimes_;
+    // Background compile state.
     std::future<BackgroundCompileTaskResult> backgroundCompileResult_;
     bool backgroundCompileInProgress_ = false;
     std::string lastCompileError_;
@@ -182,7 +181,7 @@ namespace hades
     void render_plugins(EditorPluginPhase phase, EditorPluginContext &context);
     void sync_menu_bar(EntityManager &entityManager, ComponentManager &componentManager);
     void configure_default_dock_layout(std::uint32_t dockspaceId);
-    void refresh_workspace_cache(float deltaTime, const std::filesystem::path &workspacePath);
+    void refresh_workspace_cache(const std::filesystem::path &workspacePath);
     void invalidate_workspace_cache();
     void request_workspace_item_creation(WorkspaceCreateKind kind, const std::filesystem::path &parentPath);
     void request_workspace_item_import(const std::filesystem::path &destinationDirectory);

@@ -368,17 +368,11 @@ namespace hades
         (size_t)IM_ARRAYSIZE(requestSurfaceImageFormat),
         requestSurfaceColorSpace);
 
-#ifdef APP_UNLIMITED_FRAME_RATE
     VkPresentModeKHR present_modes[] = {
-        VK_PRESENT_MODE_MAILBOX_KHR,
-        VK_PRESENT_MODE_IMMEDIATE_KHR,
+        vsync_ ? VK_PRESENT_MODE_FIFO_KHR : VK_PRESENT_MODE_MAILBOX_KHR,
+        vsync_ ? VK_PRESENT_MODE_FIFO_KHR : VK_PRESENT_MODE_IMMEDIATE_KHR,
         VK_PRESENT_MODE_FIFO_KHR,
     };
-#else
-    VkPresentModeKHR present_modes[] = {
-        VK_PRESENT_MODE_FIFO_KHR,
-    };
-#endif
     g_MainWindowData.PresentMode = VulkanH_SelectPresentMode(
         g_PhysicalDevice,
         g_MainWindowData.Surface,

@@ -407,6 +407,11 @@ namespace hades
       ComponentManager &componentManager,
       ScriptRuntime &scriptRuntime)
   {
+    if (!activeWorkspacePath_.empty() && !workspaceScriptFiles_.empty())
+    {
+      queue_workspace_script_compile();
+    }
+
     const auto startupWorld = normalize_default_world(entityManager, componentManager);
     if (!startupWorld.has_value())
     {
