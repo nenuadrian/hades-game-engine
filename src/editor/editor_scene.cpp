@@ -1760,13 +1760,6 @@ namespace hades
     drawList->AddRectFilled(canvasOrigin, canvasMax, IM_COL32(17, 20, 24, 255));
     drawList->AddRect(canvasOrigin, canvasMax, IM_COL32(70, 76, 86, 255));
     drawList->PushClipRect(canvasOrigin, canvasMax, true);
-    drawList->AddText(
-        ImVec2(canvasOrigin.x + 12.0f, canvasOrigin.y + 12.0f),
-        IM_COL32(135, 142, 154, 255),
-        state.isPlaying
-            ? "Click entities select  |  Arrows move  |  Wheel zoom  |  Ctrl/Cmd + drag rotate"
-            : "Click entities select  |  Drag RGB axes move  |  Arrows move  |  Wheel zoom  |  Ctrl/Cmd + drag rotate");
-
     if (!state.isPlaying)
     {
       draw_editor_grid(drawList, sceneCamera, camera, canvasOrigin, canvasSize);

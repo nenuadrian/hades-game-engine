@@ -389,6 +389,9 @@ namespace hades
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+#ifdef __APPLE__
+    io.ConfigMacOSXBehaviors = true;
+#endif
     if (enableViewports)
     {
       io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
@@ -745,12 +748,7 @@ namespace hades
       return;
     }
 
-    const float panelWidth = std::min(ImGui::GetContentRegionAvail().x, 760.0f);
-    const float leftMargin = std::max((ImGui::GetWindowSize().x - panelWidth) * 0.5f, 24.0f);
-    ImGui::SetCursorPosX(leftMargin);
     ImGui::SetCursorPosY(24.0f);
-
-    ImGui::BeginChild("Workspace Selector Panel", ImVec2(panelWidth, 0.0f), true);
     render_workspace_logo();
 
     if (!workspaceStatusMessage.empty())
@@ -937,9 +935,6 @@ namespace hades
 
       ImGui::EndPopup();
     }
-
-    ImGui::EndChild();
-
     ImGui::End();
     ImGui::PopStyleVar(2);
   }
@@ -1220,7 +1215,7 @@ namespace hades
       return false;
     }
 
-    if (!imgui_session.init(window.get(), *renderer))
+    if (!imgui_session.init(window.get(), *renderer, false))
     {
       return false;
     }

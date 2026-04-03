@@ -47,7 +47,7 @@ namespace hades
     class ImGuiSession
     {
     public:
-      bool init(SDL_Window *window, Renderer &renderer, bool enableViewports = true);
+      bool init(SDL_Window *window, Renderer &renderer, bool enableViewports = false);
       void process_event(const SDL_Event &event);
       void begin_frame();
       void render();

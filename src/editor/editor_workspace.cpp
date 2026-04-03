@@ -369,6 +369,10 @@ namespace hades
       std::vector<std::filesystem::directory_entry> entries;
       for (std::filesystem::directory_iterator iterator(path, errorCode); !errorCode && iterator != std::filesystem::directory_iterator(); iterator.increment(errorCode))
       {
+        if (iterator->path().filename() == ".hades")
+        {
+          continue;
+        }
         entries.push_back(*iterator);
       }
 
@@ -1259,8 +1263,6 @@ namespace hades
       ImGui::TableSetupColumn("Entities", ImGuiTableColumnFlags_WidthFixed, 300.0f);
 
       ImGui::TableNextColumn();
-      ImGui::TextWrapped("%s", activeWorkspacePath_.empty() ? "No workspace." : activeWorkspacePath_.string().c_str());
-      ImGui::Separator();
       if (!workspaceScanError_.empty())
       {
         ImGui::TextColored(ImVec4(0.88f, 0.42f, 0.42f, 1.0f), "%s", workspaceScanError_.c_str());
@@ -1585,9 +1587,6 @@ namespace hades
       ImGui::End();
       return;
     }
-
-    ImGui::TextWrapped("%s", activeWorkspacePath_.string().c_str());
-    ImGui::Separator();
 
     if (!workspaceScanError_.empty())
     {
