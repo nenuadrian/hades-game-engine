@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -58,6 +59,42 @@ def _rewrite_content(content: str) -> str:
     )
 
 
+def _iter_local_targets(content: str) -> set[str]:
+    targets: set[str] = set()
+
+    for match in MARKDOWN_LINK_RE.finditer(content):
+        target = _rewrite_target(match.group(2))
+        parsed = urlsplit(target)
+        if parsed.scheme or parsed.netloc or not parsed.path:
+            continue
+        targets.add(parsed.path)
+
+    for match in HTML_ATTR_RE.finditer(content):
+        target = _rewrite_target(match.group("target"))
+        parsed = urlsplit(target)
+        if parsed.scheme or parsed.netloc or not parsed.path:
+            continue
+        targets.add(parsed.path)
+
+    return targets
+
+
+def _sync_local_assets(source_path: Path, rendered_content: str) -> None:
+    for target in _iter_local_targets(rendered_content):
+        source_target = (source_path.parent / target).resolve()
+        docs_target = (DOCS_DIR / target).resolve()
+
+        if not source_target.is_file():
+            continue
+        if docs_target == source_target or DOCS_DIR not in docs_target.parents:
+            continue
+
+        docs_target.parent.mkdir(parents=True, exist_ok=True)
+        if docs_target.exists() and docs_target.read_bytes() == source_target.read_bytes():
+            continue
+        shutil.copy2(source_target, docs_target)
+
+
 def _strip_markdown_section(content: str, heading: str) -> str:
     lines = content.splitlines(keepends=True)
     heading_line = None
@@ -104,6 +141,7 @@ def _generate_doc(
     content = _rewrite_content(source_path.read_text(encoding="utf-8"))
     if strip_heading:
         content = _strip_markdown_section(content, strip_heading)
+    _sync_local_assets(source_path, content)
     rendered = f"{front_matter}{GENERATED_COMMENT.format(source=source_name)}{content}"
     _write_if_changed(target_path, rendered)
 
