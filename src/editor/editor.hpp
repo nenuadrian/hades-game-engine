@@ -63,7 +63,7 @@ namespace hades
     bool is_script_editor_window_open() const;
     void set_script_editor_window_open(bool open);
     bool consume_script_editor_focus_request();
-    void render_script_editor_window();
+    void render_script_editor_window(EntityManager &entityManager, ComponentManager &componentManager);
     void log_message(DebugMessageLevel level, const std::string &text);
     void log_info(const std::string &text);
     void log_warning(const std::string &text);
@@ -180,7 +180,7 @@ namespace hades
     void render_settings_window();
     void render_debug_console_window();
     void render_workspace_tree_node(const WorkspaceTreeNode &node);
-    void render_script_editor();
+    void render_script_editor(EntityManager &entityManager, ComponentManager &componentManager);
     std::optional<std::size_t> find_script_editor_tab_index(const std::filesystem::path &scriptPath) const;
     ScriptEditorTab *active_script_editor_tab();
     const ScriptEditorTab *active_script_editor_tab() const;

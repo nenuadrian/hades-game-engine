@@ -81,7 +81,7 @@ namespace hades
       bool is_visible() const;
       std::optional<std::uint32_t> window_id() const;
       void process_event(const SDL_Event &event);
-      void render(Editor &editor);
+      void render(Editor &editor, EntityManager &entityManager, ComponentManager &componentManager);
 
     private:
       void destroy();

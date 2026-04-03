@@ -15,6 +15,10 @@
 
 #include "imgui.h"
 #include "TextEditor.h"
+#include "../engine/components/script_component.hpp"
+#include "../engine/core/ecs/component_manager.hpp"
+#include "../engine/core/ecs/entity_manager.hpp"
+#include "../engine/core/ecs/world_utils.hpp"
 #include "../engine/runtime/script_runtime.hpp"
 
 namespace hades
@@ -116,6 +120,16 @@ namespace hades
     {
       const std::filesystem::path relativePath = path.lexically_relative(workspacePath);
       return relativePath.empty() ? path.generic_string() : relativePath.generic_string();
+    }
+
+    std::string normalize_generic_path(const std::filesystem::path &path)
+    {
+      return path.lexically_normal().generic_string();
+    }
+
+    std::string normalize_generic_path(const std::string &path)
+    {
+      return normalize_generic_path(std::filesystem::path(path));
     }
 
     bool has_path_separator(const std::string &name)
@@ -824,7 +838,7 @@ namespace hades
     return focusRequested;
   }
 
-  void Editor::render_script_editor_window()
+  void Editor::render_script_editor_window(EntityManager &entityManager, ComponentManager &componentManager)
   {
     if (!openScriptEditorWindow_)
     {
@@ -848,7 +862,7 @@ namespace hades
       return;
     }
 
-    render_script_editor();
+    render_script_editor(entityManager, componentManager);
 
     ImGui::End();
     ImGui::PopStyleVar(2);
@@ -1139,7 +1153,7 @@ namespace hades
         });
   }
 
-  void Editor::render_script_editor()
+  void Editor::render_script_editor(EntityManager &entityManager, ComponentManager &componentManager)
   {
     if (openScriptEditorUnsavedChangesDialog_)
     {
@@ -1216,11 +1230,12 @@ namespace hades
 
     if (ImGui::BeginTable(
             "ScriptEditorLayout",
-            2,
+            3,
             ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp))
     {
       ImGui::TableSetupColumn("Files", ImGuiTableColumnFlags_WidthFixed, 280.0f);
       ImGui::TableSetupColumn("Editor", ImGuiTableColumnFlags_WidthStretch);
+      ImGui::TableSetupColumn("Entities", ImGuiTableColumnFlags_WidthFixed, 300.0f);
 
       ImGui::TableNextColumn();
       ImGui::TextWrapped("%s", activeWorkspacePath_.empty() ? "No workspace." : activeWorkspacePath_.string().c_str());
@@ -1337,15 +1352,28 @@ namespace hades
         return;
       }
 
-      ImGui::TextWrapped("%s", activeTab->relativePath.empty() ? activeTab->path.string().c_str() : activeTab->relativePath.c_str());
-      ImGui::Separator();
-
       const bool canSave = activeTab->dirty;
-      if (!canSave)
+      ImGui::BeginChild("ScriptEditorEditorPane", ImVec2(0.0f, 0.0f), false, ImGuiWindowFlags_MenuBar);
+
+      bool saveRequested = false;
+      bool saveAllRequested = false;
+      bool compileRequested = false;
+      bool revertRequested = false;
+
+      if (ImGui::BeginMenuBar())
       {
-        ImGui::BeginDisabled();
+        if (ImGui::BeginMenu("Script"))
+        {
+          saveRequested = ImGui::MenuItem("Save", nullptr, false, canSave);
+          saveAllRequested = ImGui::MenuItem("Save All");
+          compileRequested = ImGui::MenuItem("Compile Workspace");
+          revertRequested = ImGui::MenuItem("Revert", nullptr, false, canSave);
+          ImGui::EndMenu();
+        }
+        ImGui::EndMenuBar();
       }
-      if (ImGui::Button("Save"))
+
+      if (saveRequested)
       {
         std::string errorMessage;
         if (!save_active_script_document(true, &errorMessage))
@@ -1354,13 +1382,8 @@ namespace hades
           scriptEditorStatusIsError_ = true;
         }
       }
-      if (!canSave)
-      {
-        ImGui::EndDisabled();
-      }
 
-      ImGui::SameLine();
-      if (ImGui::Button("Save All"))
+      if (saveAllRequested)
       {
         std::string errorMessage;
         if (!save_all_script_documents(false, &errorMessage))
@@ -1370,8 +1393,7 @@ namespace hades
         }
       }
 
-      ImGui::SameLine();
-      if (ImGui::Button("Compile Workspace"))
+      if (compileRequested)
       {
         std::string errorMessage;
         if (!save_all_script_documents(false, &errorMessage))
@@ -1385,12 +1407,7 @@ namespace hades
         }
       }
 
-      ImGui::SameLine();
-      if (!canSave)
-      {
-        ImGui::BeginDisabled();
-      }
-      if (ImGui::Button("Revert"))
+      if (revertRequested)
       {
         ScriptDocumentSnapshot snapshot;
         std::string errorMessage;
@@ -1419,12 +1436,9 @@ namespace hades
           scriptEditorStatusIsError_ = false;
         }
       }
-      if (!canSave)
-      {
-        ImGui::EndDisabled();
-      }
 
-      ImGui::SameLine();
+      ImGui::TextWrapped("%s", activeTab->relativePath.empty() ? activeTab->path.string().c_str() : activeTab->relativePath.c_str());
+      ImGui::Separator();
       ImGui::TextDisabled("%s", activeTab->dirty ? "Unsaved changes" : "Saved");
 
       if (!scriptEditorStatusMessage_.empty())
@@ -1472,6 +1486,64 @@ namespace hades
         }
       }
       ImGui::PopID();
+      ImGui::EndChild();
+
+      ImGui::TableNextColumn();
+      ImGui::TextUnformatted("Entities Using Script");
+      ImGui::Separator();
+
+      const std::string activeScriptRelativePath =
+          activeWorkspacePath_.empty()
+              ? normalize_generic_path(activeTab->path)
+              : normalize_generic_path(relative_workspace_path(activeWorkspacePath_, activeTab->path));
+
+      std::vector<Entity::EntityId> matchingEntities;
+      for (const Entity::EntityId entity : entityManager.getAllEntities())
+      {
+        if (!componentManager.hasComponent<ScriptComponent>(entity))
+        {
+          continue;
+        }
+
+        const auto &scriptComponent = componentManager.getComponent<ScriptComponent>(entity);
+        const bool usesScript = std::any_of(
+            scriptComponent.attachments.begin(),
+            scriptComponent.attachments.end(),
+            [&activeScriptRelativePath](const ScriptAttachment &attachment)
+            {
+              return !attachment.scriptPath.empty() &&
+                     normalize_generic_path(attachment.scriptPath) == activeScriptRelativePath;
+            });
+        if (usesScript)
+        {
+          matchingEntities.push_back(entity);
+        }
+      }
+
+      ImGui::BeginChild("ScriptEditorEntityUsers");
+      if (matchingEntities.empty())
+      {
+        ImGui::TextDisabled("No entities use this script.");
+      }
+      else
+      {
+        ImGui::TextDisabled("%zu matching %s", matchingEntities.size(), matchingEntities.size() == 1 ? "entity" : "entities");
+        ImGui::Separator();
+
+        for (const Entity::EntityId entity : matchingEntities)
+        {
+          const bool selected = state.selectedEntity.has_value() && *state.selectedEntity == entity;
+          if (ImGui::Selectable(entity_label(entity, componentManager).c_str(), selected))
+          {
+            if (const auto world = world_for_entity(entity, componentManager); world.has_value())
+            {
+              load_world(*world, componentManager);
+            }
+            state.selectedEntity = entity;
+          }
+        }
+      }
+      ImGui::EndChild();
 
       ImGui::EndTable();
     }

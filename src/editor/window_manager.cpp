@@ -613,7 +613,10 @@ namespace hades
     imgui_session_.process_event(event);
   }
 
-  void WindowManager::DetachedScriptEditorWindow::render(Editor &editor)
+  void WindowManager::DetachedScriptEditorWindow::render(
+      Editor &editor,
+      EntityManager &entityManager,
+      ComponentManager &componentManager)
   {
     if (!is_open() || !visible_)
     {
@@ -628,7 +631,7 @@ namespace hades
 
     renderer_->render_frame(window_.get());
     imgui_session_.begin_frame();
-    editor.render_script_editor_window();
+    editor.render_script_editor_window(entityManager, componentManager);
     imgui_session_.render();
   }
 
@@ -1139,7 +1142,7 @@ namespace hades
       scriptEditorWindow.show();
     }
 
-    scriptEditorWindow.render(editor);
+    scriptEditorWindow.render(editor, entityManager, componentManager);
   }
 
   void WindowManager::update_window_title()
