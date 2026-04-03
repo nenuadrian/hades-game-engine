@@ -130,6 +130,37 @@ namespace
     buffer[copyLength] = '\0';
   }
 
+  std::optional<Uint32> event_window_id(const SDL_Event &event)
+  {
+    switch (event.type)
+    {
+    case SDL_WINDOWEVENT:
+      return event.window.windowID;
+    case SDL_KEYDOWN:
+    case SDL_KEYUP:
+      return event.key.windowID;
+    case SDL_TEXTEDITING:
+    case SDL_TEXTINPUT:
+      return event.text.windowID;
+    case SDL_MOUSEMOTION:
+      return event.motion.windowID;
+    case SDL_MOUSEBUTTONDOWN:
+    case SDL_MOUSEBUTTONUP:
+      return event.button.windowID;
+    case SDL_MOUSEWHEEL:
+      return event.wheel.windowID;
+    case SDL_DROPFILE:
+    case SDL_DROPTEXT:
+    case SDL_DROPBEGIN:
+    case SDL_DROPCOMPLETE:
+      return event.drop.windowID;
+    default:
+      break;
+    }
+
+    return std::nullopt;
+  }
+
   void build_workspace_logo_preview(
       SDL_Surface *logoSurface,
       std::vector<std::uint32_t> &pixels,
@@ -504,25 +535,140 @@ namespace hades
     const float panelWidth = std::min(ImGui::GetContentRegionAvail().x, 760.0f);
     const float leftMargin = std::max((ImGui::GetWindowSize().x - panelWidth) * 0.5f, 24.0f);
     ImGui::SetCursorPosX(leftMargin);
-    ImGui::SetCursorPosY(28.0f);
+    ImGui::SetCursorPosY(24.0f);
 
     ImGui::BeginChild("Workspace Selector Panel", ImVec2(panelWidth, 0.0f), true);
     render_workspace_logo();
-    ImGui::Spacing();
 
     if (!workspaceStatusMessage.empty())
     {
       ImGui::Spacing();
-      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.90f, 0.62f, 0.56f, 1.00f));
+      ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.22f, 0.11f, 0.10f, 0.90f));
+      ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.66f, 0.34f, 0.31f, 0.85f));
+      ImGui::BeginChild("Workspace Status", ImVec2(0.0f, 54.0f), true, ImGuiWindowFlags_AlwaysUseWindowPadding);
+      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.98f, 0.80f, 0.75f, 1.00f));
       ImGui::TextWrapped("%s", workspaceStatusMessage.c_str());
       ImGui::PopStyleColor();
+      ImGui::EndChild();
+      ImGui::PopStyleColor(2);
+      ImGui::Dummy(ImVec2(0.0f, 14.0f));
+    }
+    else
+    {
+      ImGui::Dummy(ImVec2(0.0f, 18.0f));
     }
 
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
+    std::string pruneError;
+    if (!workspaceManager.prune_missing_recent_workspaces(&pruneError) && workspaceStatusMessage.empty())
+    {
+      workspaceStatusMessage = pruneError;
+    }
+
+    const float buttonGap = 14.0f;
+    const float buttonWidth = (ImGui::GetContentRegionAvail().x - buttonGap) * 0.5f;
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(16.0f, 16.0f));
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.16f, 0.13f, 0.13f, 1.00f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.22f, 0.18f, 0.18f, 1.00f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.29f, 0.23f, 0.22f, 1.00f));
+    if (ImGui::Button("Create New", ImVec2(buttonWidth, 0.0f)))
+    {
+      creatingWorkspace = true;
+      workspaceStatusMessage.clear();
+      if (createWorkspaceParentBuffer[0] == '\0')
+      {
+        std::error_code errorCode;
+        set_buffer_text(createWorkspaceParentBuffer, std::filesystem::current_path(errorCode).string());
+      }
+    }
+
+    ImGui::SameLine(0.0f, buttonGap);
+    if (ImGui::Button("Browse Existing", ImVec2(buttonWidth, 0.0f)))
+    {
+      std::string pickerError;
+      const auto pickedFolder = hades::pick_folder_with_native_dialog("Select a workspace folder", &pickerError);
+      if (pickedFolder.has_value())
+      {
+        workspaceStatusMessage.clear();
+        open_workspace(pickedFolder->string());
+      }
+      else if (!pickerError.empty())
+      {
+        workspaceStatusMessage = pickerError;
+      }
+    }
+    ImGui::PopStyleColor(3);
+    ImGui::PopStyleVar();
+
+    ImGui::Dummy(ImVec2(0.0f, 18.0f));
+
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.08f, 0.08f, 0.92f));
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.18f, 0.15f, 0.15f, 1.00f));
+    ImGui::BeginChild("Recent Workspaces List", ImVec2(0.0f, 0.0f), true, ImGuiWindowFlags_AlwaysUseWindowPadding);
+
+    if (workspaceManager.recent_workspaces().empty())
+    {
+      ImGui::Dummy(ImVec2(0.0f, 8.0f));
+      ImGui::TextDisabled("No existing projects yet.");
+    }
+    else
+    {
+      for (std::size_t index = 0; index < workspaceManager.recent_workspaces().size(); ++index)
+      {
+        const WorkspaceEntry &workspace = workspaceManager.recent_workspaces()[index];
+        ImGui::PushID(static_cast<int>(index));
+
+        const float cardWidth = ImGui::GetContentRegionAvail().x;
+        const ImVec2 cardMin = ImGui::GetCursorScreenPos();
+        const ImVec2 cardSize(cardWidth, 58.0f);
+        const ImVec2 cardMax(cardMin.x + cardSize.x, cardMin.y + cardSize.y);
+
+        ImGui::InvisibleButton("workspace_card", cardSize);
+        const bool hovered = ImGui::IsItemHovered();
+        const bool clicked = ImGui::IsItemClicked();
+
+        ImDrawList *drawList = ImGui::GetWindowDrawList();
+        const ImU32 fillColor = hovered ? IM_COL32(42, 33, 33, 255) : IM_COL32(28, 24, 24, 255);
+        const ImU32 borderColor = hovered ? IM_COL32(170, 150, 144, 255) : IM_COL32(66, 56, 56, 255);
+        const ImU32 accentColor = hovered ? IM_COL32(214, 200, 192, 255) : IM_COL32(140, 128, 122, 255);
+
+        drawList->AddRectFilled(cardMin, cardMax, fillColor, 6.0f);
+        drawList->AddRect(cardMin, cardMax, borderColor, 6.0f, 0, 1.0f);
+        drawList->AddRectFilled(cardMin, ImVec2(cardMin.x + 4.0f, cardMax.y), accentColor, 6.0f, ImDrawFlags_RoundCornersLeft);
+
+        ImGui::SetCursorScreenPos(ImVec2(cardMin.x + 18.0f, cardMin.y + 10.0f));
+        ImGui::TextUnformatted(workspace.name.c_str());
+        ImGui::SetCursorScreenPos(ImVec2(cardMin.x + 18.0f, cardMin.y + 31.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.64f, 0.61f, 0.60f, 1.00f));
+        ImGui::PushTextWrapPos(cardMax.x - 14.0f);
+        ImGui::TextUnformatted(workspace.path.string().c_str());
+        ImGui::PopTextWrapPos();
+        ImGui::PopStyleColor();
+
+        if (clicked)
+        {
+          open_workspace(workspace.path.string());
+        }
+
+        if (index + 1 < workspaceManager.recent_workspaces().size())
+        {
+          ImGui::Dummy(ImVec2(0.0f, 10.0f));
+        }
+
+        ImGui::PopID();
+      }
+    }
+
+    ImGui::EndChild();
+    ImGui::PopStyleColor(2);
 
     if (creatingWorkspace)
+    {
+      ImGui::OpenPopup("Create Workspace");
+      creatingWorkspace = false;
+    }
+
+    ImGui::SetNextWindowSize(ImVec2(460.0f, 0.0f), ImGuiCond_Appearing);
+    if (ImGui::BeginPopupModal("Create Workspace", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
     {
       ImGui::InputText("Workspace Name", createWorkspaceNameBuffer.data(), createWorkspaceNameBuffer.size());
       ImGui::InputText("Location", createWorkspaceParentBuffer.data(), createWorkspaceParentBuffer.size());
@@ -542,24 +688,15 @@ namespace hades
         }
       }
 
-      ImGui::SameLine();
-      if (ImGui::Button("Back"))
-      {
-        creatingWorkspace = false;
-        workspaceStatusMessage.clear();
-      }
-
       const std::string workspaceName = trim_copy(createWorkspaceNameBuffer.data());
       const std::string parentDirectory = trim_copy(createWorkspaceParentBuffer.data());
       if (!workspaceName.empty() && !parentDirectory.empty())
       {
         ImGui::Spacing();
-        ImGui::TextDisabled("Workspace folder");
-        const std::string targetPath = (std::filesystem::path(parentDirectory) / workspaceName).string();
-        ImGui::PushTextWrapPos();
-        ImGui::Text("%s", targetPath.c_str());
-        ImGui::PopTextWrapPos();
+        ImGui::TextDisabled("%s", (std::filesystem::path(parentDirectory) / workspaceName).string().c_str());
       }
+
+      ImGui::Spacing();
 
       const bool canCreateWorkspace = !workspaceName.empty() && !parentDirectory.empty();
       if (!canCreateWorkspace)
@@ -569,85 +706,23 @@ namespace hades
       if (ImGui::Button("Create Workspace", ImVec2(180.0f, 0.0f)))
       {
         create_workspace();
+        if (workspaceManager.has_current_workspace())
+        {
+          ImGui::CloseCurrentPopup();
+        }
       }
       if (!canCreateWorkspace)
       {
         ImGui::EndDisabled();
       }
-    }
-    else
-    {
-      std::string pruneError;
-      if (!workspaceManager.prune_missing_recent_workspaces(&pruneError) && workspaceStatusMessage.empty())
+
+      ImGui::SameLine();
+      if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)))
       {
-        workspaceStatusMessage = pruneError;
+        ImGui::CloseCurrentPopup();
       }
 
-      ImGui::InputText("Workspace Folder", openWorkspacePathBuffer.data(), openWorkspacePathBuffer.size());
-
-      if (ImGui::Button("Browse Existing..."))
-      {
-        std::string pickerError;
-        const auto pickedFolder = hades::pick_folder_with_native_dialog("Select a workspace folder", &pickerError);
-        if (pickedFolder.has_value())
-        {
-          set_buffer_text(openWorkspacePathBuffer, pickedFolder->string());
-          workspaceStatusMessage.clear();
-        }
-        else if (!pickerError.empty())
-        {
-          workspaceStatusMessage = pickerError;
-        }
-      }
-
-      if (ImGui::Button("Create New Workspace"))
-      {
-        creatingWorkspace = true;
-        workspaceStatusMessage.clear();
-        if (createWorkspaceParentBuffer[0] == '\0')
-        {
-          std::error_code errorCode;
-          set_buffer_text(createWorkspaceParentBuffer, std::filesystem::current_path(errorCode).string());
-        }
-      }
-
-      ImGui::Spacing();
-      ImGui::TextUnformatted("Recent Workspaces");
-      ImGui::Separator();
-
-      if (workspaceManager.recent_workspaces().empty())
-      {
-        ImGui::Spacing();
-        ImGui::TextDisabled("No recent workspaces yet.");
-      }
-      else
-      {
-        ImGui::BeginChild("Recent Workspaces List", ImVec2(0.0f, 0.0f), false);
-        for (std::size_t index = 0; index < workspaceManager.recent_workspaces().size(); ++index)
-        {
-          const WorkspaceEntry &workspace = workspaceManager.recent_workspaces()[index];
-          ImGui::PushID(static_cast<int>(index));
-
-          if (ImGui::Button(workspace.name.c_str(), ImVec2(ImGui::GetContentRegionAvail().x, 0.0f)))
-          {
-            open_workspace(workspace.path.string());
-          }
-
-          ImGui::PushTextWrapPos();
-          ImGui::TextDisabled("%s", workspace.path.string().c_str());
-          ImGui::PopTextWrapPos();
-
-          if (index + 1 < workspaceManager.recent_workspaces().size())
-          {
-            ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::Spacing();
-          }
-
-          ImGui::PopID();
-        }
-        ImGui::EndChild();
-      }
+      ImGui::EndPopup();
     }
 
     ImGui::EndChild();
@@ -677,7 +752,6 @@ namespace hades
 
     creatingWorkspace = false;
     workspaceStatusMessage = errorMessage;
-    set_buffer_text(openWorkspacePathBuffer, workspace->path.string());
     set_buffer_text(createWorkspaceParentBuffer, workspace->path.parent_path().string());
     update_window_title();
   }
@@ -706,7 +780,6 @@ namespace hades
 
     creatingWorkspace = false;
     workspaceStatusMessage = errorMessage;
-    set_buffer_text(openWorkspacePathBuffer, workspace->path.string());
     set_buffer_text(createWorkspaceParentBuffer, workspace->path.parent_path().string());
     set_buffer_text(createWorkspaceNameBuffer, std::string());
     update_window_title();
@@ -720,6 +793,7 @@ namespace hades
       audio_engine->stop_all();
     }
 
+    playWindow.close();
     entityManager = EntityManager();
     componentManager = ComponentManager();
     editor.reset_workspace_session();
@@ -729,6 +803,51 @@ namespace hades
     {
       audioSystem->set_active_world(std::nullopt);
     }
+  }
+
+  void WindowManager::stop_active_play_mode(const std::string &message)
+  {
+    scriptRuntime.stop();
+    editor.state.pendingPlayAction = EditorPlayAction::None;
+    editor.state.isPlaying = false;
+    editor.state.activeWorld.reset();
+    editor.state.activeCamera.reset();
+    editor.state.playModeMessage = message;
+    playWindow.close();
+
+    if (audio_engine != nullptr)
+    {
+      audio_engine->stop_all();
+    }
+    if (audioSystem != nullptr)
+    {
+      audioSystem->set_active_world(std::nullopt);
+    }
+  }
+
+  void WindowManager::sync_play_window()
+  {
+    if (!editor.state.isPlaying)
+    {
+      playWindow.close();
+      return;
+    }
+
+    std::string errorMessage;
+    if (!playWindow.is_open() && !playWindow.open(&errorMessage))
+    {
+      stop_active_play_mode(
+          errorMessage.empty()
+              ? "Unable to open the detached play window."
+              : errorMessage);
+      return;
+    }
+
+    playWindow.render(
+        entityManager,
+        componentManager,
+        editor.state.activeWorld,
+        editor.state.activeCamera);
   }
 
   void WindowManager::update_window_title()
@@ -830,19 +949,32 @@ namespace hades
 
   void WindowManager::render_frame()
   {
+    const Uint32 editorWindowId = window != nullptr ? SDL_GetWindowID(window.get()) : 0U;
     SDL_Event event;
     while (SDL_PollEvent(&event))
     {
-      ImGui_ImplSDL2_ProcessEvent(&event);
+      const auto targetWindowId = event_window_id(event);
+      const auto playWindowId = playWindow.window_id();
+      if (!targetWindowId.has_value() || *targetWindowId == editorWindowId)
+      {
+        ImGui_ImplSDL2_ProcessEvent(&event);
+      }
       if (event.type == SDL_QUIT)
       {
         running = false;
       }
       if (event.type == SDL_WINDOWEVENT &&
-          event.window.event == SDL_WINDOWEVENT_CLOSE &&
-          event.window.windowID == SDL_GetWindowID(window.get()))
+          event.window.event == SDL_WINDOWEVENT_CLOSE)
       {
-        running = false;
+        if (event.window.windowID == editorWindowId)
+        {
+          running = false;
+        }
+        else if (playWindowId.has_value() &&
+                 event.window.windowID == *playWindowId)
+        {
+          stop_active_play_mode();
+        }
       }
     }
 
@@ -873,14 +1005,7 @@ namespace hades
         scriptRuntime.update(io.DeltaTime, componentManager, entityManager);
         if (scriptRuntime.faulted())
         {
-          editor.state.isPlaying = false;
-          editor.state.activeWorld.reset();
-          editor.state.activeCamera.reset();
-          editor.state.playModeMessage = scriptRuntime.last_error();
-          if (audio_engine != nullptr)
-          {
-            audio_engine->stop_all();
-          }
+          stop_active_play_mode(scriptRuntime.last_error());
         }
         else
         {
@@ -901,6 +1026,7 @@ namespace hades
     }
 
     imgui_session.render();
+    sync_play_window();
   }
 
   int WindowManager::run()

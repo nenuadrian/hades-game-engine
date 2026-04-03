@@ -75,9 +75,17 @@ namespace hades
     std::array<char, 512> workspaceImportSourcePathBuffer_{};
     std::string workspaceImportError_;
     bool openWorkspaceDeleteDialog_ = false;
+    bool openSettingsWindow_ = false;
+    bool focusSettingsWindow_ = false;
     std::filesystem::path pendingWorkspaceDeletePath_;
     std::string workspaceDeleteError_;
     std::optional<Entity::EntityId> pendingEntityDeletion_;
+    float sceneCameraTargetX_ = 0.0f;
+    float sceneCameraTargetY_ = 0.0f;
+    float sceneCameraTargetZ_ = 0.0f;
+    float sceneCameraDistance_ = 1.0f;
+    float sceneCameraYawDegrees_ = 0.0f;
+    float sceneCameraPitchDegrees_ = 0.0f;
 
     // File watch / background compile state.
     std::unordered_map<std::string, std::filesystem::file_time_type> scriptModTimes_;
@@ -100,7 +108,9 @@ namespace hades
     void render_workspace_create_dialog();
     void render_workspace_import_dialog();
     void render_workspace_delete_dialog(EntityManager &entityManager, ComponentManager &componentManager);
+    void render_settings_window();
     void render_workspace_tree_node(const WorkspaceTreeNode &node);
+    void reset_scene_camera();
     void ensure_world_state(EntityManager &entityManager, ComponentManager &componentManager);
     Entity::EntityId create_world(EntityManager &entityManager, ComponentManager &componentManager);
     void load_world(Entity::EntityId world, ComponentManager &componentManager);
@@ -122,7 +132,6 @@ namespace hades
     void scene(EntityManager &entityManager, ComponentManager &componentManager);
     void properties(EntityManager &entityManager, ComponentManager &componentManager);
     void components(EntityManager &entityManager, ComponentManager &componentManager);
-    void game(EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime);
     void render_hierarchy(Entity::EntityId entity, EntityManager &entityManager, ComponentManager &componentManager);
     void render_hierarchies(EntityManager &entityManager, ComponentManager &componentManager);
     void debug(float deltaTime);

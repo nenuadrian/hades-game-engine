@@ -11,6 +11,7 @@
 #include "../engine/core/ecs/entity_manager.hpp"
 #include "../engine/core/ecs/system_manager.hpp"
 #include "../engine/runtime/script_runtime.hpp"
+#include "detached_play_window.hpp"
 #include "editor.hpp"
 #include "workspace_manager.hpp"
 
@@ -66,6 +67,7 @@ namespace hades
     // Keep destruction order: ImGui, audio, renderer, SDL window, then SDL itself.
     SdlSession sdl_session;
     WindowPtr window{nullptr};
+    DetachedPlayWindow playWindow;
     std::unique_ptr<Renderer> renderer;
     std::unique_ptr<AudioEngine> audio_engine;
     std::shared_ptr<AudioSystem> audioSystem;
@@ -75,7 +77,6 @@ namespace hades
     bool wasPlayingLastFrame = false;
     bool creatingWorkspace = false;
     std::string workspaceStatusMessage;
-    std::array<char, 1024> openWorkspacePathBuffer{};
     std::array<char, 1024> createWorkspaceParentBuffer{};
     std::array<char, 256> createWorkspaceNameBuffer{};
     std::vector<std::uint32_t> workspaceLogoPixels;
@@ -89,6 +90,8 @@ namespace hades
     void open_workspace(const std::string &workspacePath);
     void create_workspace();
     void reset_workspace_session();
+    void stop_active_play_mode(const std::string &message = std::string());
+    void sync_play_window();
     void update_window_title();
     bool init();
     void render_frame();

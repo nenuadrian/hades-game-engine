@@ -48,15 +48,26 @@ namespace hades
     constexpr char PROPERTIES_WINDOW_TITLE[] = "Properties";
     constexpr char COMPONENTS_WINDOW_TITLE[] = "Components";
     constexpr char SCENE_WINDOW_TITLE[] = "World";
-    constexpr char GAME_WINDOW_TITLE[] = "Game";
+    constexpr char SETTINGS_WINDOW_TITLE[] = "Settings";
     constexpr char IMPORT_MODEL_POPUP_TITLE[] = "Import Model";
     constexpr char WORKSPACE_CREATE_POPUP_TITLE[] = "Create Workspace Item";
     constexpr char WORKSPACE_IMPORT_POPUP_TITLE[] = "Import Into Workspace";
     constexpr char WORKSPACE_DELETE_POPUP_TITLE[] = "Delete Workspace Item";
     constexpr float PI = 3.14159265358979323846f;
     constexpr float CUBE_HALF_EXTENT = 0.5f;
+    constexpr float EDITOR_SCENE_CAMERA_TARGET_X = 0.0f;
+    constexpr float EDITOR_SCENE_CAMERA_TARGET_Y = 0.0f;
+    constexpr float EDITOR_SCENE_CAMERA_TARGET_Z = 0.0f;
     constexpr float EDITOR_SCENE_CAMERA_Y = 3.0f;
     constexpr float EDITOR_SCENE_CAMERA_Z = -6.0f;
+    constexpr float EDITOR_SCENE_CAMERA_MIN_DISTANCE = 1.0f;
+    constexpr float EDITOR_SCENE_CAMERA_MAX_DISTANCE = 250.0f;
+    constexpr float EDITOR_SCENE_CAMERA_MIN_PITCH = -89.0f;
+    constexpr float EDITOR_SCENE_CAMERA_MAX_PITCH = 89.0f;
+    constexpr float EDITOR_SCENE_CAMERA_ROTATION_SENSITIVITY_X = 0.35f;
+    constexpr float EDITOR_SCENE_CAMERA_ROTATION_SENSITIVITY_Y = 0.25f;
+    constexpr float EDITOR_SCENE_CAMERA_ZOOM_FACTOR = 0.85f;
+    constexpr float CAMERA_FRUSTUM_PREVIEW_MAX_DEPTH = 12.0f;
     constexpr int BOX_EDGES[12][2] = {
         {0, 1}, {1, 2}, {2, 3}, {3, 0},
         {4, 5}, {5, 6}, {6, 7}, {7, 4},
@@ -68,6 +79,14 @@ namespace hades
       float x;
       float y;
       float z;
+    };
+
+    struct EditorSceneViewCamera
+    {
+      PositionComponent3D position;
+      Vec3 right;
+      Vec3 up;
+      Vec3 forward;
     };
 
     const char *primitive_type_label(PrimitiveType type)
@@ -105,11 +124,6 @@ namespace hades
       return name + " (" + std::to_string(entity) + ")";
     }
 
-    void render_selection_hint(const char *message)
-    {
-      ImGui::TextDisabled("%s", message);
-    }
-
     Vec3 make_vec3(float x, float y, float z)
     {
       return Vec3{x, y, z};
@@ -120,6 +134,65 @@ namespace hades
       return make_vec3(position.x, position.y, position.z);
     }
 
+    float degrees_to_radians(float degrees)
+    {
+      return degrees * (PI / 180.0f);
+    }
+
+    float radians_to_degrees(float radians)
+    {
+      return radians * (180.0f / PI);
+    }
+
+    Vec3 add_vec3(const Vec3 &lhs, const Vec3 &rhs)
+    {
+      return make_vec3(lhs.x + rhs.x, lhs.y + rhs.y, lhs.z + rhs.z);
+    }
+
+    Vec3 subtract_vec3(const Vec3 &lhs, const Vec3 &rhs)
+    {
+      return make_vec3(lhs.x - rhs.x, lhs.y - rhs.y, lhs.z - rhs.z);
+    }
+
+    Vec3 scale_vec3(const Vec3 &value, float scalar)
+    {
+      return make_vec3(value.x * scalar, value.y * scalar, value.z * scalar);
+    }
+
+    float dot_vec3(const Vec3 &lhs, const Vec3 &rhs)
+    {
+      return (lhs.x * rhs.x) + (lhs.y * rhs.y) + (lhs.z * rhs.z);
+    }
+
+    Vec3 cross_vec3(const Vec3 &lhs, const Vec3 &rhs)
+    {
+      return make_vec3(
+          (lhs.y * rhs.z) - (lhs.z * rhs.y),
+          (lhs.z * rhs.x) - (lhs.x * rhs.z),
+          (lhs.x * rhs.y) - (lhs.y * rhs.x));
+    }
+
+    float length_vec3(const Vec3 &value)
+    {
+      return std::sqrt(dot_vec3(value, value));
+    }
+
+    Vec3 normalize_vec3(const Vec3 &value)
+    {
+      const float length = length_vec3(value);
+      if (length <= 1e-5f)
+      {
+        return make_vec3(0.0f, 0.0f, 0.0f);
+      }
+
+      return scale_vec3(value, 1.0f / length);
+    }
+
+    Vec3 flatten_xz(const Vec3 &value)
+    {
+      return normalize_vec3(make_vec3(value.x, 0.0f, value.z));
+    }
+
     Vec3 lerp_vec3(const Vec3 &start, const Vec3 &end, float t)
     {
       return make_vec3(
@@ -128,10 +201,58 @@ namespace hades
           start.z + ((end.z - start.z) * t));
     }
 
+    EditorSceneViewCamera make_editor_scene_view_camera(
+        float targetX,
+        float targetY,
+        float targetZ,
+        float distance,
+        float yawDegrees,
+        float pitchDegrees)
+    {
+      const float yawRadians = degrees_to_radians(yawDegrees);
+      const float pitchRadians = degrees_to_radians(pitchDegrees);
+      const float cosPitch = std::cos(pitchRadians);
+      const Vec3 forward = normalize_vec3(make_vec3(
+          std::sin(yawRadians) * cosPitch,
+          std::sin(pitchRadians),
+          std::cos(yawRadians) * cosPitch));
+      const Vec3 worldUp = make_vec3(0.0f, 1.0f, 0.0f);
+      const Vec3 right = normalize_vec3(cross_vec3(worldUp, forward));
+      const Vec3 up = normalize_vec3(cross_vec3(forward, right));
+
+      return EditorSceneViewCamera{
+          PositionComponent3D(
+              targetX - (forward.x * distance),
+              targetY - (forward.y * distance),
+              targetZ - (forward.z * distance)),
+          right,
+          up,
+          forward,
+      };
+    }
+
+    EditorSceneViewCamera make_axis_aligned_scene_view_camera(const PositionComponent3D &position)
+    {
+      return EditorSceneViewCamera{
+          position,
+          make_vec3(1.0f, 0.0f, 0.0f),
+          make_vec3(0.0f, 1.0f, 0.0f),
+          make_vec3(0.0f, 0.0f, 1.0f),
+      };
+    }
+
+    Vec3 world_to_camera_space(const Vec3 &worldPoint, const EditorSceneViewCamera &sceneCamera)
+    {
+      const Vec3 relative = subtract_vec3(worldPoint, make_vec3(sceneCamera.position));
+      return make_vec3(
+          dot_vec3(relative, sceneCamera.right),
+          dot_vec3(relative, sceneCamera.up),
+          dot_vec3(relative, sceneCamera.forward));
+    }
+
     bool clip_segment_to_camera_depth(
         Vec3 &start,
         Vec3 &end,
-        const PositionComponent3D &cameraPosition,
         const CameraComponent &camera)
     {
       auto clip_endpoint = [](Vec3 &point, float &depth, const Vec3 &otherPoint, float otherDepth, float targetDepth)
@@ -148,8 +269,8 @@ namespace hades
         return true;
       };
 
-      float startDepth = start.z - cameraPosition.z;
-      float endDepth = end.z - cameraPosition.z;
+      float startDepth = start.z;
+      float endDepth = end.z;
       if ((startDepth < camera.nearClip && endDepth < camera.nearClip) ||
           (startDepth > camera.farClip && endDepth > camera.farClip))
       {
@@ -181,9 +302,8 @@ namespace hades
       return true;
     }
 
-    bool project_point(
-        const Vec3 &worldPoint,
-        const PositionComponent3D &cameraPosition,
+    bool project_camera_space_point(
+        const Vec3 &cameraSpacePoint,
         const CameraComponent &camera,
         const ImVec2 &canvasOrigin,
         const ImVec2 &canvasSize,
@@ -194,24 +314,21 @@ namespace hades
         return false;
       }
 
-      const float relativeX = worldPoint.x - cameraPosition.x;
-      const float relativeY = worldPoint.y - cameraPosition.y;
-      const float relativeZ = worldPoint.z - cameraPosition.z;
-      if (relativeZ <= camera.nearClip || relativeZ >= camera.farClip)
+      if (cameraSpacePoint.z <= camera.nearClip || cameraSpacePoint.z >= camera.farClip)
       {
         return false;
       }
 
       const float aspectRatio = canvasSize.x / canvasSize.y;
-      const float halfFovRadians = (camera.fovY * 0.5f) * (PI / 180.0f);
+      const float halfFovRadians = degrees_to_radians(camera.fovY * 0.5f);
       const float tanHalfFov = std::tan(halfFovRadians);
       if (tanHalfFov <= 0.0f)
       {
         return false;
       }
 
-      const float normalizedX = relativeX / (relativeZ * tanHalfFov * aspectRatio);
-      const float normalizedY = relativeY / (relativeZ * tanHalfFov);
+      const float normalizedX = cameraSpacePoint.x / (cameraSpacePoint.z * tanHalfFov * aspectRatio);
+      const float normalizedY = cameraSpacePoint.y / (cameraSpacePoint.z * tanHalfFov);
       if (std::abs(normalizedX) > 10.0f || std::abs(normalizedY) > 10.0f)
       {
         return false;
@@ -222,30 +339,41 @@ namespace hades
       return true;
     }
 
+    bool project_point(
+        const Vec3 &worldPoint,
+        const EditorSceneViewCamera &sceneCamera,
+        const CameraComponent &camera,
+        const ImVec2 &canvasOrigin,
+        const ImVec2 &canvasSize,
+        ImVec2 &screenPoint)
+    {
+      return project_camera_space_point(
+          world_to_camera_space(worldPoint, sceneCamera),
+          camera,
+          canvasOrigin,
+          canvasSize,
+          screenPoint);
+    }
+
     bool project_line_segment(
         const Vec3 &start,
         const Vec3 &end,
-        const PositionComponent3D &cameraPosition,
+        const EditorSceneViewCamera &sceneCamera,
         const CameraComponent &camera,
         const ImVec2 &canvasOrigin,
         const ImVec2 &canvasSize,
         ImVec2 &screenStart,
         ImVec2 &screenEnd)
     {
-      Vec3 clippedStart = start;
-      Vec3 clippedEnd = end;
-      if (!clip_segment_to_camera_depth(clippedStart, clippedEnd, cameraPosition, camera))
+      Vec3 clippedStart = world_to_camera_space(start, sceneCamera);
+      Vec3 clippedEnd = world_to_camera_space(end, sceneCamera);
+      if (!clip_segment_to_camera_depth(clippedStart, clippedEnd, camera))
       {
         return false;
       }
 
-      return project_point(clippedStart, cameraPosition, camera, canvasOrigin, canvasSize, screenStart) &&
-             project_point(clippedEnd, cameraPosition, camera, canvasOrigin, canvasSize, screenEnd);
-    }
-
-    PositionComponent3D editor_scene_camera_position()
-    {
-      return PositionComponent3D(0.0f, EDITOR_SCENE_CAMERA_Y, EDITOR_SCENE_CAMERA_Z);
+      return project_camera_space_point(clippedStart, camera, canvasOrigin, canvasSize, screenStart) &&
+             project_camera_space_point(clippedEnd, camera, canvasOrigin, canvasSize, screenEnd);
     }
 
     CameraComponent editor_scene_camera()
@@ -255,7 +383,7 @@ namespace hades
 
     void draw_editor_grid(
         ImDrawList *drawList,
-        const PositionComponent3D &cameraPosition,
+        const EditorSceneViewCamera &sceneCamera,
         const CameraComponent &camera,
         const ImVec2 &canvasOrigin,
         const ImVec2 &canvasSize)
@@ -273,7 +401,7 @@ namespace hades
         if (!project_line_segment(
                 make_vec3(static_cast<float>(x), GRID_HEIGHT, -static_cast<float>(GRID_HALF_EXTENT)),
                 make_vec3(static_cast<float>(x), GRID_HEIGHT, static_cast<float>(GRID_HALF_EXTENT)),
-                cameraPosition,
+                sceneCamera,
                 camera,
                 canvasOrigin,
                 canvasSize,
@@ -297,7 +425,7 @@ namespace hades
         if (!project_line_segment(
                 make_vec3(-static_cast<float>(GRID_HALF_EXTENT), GRID_HEIGHT, static_cast<float>(z)),
                 make_vec3(static_cast<float>(GRID_HALF_EXTENT), GRID_HEIGHT, static_cast<float>(z)),
-                cameraPosition,
+                sceneCamera,
                 camera,
                 canvasOrigin,
                 canvasSize,
@@ -351,9 +479,114 @@ namespace hades
           position.z + ((minCorner.z + maxCorner.z) * 0.5f));
     }
 
+    std::array<Vec3, 4> frustum_plane_corners(
+        const PositionComponent3D &position,
+        float depth,
+        float halfWidth,
+        float halfHeight)
+    {
+      return {
+          make_vec3(position.x - halfWidth, position.y + halfHeight, position.z + depth),
+          make_vec3(position.x + halfWidth, position.y + halfHeight, position.z + depth),
+          make_vec3(position.x + halfWidth, position.y - halfHeight, position.z + depth),
+          make_vec3(position.x - halfWidth, position.y - halfHeight, position.z + depth),
+      };
+    }
+
+    bool draw_camera_frustum(
+        ImDrawList *drawList,
+        const EditorSceneViewCamera &sceneCamera,
+        const CameraComponent &previewCamera,
+        const ImVec2 &canvasOrigin,
+        const ImVec2 &canvasSize,
+        const PositionComponent3D &position,
+        const CameraComponent &camera,
+        ImU32 lineColor,
+        float thickness)
+    {
+      if (canvasSize.x <= 0.0f || canvasSize.y <= 0.0f ||
+          camera.fovY <= 0.0f ||
+          camera.nearClip <= 0.0f ||
+          camera.farClip <= camera.nearClip)
+      {
+        return false;
+      }
+
+      const float farDepth = std::min(
+          camera.farClip,
+          std::max(CAMERA_FRUSTUM_PREVIEW_MAX_DEPTH, camera.nearClip + 0.001f));
+      const float aspectRatio = canvasSize.x / canvasSize.y;
+      const float halfFovRadians = degrees_to_radians(camera.fovY * 0.5f);
+      const float tanHalfFov = std::tan(halfFovRadians);
+      if (aspectRatio <= 0.0f || tanHalfFov <= 0.0f)
+      {
+        return false;
+      }
+
+      const float nearHalfHeight = tanHalfFov * camera.nearClip;
+      const float nearHalfWidth = nearHalfHeight * aspectRatio;
+      const float farHalfHeight = tanHalfFov * farDepth;
+      const float farHalfWidth = farHalfHeight * aspectRatio;
+
+      const auto nearCorners = frustum_plane_corners(position, camera.nearClip, nearHalfWidth, nearHalfHeight);
+      const auto farCorners = frustum_plane_corners(position, farDepth, farHalfWidth, farHalfHeight);
+
+      int drawnSegmentCount = 0;
+      for (std::size_t index = 0; index < nearCorners.size(); ++index)
+      {
+        const std::size_t nextIndex = (index + 1) % nearCorners.size();
+        ImVec2 lineStart;
+        ImVec2 lineEnd;
+
+        if (project_line_segment(
+                nearCorners[index],
+                nearCorners[nextIndex],
+                sceneCamera,
+                previewCamera,
+                canvasOrigin,
+                canvasSize,
+                lineStart,
+                lineEnd))
+        {
+          drawList->AddLine(lineStart, lineEnd, lineColor, thickness);
+          ++drawnSegmentCount;
+        }
+
+        if (project_line_segment(
+                farCorners[index],
+                farCorners[nextIndex],
+                sceneCamera,
+                previewCamera,
+                canvasOrigin,
+                canvasSize,
+                lineStart,
+                lineEnd))
+        {
+          drawList->AddLine(lineStart, lineEnd, lineColor, thickness);
+          ++drawnSegmentCount;
+        }
+
+        if (project_line_segment(
+                nearCorners[index],
+                farCorners[index],
+                sceneCamera,
+                previewCamera,
+                canvasOrigin,
+                canvasSize,
+                lineStart,
+                lineEnd))
+        {
+          drawList->AddLine(lineStart, lineEnd, lineColor, thickness);
+          ++drawnSegmentCount;
+        }
+      }
+
+      return drawnSegmentCount > 0;
+    }
+
     bool draw_wire_box(
         ImDrawList *drawList,
-        const PositionComponent3D &cameraPosition,
+        const EditorSceneViewCamera &sceneCamera,
         const CameraComponent &camera,
         const ImVec2 &canvasOrigin,
         const ImVec2 &canvasSize,
@@ -374,7 +607,7 @@ namespace hades
         if (!project_line_segment(
                 corners[edge[0]],
                 corners[edge[1]],
-                cameraPosition,
+                sceneCamera,
                 camera,
                 canvasOrigin,
                 canvasSize,
@@ -396,7 +629,7 @@ namespace hades
       if (label != nullptr)
       {
         ImVec2 centerPoint;
-        if (project_point(box_center(minCorner, maxCorner, position), cameraPosition, camera, canvasOrigin, canvasSize, centerPoint))
+        if (project_point(box_center(minCorner, maxCorner, position), sceneCamera, camera, canvasOrigin, canvasSize, centerPoint))
         {
           drawList->AddText(
               ImVec2(centerPoint.x + 6.0f, centerPoint.y + 6.0f),
@@ -410,7 +643,7 @@ namespace hades
 
     int draw_world_preview(
         ImDrawList *drawList,
-        const PositionComponent3D &cameraPosition,
+        const EditorSceneViewCamera &sceneCamera,
         const CameraComponent &camera,
         const ImVec2 &canvasOrigin,
         const ImVec2 &canvasSize,
@@ -440,6 +673,24 @@ namespace hades
         const auto &position = componentManager.getComponent<PositionComponent3D>(entity);
         const std::string label = entity_display_label(entity, componentManager);
 
+        if (componentManager.hasComponent<CameraComponent>(entity))
+        {
+          const auto &entityCamera = componentManager.getComponent<CameraComponent>(entity);
+          if (draw_camera_frustum(
+                  drawList,
+                  sceneCamera,
+                  camera,
+                  canvasOrigin,
+                  canvasSize,
+                  position,
+                  entityCamera,
+                  IM_COL32(255, 165, 0, 255),
+                  1.5f))
+          {
+            ++visibleRenderableCount;
+          }
+        }
+
         if (componentManager.hasComponent<PrimitiveComponent>(entity))
         {
           const auto &primitive = componentManager.getComponent<PrimitiveComponent>(entity);
@@ -450,7 +701,7 @@ namespace hades
 
           if (draw_wire_box(
                   drawList,
-                  cameraPosition,
+                  sceneCamera,
                   camera,
                   canvasOrigin,
                   canvasSize,
@@ -478,7 +729,7 @@ namespace hades
 
           if (draw_wire_box(
                   drawList,
-                  cameraPosition,
+                  sceneCamera,
                   camera,
                   canvasOrigin,
                   canvasSize,
@@ -969,9 +1220,23 @@ namespace hades
 
   Editor::Editor() : gui(std::make_unique<ImGui_GUI>())
   {
+    reset_scene_camera();
   }
 
   Editor::~Editor() = default;
+
+  void Editor::reset_scene_camera()
+  {
+    sceneCameraTargetX_ = EDITOR_SCENE_CAMERA_TARGET_X;
+    sceneCameraTargetY_ = EDITOR_SCENE_CAMERA_TARGET_Y;
+    sceneCameraTargetZ_ = EDITOR_SCENE_CAMERA_TARGET_Z;
+    sceneCameraDistance_ = std::sqrt(
+        (EDITOR_SCENE_CAMERA_Y * EDITOR_SCENE_CAMERA_Y) +
+        (EDITOR_SCENE_CAMERA_Z * EDITOR_SCENE_CAMERA_Z));
+    sceneCameraYawDegrees_ = 0.0f;
+    sceneCameraPitchDegrees_ = -radians_to_degrees(
+        std::atan2(EDITOR_SCENE_CAMERA_Y, std::abs(EDITOR_SCENE_CAMERA_Z)));
+  }
 
   void Editor::reset_workspace_session()
   {
@@ -984,6 +1249,7 @@ namespace hades
     state.activeCamera.reset();
     state.playModeMessage.clear();
     pendingEntityDeletion_.reset();
+    reset_scene_camera();
 
     activeWorkspacePath_.clear();
     workspaceTreeRoot_.reset();
@@ -1088,7 +1354,7 @@ namespace hades
     scene(entityManager, componentManager);
     properties(entityManager, componentManager);
     components(entityManager, componentManager);
-    game(entityManager, componentManager, scriptRuntime);
+    render_settings_window();
     debug(deltaTime);
   }
 
@@ -1106,6 +1372,14 @@ namespace hades
       create_world(entityManager, componentManager);
     };
 
+    MenuBarItem settings;
+    settings.title = "Settings";
+    settings.on_activate = [this]()
+    {
+      openSettingsWindow_ = true;
+      focusSettingsWindow_ = true;
+    };
+
     MenuBarItem exit;
     exit.title = "Exit";
     exit.on_activate = [this]()
@@ -1114,6 +1388,7 @@ namespace hades
     };
 
     file.children_menu_items.push_back(newWorld);
+    file.children_menu_items.push_back(settings);
     file.children_menu_items.push_back(exit);
     gui->menu_bar_items.push_back(file);
 
@@ -1189,14 +1464,11 @@ namespace hades
     const ImGuiID entitiesDockId = ImGui::DockBuilderSplitNode(workspaceDockId, ImGuiDir_Down, 0.56f, nullptr, &workspaceDockId);
     ImGuiID inspectorDockId = ImGui::DockBuilderSplitNode(mainDockId, ImGuiDir_Right, 0.34f, nullptr, &mainDockId);
     const ImGuiID componentsDockId = ImGui::DockBuilderSplitNode(inspectorDockId, ImGuiDir_Right, 0.45f, nullptr, &inspectorDockId);
-    const ImGuiID gameDockId = ImGui::DockBuilderSplitNode(mainDockId, ImGuiDir_Down, 0.22f, nullptr, &mainDockId);
-
     ImGui::DockBuilderDockWindow(WORKSPACE_WINDOW_TITLE, workspaceDockId);
     ImGui::DockBuilderDockWindow(ENTITY_WINDOW_TITLE, entitiesDockId);
     ImGui::DockBuilderDockWindow(PROPERTIES_WINDOW_TITLE, inspectorDockId);
     ImGui::DockBuilderDockWindow(COMPONENTS_WINDOW_TITLE, componentsDockId);
     ImGui::DockBuilderDockWindow(SCENE_WINDOW_TITLE, mainDockId);
-    ImGui::DockBuilderDockWindow(GAME_WINDOW_TITLE, gameDockId);
     ImGui::DockBuilderFinish(dockspaceId);
   }
 
@@ -1293,16 +1565,9 @@ namespace hades
     }
 
     const bool creatingScript = pendingWorkspaceCreateKind_ == WorkspaceCreateKind::Script;
-    ImGui::TextWrapped(
-        "%s in:",
-        creatingScript ? "Create a new C# script" : "Create a new folder");
+    ImGui::TextWrapped("%s", creatingScript ? "New Script" : "New Folder");
     ImGui::TextWrapped("%s", pendingWorkspaceCreateParentPath_.string().c_str());
     ImGui::InputText(creatingScript ? "Script Name" : "Folder Name", workspaceCreateNameBuffer_.data(), workspaceCreateNameBuffer_.size());
-
-    if (creatingScript)
-    {
-      ImGui::TextDisabled("The .cs extension will be added automatically when needed.");
-    }
 
     if (!workspaceCreateError_.empty())
     {
@@ -1355,10 +1620,9 @@ namespace hades
       return;
     }
 
-    ImGui::TextWrapped("Import a file into:");
+    ImGui::TextWrapped("Import File");
     ImGui::TextWrapped("%s", pendingWorkspaceImportParentPath_.string().c_str());
     ImGui::InputText("Source File", workspaceImportSourcePathBuffer_.data(), workspaceImportSourcePathBuffer_.size());
-    ImGui::TextDisabled("The original file stays in place. The workspace receives a copy with the same name.");
 
     if (ImGui::Button("Browse File..."))
     {
@@ -1438,15 +1702,8 @@ namespace hades
     std::error_code errorCode;
     const bool deletingDirectory = std::filesystem::is_directory(pendingWorkspaceDeletePath_, errorCode);
 
-    ImGui::TextWrapped(
-        "Delete this %s from the active workspace?",
-        deletingDirectory ? "folder" : "file");
+    ImGui::TextWrapped("%s", deletingDirectory ? "Delete Folder" : "Delete File");
     ImGui::TextWrapped("%s", pendingWorkspaceDeletePath_.string().c_str());
-    if (deletingDirectory)
-    {
-      ImGui::TextDisabled("Folder deletion is recursive.");
-    }
-    ImGui::TextDisabled("Deleted C# scripts are removed from any script components that reference them.");
 
     if (!workspaceDeleteError_.empty())
     {
@@ -1560,7 +1817,7 @@ namespace hades
 
     if (activeWorkspacePath_.empty())
     {
-      render_selection_hint("Open a workspace to browse its files.");
+      ImGui::TextDisabled("No workspace.");
       ImGui::End();
       return;
     }
@@ -1576,7 +1833,7 @@ namespace hades
 
     if (!workspaceTreeRoot_.has_value())
     {
-      render_selection_hint("Workspace files are not available yet.");
+      ImGui::TextDisabled("No files.");
       ImGui::End();
       return;
     }
@@ -1803,7 +2060,7 @@ namespace hades
       return;
     }
 
-    ImGui::TextWrapped("Import a mesh scene supported by Assimp and attach it as a model entity.");
+    ImGui::TextWrapped("Import Model");
     ImGui::InputText("Path", importModelPathBuffer.data(), importModelPathBuffer.size());
 
     if (!importModelError.empty())
@@ -1973,6 +2230,7 @@ namespace hades
   void Editor::scene(EntityManager &entityManager, ComponentManager &componentManager)
   {
     ImGui::Begin(SCENE_WINDOW_TITLE);
+    ImGuiIO &io = ImGui::GetIO();
 
     const auto sceneWorld = state.isPlaying
                                 ? state.activeWorld
@@ -1999,9 +2257,6 @@ namespace hades
       return;
     }
 
-    const PositionComponent3D cameraPosition = editor_scene_camera_position();
-    const CameraComponent camera = editor_scene_camera();
-
     ImGui::Spacing();
     const ImVec2 canvasSize = ImGui::GetContentRegionAvail();
     if (canvasSize.x < 64.0f || canvasSize.y < 64.0f)
@@ -2013,20 +2268,95 @@ namespace hades
     const ImVec2 canvasOrigin = ImGui::GetCursorScreenPos();
     const ImVec2 canvasMax(canvasOrigin.x + canvasSize.x, canvasOrigin.y + canvasSize.y);
     ImGui::InvisibleButton("scene_canvas", canvasSize);
+    const bool sceneCanvasHovered = ImGui::IsItemHovered();
+    const bool sceneCanvasActive = ImGui::IsItemActive();
+    const bool sceneWindowFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+    const bool rotateModifierDown = io.KeyCtrl || io.KeySuper;
+
+    if (sceneCanvasHovered && io.MouseWheel != 0.0f)
+    {
+      sceneCameraDistance_ = std::clamp(
+          sceneCameraDistance_ * static_cast<float>(std::pow(EDITOR_SCENE_CAMERA_ZOOM_FACTOR, io.MouseWheel)),
+          EDITOR_SCENE_CAMERA_MIN_DISTANCE,
+          EDITOR_SCENE_CAMERA_MAX_DISTANCE);
+    }
+
+    if (sceneCanvasActive && rotateModifierDown && ImGui::IsMouseDragging(ImGuiMouseButton_Left))
+    {
+      sceneCameraYawDegrees_ = std::remainder(
+          sceneCameraYawDegrees_ + (io.MouseDelta.x * EDITOR_SCENE_CAMERA_ROTATION_SENSITIVITY_X),
+          360.0f);
+      sceneCameraPitchDegrees_ = std::clamp(
+          sceneCameraPitchDegrees_ - (io.MouseDelta.y * EDITOR_SCENE_CAMERA_ROTATION_SENSITIVITY_Y),
+          EDITOR_SCENE_CAMERA_MIN_PITCH,
+          EDITOR_SCENE_CAMERA_MAX_PITCH);
+    }
+
+    EditorSceneViewCamera sceneCamera = make_editor_scene_view_camera(
+        sceneCameraTargetX_,
+        sceneCameraTargetY_,
+        sceneCameraTargetZ_,
+        sceneCameraDistance_,
+        sceneCameraYawDegrees_,
+        sceneCameraPitchDegrees_);
+
+    if (sceneWindowFocused && !rotateModifierDown && !io.WantTextInput)
+    {
+      Vec3 movement = make_vec3(0.0f, 0.0f, 0.0f);
+      const Vec3 forwardOnGround = flatten_xz(sceneCamera.forward);
+
+      if (ImGui::IsKeyDown(ImGuiKey_LeftArrow))
+      {
+        movement = subtract_vec3(movement, sceneCamera.right);
+      }
+      if (ImGui::IsKeyDown(ImGuiKey_RightArrow))
+      {
+        movement = add_vec3(movement, sceneCamera.right);
+      }
+      if (ImGui::IsKeyDown(ImGuiKey_UpArrow))
+      {
+        movement = add_vec3(movement, forwardOnGround);
+      }
+      if (ImGui::IsKeyDown(ImGuiKey_DownArrow))
+      {
+        movement = subtract_vec3(movement, forwardOnGround);
+      }
+
+      movement = flatten_xz(movement);
+      if (length_vec3(movement) > 0.0f)
+      {
+        const float cameraMoveSpeed = std::max(3.0f, sceneCameraDistance_);
+        sceneCameraTargetX_ += movement.x * cameraMoveSpeed * io.DeltaTime;
+        sceneCameraTargetZ_ += movement.z * cameraMoveSpeed * io.DeltaTime;
+        sceneCamera = make_editor_scene_view_camera(
+            sceneCameraTargetX_,
+            sceneCameraTargetY_,
+            sceneCameraTargetZ_,
+            sceneCameraDistance_,
+            sceneCameraYawDegrees_,
+            sceneCameraPitchDegrees_);
+      }
+    }
+
+    const CameraComponent camera = editor_scene_camera();
 
     ImDrawList *drawList = ImGui::GetWindowDrawList();
     drawList->AddRectFilled(canvasOrigin, canvasMax, IM_COL32(17, 20, 24, 255));
     drawList->AddRect(canvasOrigin, canvasMax, IM_COL32(70, 76, 86, 255));
     drawList->PushClipRect(canvasOrigin, canvasMax, true);
+    drawList->AddText(
+        ImVec2(canvasOrigin.x + 12.0f, canvasOrigin.y + 12.0f),
+        IM_COL32(135, 142, 154, 255),
+        "Arrows move  |  Wheel zoom  |  Ctrl/Cmd + drag rotate");
 
     if (!state.isPlaying)
     {
-      draw_editor_grid(drawList, cameraPosition, camera, canvasOrigin, canvasSize);
+      draw_editor_grid(drawList, sceneCamera, camera, canvasOrigin, canvasSize);
     }
 
     const int visibleRenderableCount = draw_world_preview(
         drawList,
-        cameraPosition,
+        sceneCamera,
         camera,
         canvasOrigin,
         canvasSize,
@@ -2034,18 +2364,6 @@ namespace hades
         componentManager,
         sceneWorld,
         std::nullopt);
-
-    if (visibleRenderableCount == 0)
-    {
-      const char *message = "No cubes or imported models from the loaded world are visible in the scene.";
-      const ImVec2 textSize = ImGui::CalcTextSize(message);
-      drawList->AddText(
-          ImVec2(
-              canvasOrigin.x + (canvasSize.x * 0.5f) - (textSize.x * 0.5f),
-              canvasOrigin.y + (canvasSize.y * 0.5f) - (textSize.y * 0.5f)),
-          IM_COL32(120, 128, 142, 255),
-          message);
-    }
 
     drawList->PopClipRect();
     ImGui::End();
@@ -2057,7 +2375,7 @@ namespace hades
 
     if (!state.selectedEntity.has_value())
     {
-      render_selection_hint("Select a world or entity to edit its properties.");
+      ImGui::TextDisabled("No selection.");
       ImGui::End();
       return;
     }
@@ -2095,7 +2413,7 @@ namespace hades
 
     if (!state.selectedEntity.has_value())
     {
-      render_selection_hint("Select a world or entity to inspect its components.");
+      ImGui::TextDisabled("No selection.");
       ImGui::End();
       return;
     }
@@ -2132,22 +2450,12 @@ namespace hades
       ImGui::EndDisabled();
     }
 
-    ImGui::SameLine();
-    ImGui::TextDisabled(
-        "%s",
-        isWorld
-            ? "World roots own child entities and startup settings."
-            : "Expand a component to inspect or edit it.");
     ImGui::Separator();
 
     if (componentManager.hasComponent<WorldComponent>(entity) && ImGui::CollapsingHeader("World", ImGuiTreeNodeFlags_DefaultOpen))
     {
       const auto &world = componentManager.getComponent<WorldComponent>(entity);
-      ImGui::TextDisabled(
-          "%s",
-          world.isDefault
-              ? "This is the startup world used when Play begins."
-              : "This world stays inactive until it is chosen as the startup world.");
+      ImGui::Text("Startup World: %s", world.isDefault ? "Yes" : "No");
       if (!world.isDefault && ImGui::Button("Set As Default World"))
       {
         set_default_world(entity, entityManager, componentManager);
@@ -2413,11 +2721,11 @@ namespace hades
 
           if (scriptOptions.empty())
           {
-            ImGui::TextDisabled("No .cs scripts were found in the workspace.");
+            ImGui::TextDisabled("No scripts.");
           }
           else if (!attachment.scriptPath.empty())
           {
-            ImGui::TextDisabled("Workspace path: %s", attachment.scriptPath.c_str());
+            ImGui::TextDisabled("%s", attachment.scriptPath.c_str());
           }
 
           if (ImGui::InputText("Class Name", classBuffer.data(), classBuffer.size()))
@@ -2530,124 +2838,6 @@ namespace hades
     ImGui::End();
   }
 
-  void Editor::game(
-      EntityManager &entityManager,
-      ComponentManager &componentManager,
-      ScriptRuntime &scriptRuntime)
-  {
-    ImGui::Begin(GAME_WINDOW_TITLE);
-
-    const auto activeWorld = state.isPlaying ? state.activeWorld : normalize_default_world(entityManager, componentManager);
-
-    if (ImGui::Button(state.isPlaying ? "Stop" : "Play"))
-    {
-      if (state.isPlaying)
-      {
-        stop_play_mode(scriptRuntime);
-      }
-      else
-      {
-        start_play_mode(entityManager, componentManager, scriptRuntime);
-      }
-    }
-
-    if (activeWorld.has_value())
-    {
-      ImGui::SameLine();
-      ImGui::TextDisabled(
-          "%s: %s",
-          state.isPlaying ? "Active World" : "Default World",
-          entity_label(*activeWorld, componentManager).c_str());
-    }
-
-    if (!state.playModeMessage.empty())
-    {
-      ImGui::TextColored(ImVec4(0.88f, 0.42f, 0.42f, 1.0f), "%s", state.playModeMessage.c_str());
-    }
-
-    if (!state.isPlaying)
-    {
-      ImGui::Spacing();
-      if (!activeWorld.has_value())
-      {
-        ImGui::TextDisabled("No startup world is available.");
-      }
-      else
-      {
-        const auto selection = select_main_camera(entityManager, componentManager, activeWorld);
-        ImGui::TextDisabled("%s", main_camera_selection_message(selection.status));
-      }
-      ImGui::End();
-      return;
-    }
-
-    if (!activeWorld.has_value() || !state.activeCamera.has_value())
-    {
-      ImGui::TextDisabled("Play mode has no active world or camera.");
-      ImGui::End();
-      return;
-    }
-
-    ImGui::Text("Active Camera: %s", entity_label(*state.activeCamera, componentManager).c_str());
-
-    const Entity::EntityId cameraEntity = *state.activeCamera;
-    if (!componentManager.hasComponent<CameraComponent>(cameraEntity) ||
-        !componentManager.hasComponent<PositionComponent3D>(cameraEntity))
-    {
-      ImGui::Spacing();
-      ImGui::TextColored(
-          ImVec4(0.88f, 0.42f, 0.42f, 1.0f),
-          "The active camera no longer has the required camera and transform components.");
-      ImGui::End();
-      return;
-    }
-
-    const auto &camera = componentManager.getComponent<CameraComponent>(cameraEntity);
-    const auto &cameraPosition = componentManager.getComponent<PositionComponent3D>(cameraEntity);
-
-    ImGui::Spacing();
-    const ImVec2 canvasSize = ImGui::GetContentRegionAvail();
-    if (canvasSize.x < 64.0f || canvasSize.y < 64.0f)
-    {
-      ImGui::End();
-      return;
-    }
-
-    const ImVec2 canvasOrigin = ImGui::GetCursorScreenPos();
-    const ImVec2 canvasMax(canvasOrigin.x + canvasSize.x, canvasOrigin.y + canvasSize.y);
-    ImGui::InvisibleButton("game_canvas", canvasSize);
-
-    ImDrawList *drawList = ImGui::GetWindowDrawList();
-    drawList->AddRectFilled(canvasOrigin, canvasMax, IM_COL32(17, 20, 24, 255));
-    drawList->AddRect(canvasOrigin, canvasMax, IM_COL32(70, 76, 86, 255));
-    drawList->PushClipRect(canvasOrigin, canvasMax, true);
-
-    const int visibleRenderableCount = draw_world_preview(
-        drawList,
-        cameraPosition,
-        camera,
-        canvasOrigin,
-        canvasSize,
-        entityManager,
-        componentManager,
-        activeWorld,
-        cameraEntity);
-
-    if (visibleRenderableCount == 0)
-    {
-      const char *message = "No cubes or imported models from the active world are visible from the active camera.";
-      const ImVec2 canvasCenter(canvasOrigin.x + (canvasSize.x * 0.5f), canvasOrigin.y + (canvasSize.y * 0.5f));
-      const ImVec2 textSize = ImGui::CalcTextSize(message);
-      drawList->AddText(
-          ImVec2(canvasCenter.x - (textSize.x * 0.5f), canvasCenter.y - (textSize.y * 0.5f)),
-          IM_COL32(120, 128, 142, 255),
-          message);
-    }
-
-    drawList->PopClipRect();
-    ImGui::End();
-  }
-
   void Editor::render_hierarchy(
       Entity::EntityId entity,
       EntityManager &entityManager,
@@ -2733,11 +2923,69 @@ namespace hades
 
     if (!state.loadedWorld.has_value() || !componentManager.hasComponent<WorldComponent>(*state.loadedWorld))
     {
-      render_selection_hint("Load a world from the Worlds menu.");
+      ImGui::TextDisabled("No world.");
       return;
     }
 
     render_hierarchy(*state.loadedWorld, entityManager, componentManager);
+  }
+
+  void Editor::render_settings_window()
+  {
+    if (!openSettingsWindow_)
+    {
+      return;
+    }
+
+    ImGui::SetNextWindowSize(ImVec2(420.0f, 0.0f), ImGuiCond_FirstUseEver);
+    if (focusSettingsWindow_)
+    {
+      ImGui::SetNextWindowFocus();
+      focusSettingsWindow_ = false;
+    }
+
+    if (!ImGui::Begin(SETTINGS_WINDOW_TITLE, &openSettingsWindow_))
+    {
+      ImGui::End();
+      return;
+    }
+
+    ImGui::TextDisabled("Editor");
+    ImGui::Separator();
+    ImGui::Checkbox("Show Debug Window", &state.showDebugInfo);
+
+    ImGui::Spacing();
+    ImGui::TextDisabled("Scene Camera");
+    ImGui::Separator();
+
+    float target[3] = {sceneCameraTargetX_, sceneCameraTargetY_, sceneCameraTargetZ_};
+    if (ImGui::DragFloat3("Target", target, 0.1f))
+    {
+      sceneCameraTargetX_ = target[0];
+      sceneCameraTargetY_ = target[1];
+      sceneCameraTargetZ_ = target[2];
+    }
+
+    ImGui::SliderFloat(
+        "Distance",
+        &sceneCameraDistance_,
+        EDITOR_SCENE_CAMERA_MIN_DISTANCE,
+        EDITOR_SCENE_CAMERA_MAX_DISTANCE,
+        "%.1f");
+    ImGui::SliderFloat("Yaw", &sceneCameraYawDegrees_, -180.0f, 180.0f, "%.1f deg");
+    ImGui::SliderFloat(
+        "Pitch",
+        &sceneCameraPitchDegrees_,
+        EDITOR_SCENE_CAMERA_MIN_PITCH,
+        EDITOR_SCENE_CAMERA_MAX_PITCH,
+        "%.1f deg");
+
+    if (ImGui::Button("Reset Scene Camera"))
+    {
+      reset_scene_camera();
+    }
+
+    ImGui::End();
   }
 
   void Editor::debug(float deltaTime)
