@@ -406,8 +406,8 @@ namespace hades
       pendingScriptEditorClosePath_.reset();
       workspaceScriptListDirty_ = false;
       scriptModTimes_.clear();
-      parsedFieldsCache_.clear();
-      parsedFieldsModTimes_.clear();
+      parsedScriptCache_.clear();
+      parsedScriptModTimes_.clear();
       lastCompileError_.clear();
       scriptCompileStatus_ = ScriptCompileStatus::Unknown;
       currentCompileRequestId_ = ++nextCompileRequestId_;
@@ -666,8 +666,8 @@ namespace hades
         {
           scriptModTimes_.erase(relativeScriptPath);
           const std::string pathKey = (activeWorkspacePath_ / relativeScriptPath).string();
-          parsedFieldsCache_.erase(pathKey);
-          parsedFieldsModTimes_.erase(pathKey);
+          parsedScriptCache_.erase(pathKey);
+          parsedScriptModTimes_.erase(pathKey);
         }
 
         workspaceDeleteError_.clear();

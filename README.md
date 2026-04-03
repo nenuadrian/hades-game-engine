@@ -14,6 +14,13 @@ The purpose is educational and experimental in nature to explore the intriguing 
 
 ## Features
 
+![editor](assets/editor.png)
+
+![workspace](assets/workspace.png)
+
+![scripts](assets/scripts.png)
+
+
 **Rendering**
 
 - Vulkan-based renderer with swapchain management, frame synchronization, and debug validation layers
@@ -71,8 +78,6 @@ The purpose is educational and experimental in nature to explore the intriguing 
 - Unit tests via GoogleTest
 - ECS benchmark tool
 
-![editor](assets/editor.png)
-![workspace](assets/workspace.png)
 
 ## Entity-Component-System (ECS)
 

@@ -478,6 +478,11 @@ namespace hades
                 parsedScriptModTimes_[pathKey] = modTime;
               }
             }
+            else
+            {
+              parsedScriptCache_.erase(pathKey);
+              parsedScriptModTimes_.erase(pathKey);
+            }
 
             if (needsParse)
             {
@@ -497,11 +502,19 @@ namespace hades
             {
               attachment.className = parsedClasses->front().qualifiedName;
             }
+            else
+            {
+              attachment.className.clear();
+            }
           }
           else if (parsedClasses != nullptr && !parsedClasses->empty() &&
                    find_script_class(*parsedClasses, attachment.className) == nullptr)
           {
             attachment.className = parsedClasses->front().qualifiedName;
+          }
+          else if (parsedClasses != nullptr && parsedClasses->empty())
+          {
+            attachment.className.clear();
           }
 
           if (parsedClasses != nullptr && !parsedClasses->empty())
@@ -561,37 +574,37 @@ namespace hades
           {
             const auto &fields = selectedClass->publicFields;
 
-              std::set<std::string> currentFieldNames;
-              for (const auto &[type, name] : fields)
+            std::set<std::string> currentFieldNames;
+            for (const auto &[type, name] : fields)
+            {
+              currentFieldNames.insert(name);
+            }
+            for (auto it = attachment.publicFieldValues.begin(); it != attachment.publicFieldValues.end();)
+            {
+              if (currentFieldNames.find(it->first) == currentFieldNames.end())
               {
-                currentFieldNames.insert(name);
+                it = attachment.publicFieldValues.erase(it);
               }
-              for (auto it = attachment.publicFieldValues.begin(); it != attachment.publicFieldValues.end();)
+              else
               {
-                if (currentFieldNames.find(it->first) == currentFieldNames.end())
-                {
-                  it = attachment.publicFieldValues.erase(it);
-                }
-                else
-                {
-                  ++it;
-                }
+                ++it;
               }
+            }
 
-              ImGui::Separator();
-              ImGui::TextDisabled("Public Fields:");
-              for (const auto &[type, name] : fields)
-              {
-                auto &value = attachment.publicFieldValues[name];
-                std::array<char, 256> fieldBuffer{};
-                std::snprintf(fieldBuffer.data(), fieldBuffer.size(), "%s", value.c_str());
+            ImGui::Separator();
+            ImGui::TextDisabled("Public Fields:");
+            for (const auto &[type, name] : fields)
+            {
+              auto &value = attachment.publicFieldValues[name];
+              std::array<char, 256> fieldBuffer{};
+              std::snprintf(fieldBuffer.data(), fieldBuffer.size(), "%s", value.c_str());
 
-                const std::string fieldLabel = name + " (" + type + ")";
-                if (ImGui::InputText(fieldLabel.c_str(), fieldBuffer.data(), fieldBuffer.size()))
-                {
-                  value = fieldBuffer.data();
-                }
+              const std::string fieldLabel = name + " (" + type + ")";
+              if (ImGui::InputText(fieldLabel.c_str(), fieldBuffer.data(), fieldBuffer.size()))
+              {
+                value = fieldBuffer.data();
               }
+            }
           }
         }
 
