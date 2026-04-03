@@ -18,12 +18,14 @@
 #include "../engine/components/position_component_3d.hpp"
 #include "../engine/components/primitive_component.hpp"
 #include "../engine/components/script_component.hpp"
+#include "../engine/components/text_component.hpp"
 #include "../engine/components/transform_hierarchy_component.hpp"
 #include "../engine/components/world_component.hpp"
 #include "../engine/core/ecs/component_manager.hpp"
 #include "../engine/core/ecs/entity_factory.hpp"
 #include "../engine/core/ecs/entity_manager.hpp"
 #include "../engine/core/ecs/world_utils.hpp"
+#include "../engine/rendering/vector_text.hpp"
 #include "../engine/runtime/main_camera_selection.hpp"
 #include "../engine/runtime/script_runtime.hpp"
 
@@ -467,6 +469,31 @@ namespace hades
       EXPECT_TRUE(audioSource.spatialized);
     }
 
+    TEST(EntityFactoryTest, CreateTextAddsTextComponent)
+    {
+      EntityManager entityManager;
+      ComponentManager componentManager;
+
+      const auto entity = EntityFactory::createText(entityManager, componentManager);
+
+      EXPECT_TRUE(componentManager.hasComponent<NameComponent>(entity));
+      EXPECT_EQ(componentManager.getComponent<NameComponent>(entity).value, "Text");
+      EXPECT_TRUE(componentManager.hasComponent<TransformHierarchyComponent>(entity));
+      EXPECT_FALSE(componentManager.getComponent<TransformHierarchyComponent>(entity).hasParent());
+      EXPECT_TRUE(componentManager.hasComponent<PositionComponent3D>(entity));
+      EXPECT_TRUE(componentManager.hasComponent<TextComponent>(entity));
+      EXPECT_FALSE(componentManager.hasComponent<PrimitiveComponent>(entity));
+
+      const auto &text = componentManager.getComponent<TextComponent>(entity);
+      EXPECT_EQ(text.content, "Text");
+      EXPECT_FLOAT_EQ(text.fontSize, 1.0f);
+      EXPECT_FLOAT_EQ(text.wrapWidth, 4.0f);
+      EXPECT_FLOAT_EQ(text.lineSpacing, 1.25f);
+      EXPECT_FLOAT_EQ(text.yawDegrees, 0.0f);
+      EXPECT_FLOAT_EQ(text.pitchDegrees, 0.0f);
+      EXPECT_FLOAT_EQ(text.rollDegrees, 0.0f);
+    }
+
     TEST(EntityFactoryTest, CreateWorldAddsWorldRootComponents)
     {
       EntityManager entityManager;
@@ -544,6 +571,37 @@ namespace hades
       const auto &model = componentManager.getComponent<ModelComponent>(*entity).model;
       EXPECT_FALSE(model.meshes.empty());
       EXPECT_FALSE(model.materials.empty());
+    }
+
+    TEST(VectorTextTest, LayoutWrapsAndReportsMetrics)
+    {
+      const VectorTextLayout layout = layout_vector_text(
+          "HELLO WORLD",
+          VectorTextStyle{1.0f, 4.0f, 1.25f});
+
+      EXPECT_GT(layout.lineCount, 1);
+      EXPECT_LE(layout.width, 4.0f + 0.001f);
+      EXPECT_GT(layout.height, 1.0f);
+      EXPECT_FALSE(layout.segments.empty());
+    }
+
+    TEST(VectorTextTest, EulerFrameProducesWorldSpaceAxes)
+    {
+      const VectorTextFrame3D frame = make_vector_text_frame_from_euler(
+          VectorTextPoint3D{1.0f, 2.0f, 3.0f},
+          90.0f,
+          0.0f,
+          0.0f);
+
+      EXPECT_FLOAT_EQ(frame.origin.x, 1.0f);
+      EXPECT_FLOAT_EQ(frame.origin.y, 2.0f);
+      EXPECT_FLOAT_EQ(frame.origin.z, 3.0f);
+      EXPECT_NEAR(frame.right.x, 0.0f, 0.001f);
+      EXPECT_NEAR(frame.right.y, 0.0f, 0.001f);
+      EXPECT_NEAR(frame.right.z, -1.0f, 0.001f);
+      EXPECT_NEAR(frame.up.x, 0.0f, 0.001f);
+      EXPECT_NEAR(frame.up.y, 1.0f, 0.001f);
+      EXPECT_NEAR(frame.up.z, 0.0f, 0.001f);
     }
 
     TEST(EntityManagerTest, DestroyEntityRemovesItFromActiveList)

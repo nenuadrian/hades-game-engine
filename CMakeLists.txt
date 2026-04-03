@@ -83,6 +83,7 @@ set(TEST_SUPPORT_SOURCES
   src/engine/components/transform_hierarchy_component.cpp
   src/engine/core/ecs/entity_factory.cpp
   src/engine/core/ecs/entity_manager.cpp
+  src/engine/rendering/vector_text.cpp
   src/engine/runtime/clr_host.cpp
   src/engine/runtime/script_runtime.cpp
   src/engine/runtime/subprocess.cpp)

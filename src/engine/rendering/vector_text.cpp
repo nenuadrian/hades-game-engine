@@ -2,12 +2,16 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <iterator>
 #include <string>
 
 namespace hades
 {
   namespace
   {
+    constexpr float PI = 3.14159265358979323846f;
+
     struct GlyphStroke
     {
       float x1;
@@ -510,6 +514,80 @@ namespace hades
       return glyph_for_character(character).advance * characterHeight;
     }
 
+    float degrees_to_radians(float degrees)
+    {
+      return degrees * (PI / 180.0f);
+    }
+
+    VectorTextPoint3D make_point3d(float x, float y, float z)
+    {
+      return VectorTextPoint3D{x, y, z};
+    }
+
+    VectorTextPoint3D add_point3d(const VectorTextPoint3D &lhs, const VectorTextPoint3D &rhs)
+    {
+      return make_point3d(lhs.x + rhs.x, lhs.y + rhs.y, lhs.z + rhs.z);
+    }
+
+    VectorTextPoint3D subtract_point3d(const VectorTextPoint3D &lhs, const VectorTextPoint3D &rhs)
+    {
+      return make_point3d(lhs.x - rhs.x, lhs.y - rhs.y, lhs.z - rhs.z);
+    }
+
+    VectorTextPoint3D scale_point3d(const VectorTextPoint3D &point, float scale)
+    {
+      return make_point3d(point.x * scale, point.y * scale, point.z * scale);
+    }
+
+    float dot_point3d(const VectorTextPoint3D &lhs, const VectorTextPoint3D &rhs)
+    {
+      return (lhs.x * rhs.x) + (lhs.y * rhs.y) + (lhs.z * rhs.z);
+    }
+
+    VectorTextPoint3D cross_point3d(const VectorTextPoint3D &lhs, const VectorTextPoint3D &rhs)
+    {
+      return make_point3d(
+          (lhs.y * rhs.z) - (lhs.z * rhs.y),
+          (lhs.z * rhs.x) - (lhs.x * rhs.z),
+          (lhs.x * rhs.y) - (lhs.y * rhs.x));
+    }
+
+    float length_point3d(const VectorTextPoint3D &point)
+    {
+      return std::sqrt(dot_point3d(point, point));
+    }
+
+    VectorTextPoint3D normalize_point3d(const VectorTextPoint3D &point)
+    {
+      const float length = length_point3d(point);
+      if (length <= 1e-5f)
+      {
+        return make_point3d(0.0f, 0.0f, 0.0f);
+      }
+
+      return scale_point3d(point, 1.0f / length);
+    }
+
+    VectorTextPoint3D rotate_around_axis(
+        const VectorTextPoint3D &point,
+        const VectorTextPoint3D &axis,
+        float angleRadians)
+    {
+      const VectorTextPoint3D normalizedAxis = normalize_point3d(axis);
+      if (length_point3d(normalizedAxis) <= 1e-5f)
+      {
+        return point;
+      }
+
+      const float cosine = std::cos(angleRadians);
+      const float sine = std::sin(angleRadians);
+      return add_point3d(
+          add_point3d(
+              scale_point3d(point, cosine),
+              scale_point3d(cross_point3d(normalizedAxis, point), sine)),
+          scale_point3d(normalizedAxis, dot_point3d(normalizedAxis, point) * (1.0f - cosine)));
+    }
+
     float measure_range_width(std::string_view text, std::size_t begin, std::size_t end, float characterHeight)
     {
       float width = 0.0f;
@@ -554,6 +632,56 @@ namespace hades
           origin.z + (direction.z * scale),
       };
     }
+  }
+
+  VectorTextFrame3D make_vector_text_frame_from_euler(
+      const VectorTextPoint3D &origin,
+      float yawDegrees,
+      float pitchDegrees,
+      float rollDegrees,
+      float anchorX,
+      float anchorY)
+  {
+    const float yawRadians = degrees_to_radians(yawDegrees);
+    const float pitchRadians = degrees_to_radians(pitchDegrees);
+    const float rollRadians = degrees_to_radians(rollDegrees);
+    const float cosPitch = std::cos(pitchRadians);
+
+    VectorTextPoint3D forward = normalize_point3d(make_point3d(
+        std::sin(yawRadians) * cosPitch,
+        std::sin(pitchRadians),
+        std::cos(yawRadians) * cosPitch));
+    if (length_point3d(forward) <= 1e-5f)
+    {
+      forward = make_point3d(0.0f, 0.0f, 1.0f);
+    }
+
+    const VectorTextPoint3D worldUp = make_point3d(0.0f, 1.0f, 0.0f);
+    VectorTextPoint3D right = normalize_point3d(cross_point3d(worldUp, forward));
+    if (length_point3d(right) <= 1e-5f)
+    {
+      right = make_point3d(1.0f, 0.0f, 0.0f);
+    }
+
+    VectorTextPoint3D up = normalize_point3d(cross_point3d(forward, right));
+    if (length_point3d(up) <= 1e-5f)
+    {
+      up = make_point3d(0.0f, 1.0f, 0.0f);
+    }
+
+    if (std::abs(rollRadians) > 1e-5f)
+    {
+      right = normalize_point3d(rotate_around_axis(right, forward, rollRadians));
+      up = normalize_point3d(rotate_around_axis(up, forward, rollRadians));
+    }
+
+    return VectorTextFrame3D{
+        origin,
+        right,
+        up,
+        anchorX,
+        anchorY,
+    };
   }
 
   VectorTextLayout layout_vector_text(std::string_view text, const VectorTextStyle &style)

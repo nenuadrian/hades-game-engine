@@ -770,13 +770,11 @@ namespace hades
               std::max(0.0f, text.wrapWidth),
               std::max(0.8f, text.lineSpacing),
           },
-          VectorTextFrame3D{
+          make_vector_text_frame_from_euler(
               VectorTextPoint3D{position.x, position.y, position.z},
-              VectorTextPoint3D{sceneCamera.right.x, sceneCamera.right.y, sceneCamera.right.z},
-              VectorTextPoint3D{sceneCamera.up.x, sceneCamera.up.y, sceneCamera.up.z},
-              0.5f,
-              0.5f,
-          });
+              text.yawDegrees,
+              text.pitchDegrees,
+              text.rollDegrees));
 
       int visibleSegmentCount = 0;
       for (const auto &segment : geometry.segments)
@@ -1274,6 +1272,7 @@ namespace hades
       remove_component_if_present<CameraComponent>(componentManager, entity);
       remove_component_if_present<AudioListenerComponent>(componentManager, entity);
       remove_component_if_present<PrimitiveComponent>(componentManager, entity);
+      remove_component_if_present<TextComponent>(componentManager, entity);
       remove_component_if_present<AudioSourceComponent>(componentManager, entity);
       remove_component_if_present<ModelComponent>(componentManager, entity);
       remove_component_if_present<RenderComponent>(componentManager, entity);
@@ -2581,6 +2580,9 @@ namespace hades
     case EditorEntityPreset::Cube:
       createdEntity = EntityFactory::createCube(entityManager, componentManager, parent);
       break;
+    case EditorEntityPreset::Text:
+      createdEntity = EntityFactory::createText(entityManager, componentManager, parent);
+      break;
     case EditorEntityPreset::AudioEmitter:
       createdEntity = EntityFactory::createAudioEmitter(entityManager, componentManager, parent);
       break;
@@ -3139,6 +3141,40 @@ namespace hades
       ImGui::Text("Type: %s", primitive_type_label(primitive.type));
     }
 
+    if (componentManager.hasComponent<TextComponent>(entity) && ImGui::CollapsingHeader("Text", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+      auto &text = componentManager.getComponent<TextComponent>(entity);
+      ImGui::InputTextMultiline(
+          "Content",
+          &text.content,
+          ImVec2(ImGui::GetContentRegionAvail().x, ImGui::GetTextLineHeightWithSpacing() * 6.0f));
+      ImGui::DragFloat("Font Size", &text.fontSize, 0.05f, 0.05f, 64.0f);
+      ImGui::DragFloat("Wrap Width", &text.wrapWidth, 0.05f, 0.0f, 256.0f);
+      ImGui::DragFloat("Line Spacing", &text.lineSpacing, 0.01f, 0.8f, 4.0f);
+      ImGui::DragFloat("Yaw", &text.yawDegrees, 0.5f, -180.0f, 180.0f, "%.1f deg");
+      ImGui::DragFloat("Pitch", &text.pitchDegrees, 0.5f, -89.0f, 89.0f, "%.1f deg");
+      ImGui::DragFloat("Roll", &text.rollDegrees, 0.5f, -180.0f, 180.0f, "%.1f deg");
+
+      if (text.fontSize < 0.05f)
+      {
+        text.fontSize = 0.05f;
+      }
+      if (text.wrapWidth < 0.0f)
+      {
+        text.wrapWidth = 0.0f;
+      }
+      if (text.lineSpacing < 0.8f)
+      {
+        text.lineSpacing = 0.8f;
+      }
+
+      text.yawDegrees = std::remainder(text.yawDegrees, 360.0f);
+      text.pitchDegrees = std::clamp(text.pitchDegrees, -89.0f, 89.0f);
+      text.rollDegrees = std::remainder(text.rollDegrees, 360.0f);
+
+      ImGui::TextDisabled("Text is rendered as world-space vector strokes.");
+    }
+
     if (componentManager.hasComponent<AudioSourceComponent>(entity) && ImGui::CollapsingHeader("Audio Source"))
     {
       auto &source = componentManager.getComponent<AudioSourceComponent>(entity);
@@ -3504,6 +3540,10 @@ namespace hades
         if (ImGui::MenuItem("Cube"))
         {
           request_entity_creation(EditorEntityPreset::Cube, entity);
+        }
+        if (ImGui::MenuItem("Text"))
+        {
+          request_entity_creation(EditorEntityPreset::Text, entity);
         }
         if (ImGui::MenuItem("Audio Emitter"))
         {

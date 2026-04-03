@@ -63,6 +63,13 @@ namespace hades
     int lineCount = 0;
   };
 
+  VectorTextFrame3D make_vector_text_frame_from_euler(
+      const VectorTextPoint3D &origin,
+      float yawDegrees,
+      float pitchDegrees,
+      float rollDegrees,
+      float anchorX = 0.5f,
+      float anchorY = 0.5f);
   VectorTextLayout layout_vector_text(std::string_view text, const VectorTextStyle &style);
   VectorTextGeometry3D build_vector_text_geometry(
       std::string_view text,

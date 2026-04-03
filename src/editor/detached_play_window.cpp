@@ -10,10 +10,12 @@
 #include "../engine/components/model_component.hpp"
 #include "../engine/components/position_component_3d.hpp"
 #include "../engine/components/primitive_component.hpp"
+#include "../engine/components/text_component.hpp"
 #include "../engine/core/ecs/component_manager.hpp"
 #include "../engine/core/ecs/entity_manager.hpp"
 #include "../engine/core/ecs/world_utils.hpp"
 #include "../engine/rendering/model_preview.hpp"
+#include "../engine/rendering/vector_text.hpp"
 
 namespace
 {
@@ -340,6 +342,61 @@ namespace
     return drewTriangle;
   }
 
+  bool draw_vector_text(
+      SDL_Renderer *renderer,
+      const hades::PositionComponent3D &cameraPosition,
+      const hades::CameraComponent &camera,
+      int width,
+      int height,
+      const hades::PositionComponent3D &position,
+      const hades::TextComponent &text,
+      const SDL_Color &color)
+  {
+    const hades::VectorTextGeometry3D geometry = hades::build_vector_text_geometry(
+        text.content,
+        hades::VectorTextStyle{
+            std::max(0.05f, text.fontSize),
+            std::max(0.0f, text.wrapWidth),
+            std::max(0.8f, text.lineSpacing),
+        },
+        hades::make_vector_text_frame_from_euler(
+            hades::VectorTextPoint3D{position.x, position.y, position.z},
+            text.yawDegrees,
+            text.pitchDegrees,
+            text.rollDegrees));
+
+    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+
+    bool visible = false;
+    for (const auto &segment : geometry.segments)
+    {
+      SDL_FPoint screenStart{};
+      SDL_FPoint screenEnd{};
+      if (!project_segment(
+              make_vec3(segment.start.x, segment.start.y, segment.start.z),
+              make_vec3(segment.end.x, segment.end.y, segment.end.z),
+              cameraPosition,
+              camera,
+              width,
+              height,
+              screenStart,
+              screenEnd))
+      {
+        continue;
+      }
+
+      SDL_RenderDrawLine(
+          renderer,
+          static_cast<int>(std::lround(screenStart.x)),
+          static_cast<int>(std::lround(screenStart.y)),
+          static_cast<int>(std::lround(screenEnd.x)),
+          static_cast<int>(std::lround(screenEnd.y)));
+      visible = true;
+    }
+
+    return visible;
+  }
+
   void render_world_preview(
       SDL_Renderer *renderer,
       hades::EntityManager &entityManager,
@@ -353,6 +410,7 @@ namespace
   {
     const SDL_Color primitiveColor{223, 228, 235, 255};
     const SDL_Color modelColor{179, 189, 202, 255};
+    const SDL_Color textColor{227, 233, 240, 255};
 
     for (hades::Entity::EntityId entity : entityManager.getAllEntities())
     {
@@ -390,41 +448,52 @@ namespace
         }
       }
 
-      if (!componentManager.hasComponent<hades::ModelComponent>(entity))
+      if (componentManager.hasComponent<hades::ModelComponent>(entity))
       {
-        continue;
+        const auto &model = componentManager.getComponent<hades::ModelComponent>(entity).model;
+        if (hades::preview::has_renderable_geometry(model) &&
+            draw_model_mesh(
+                renderer,
+                cameraPosition,
+                camera,
+                width,
+                height,
+                position,
+                model))
+        {
+          continue;
+        }
+
+        const Vec3 minCorner = model.hasBounds
+                                   ? make_vec3(model.minX, model.minY, model.minZ)
+                                   : make_vec3(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT);
+        const Vec3 maxCorner = model.hasBounds
+                                   ? make_vec3(model.maxX, model.maxY, model.maxZ)
+                                   : make_vec3(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT);
+        draw_wire_box(
+            renderer,
+            cameraPosition,
+            camera,
+            width,
+            height,
+            position,
+            minCorner,
+            maxCorner,
+            modelColor);
       }
 
-      const auto &model = componentManager.getComponent<hades::ModelComponent>(entity).model;
-      if (hades::preview::has_renderable_geometry(model) &&
-          draw_model_mesh(
-              renderer,
-              cameraPosition,
-              camera,
-              width,
-              height,
-              position,
-              model))
+      if (componentManager.hasComponent<hades::TextComponent>(entity))
       {
-        continue;
+        draw_vector_text(
+            renderer,
+            cameraPosition,
+            camera,
+            width,
+            height,
+            position,
+            componentManager.getComponent<hades::TextComponent>(entity),
+            textColor);
       }
-
-      const Vec3 minCorner = model.hasBounds
-                                 ? make_vec3(model.minX, model.minY, model.minZ)
-                                 : make_vec3(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT);
-      const Vec3 maxCorner = model.hasBounds
-                                 ? make_vec3(model.maxX, model.maxY, model.maxZ)
-                                 : make_vec3(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT);
-      draw_wire_box(
-          renderer,
-          cameraPosition,
-          camera,
-          width,
-          height,
-          position,
-          minCorner,
-          maxCorner,
-          modelColor);
     }
   }
 }
