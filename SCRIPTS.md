@@ -11,9 +11,9 @@ via the embedded .NET runtime (CoreCLR) using the hostfxr hosting API.
 3. Add one or more script attachments to the entity.
 4. For each attachment set:
    - **Script Path**: path to a `.cs` file (relative to the workspace root)
-   - **Class Name**: the C# class to instantiate (if left empty the editor
-     derives it from the file name; use the full namespace-qualified name when
-     the short name is ambiguous)
+   - **Class**: select the `HadesScript`-derived class to instantiate from the
+     dropdown populated from that file. The editor auto-selects the first class
+     it finds when you choose a script.
    - **Enabled**: whether that attachment should run
 5. Press **Game > Play** (or use the menu).
 

@@ -47,7 +47,7 @@ and editor code stay easy to trace.
     In-process C# scripting via the .NET CoreCLR hosting API. Handles
     script compilation (`dotnet build`), CLR embedding (hostfxr), and
     managed-to-native interop using `[UnmanagedCallersOnly]` function
-    pointers. See [SCRIPTS.md](../SCRIPTS.md) for details.
+    pointers. See [Scripting](scripting.md) for details.
 
 -   ### Editor
 

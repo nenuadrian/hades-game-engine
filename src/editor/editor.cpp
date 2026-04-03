@@ -75,8 +75,8 @@ namespace hades
     nextWorkspaceScanTime_ = 0.0;
     workspaceScriptListDirty_ = false;
     scriptModTimes_.clear();
-    parsedFieldsCache_.clear();
-    parsedFieldsModTimes_.clear();
+    parsedScriptCache_.clear();
+    parsedScriptModTimes_.clear();
     lastCompileError_.clear();
     scriptCompileStatus_ = ScriptCompileStatus::Unknown;
     backgroundCompileInProgress_ = false;

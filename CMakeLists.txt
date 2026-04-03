@@ -116,6 +116,7 @@ endif()
 
 set(TEST_SUPPORT_SOURCES
   src/editor/plugins/editor_plugin.cpp
+  src/editor/script_analysis.cpp
   src/editor/script_document.cpp
   src/editor/workspace_manager.cpp
   src/editor/workspace_file_operations.cpp

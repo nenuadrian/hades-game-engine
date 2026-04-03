@@ -6,9 +6,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <filesystem>
-#include <fstream>
 #include <set>
-#include <sstream>
 #include <string>
 
 #include "imgui.h"
@@ -67,130 +65,6 @@ namespace hades
       return label;
     }
 
-    std::string trim(const std::string &value)
-    {
-      const auto start = value.find_first_not_of(" \t\r\n");
-      if (start == std::string::npos)
-      {
-        return {};
-      }
-
-      const auto end = value.find_last_not_of(" \t\r\n");
-      return value.substr(start, end - start + 1);
-    }
-
-    std::vector<std::pair<std::string, std::string>> parse_public_fields(
-        const std::filesystem::path &scriptPath)
-    {
-      std::vector<std::pair<std::string, std::string>> fields;
-
-      std::ifstream file(scriptPath);
-      if (!file.is_open())
-      {
-        return fields;
-      }
-
-      bool insideTargetClass = false;
-      int braceDepth = 0;
-      int classBraceDepth = -1;
-
-      std::string line;
-      while (std::getline(file, line))
-      {
-        const std::string trimmedLine = trim(line);
-
-        if (!insideTargetClass)
-        {
-          if (trimmedLine.find("HadesScript") != std::string::npos &&
-              trimmedLine.find("class ") != std::string::npos)
-          {
-            insideTargetClass = true;
-            for (char ch : trimmedLine)
-            {
-              if (ch == '{')
-              {
-                if (classBraceDepth < 0)
-                {
-                  classBraceDepth = braceDepth;
-                }
-                ++braceDepth;
-              }
-              else if (ch == '}')
-              {
-                --braceDepth;
-              }
-            }
-            continue;
-          }
-        }
-
-        for (char ch : trimmedLine)
-        {
-          if (ch == '{')
-          {
-            if (insideTargetClass && classBraceDepth < 0)
-            {
-              classBraceDepth = braceDepth;
-            }
-            ++braceDepth;
-          }
-          else if (ch == '}')
-          {
-            --braceDepth;
-            if (insideTargetClass && braceDepth <= classBraceDepth)
-            {
-              insideTargetClass = false;
-              classBraceDepth = -1;
-            }
-          }
-        }
-
-        if (!insideTargetClass || classBraceDepth < 0)
-        {
-          continue;
-        }
-
-        if (braceDepth != classBraceDepth + 1)
-        {
-          continue;
-        }
-
-        if (trimmedLine.find("public") != 0)
-        {
-          continue;
-        }
-        if (trimmedLine.find("override") != std::string::npos ||
-            trimmedLine.find("virtual") != std::string::npos ||
-            trimmedLine.find("static") != std::string::npos ||
-            trimmedLine.find("(") != std::string::npos ||
-            trimmedLine.find("void") != std::string::npos ||
-            trimmedLine.find("class ") != std::string::npos)
-        {
-          continue;
-        }
-
-        std::istringstream iss(trimmedLine);
-        std::string keyword;
-        std::string type;
-        std::string name;
-        if (!(iss >> keyword >> type >> name))
-        {
-          continue;
-        }
-
-        while (!name.empty() && (name.back() == ';' || name.back() == '='))
-        {
-          name.pop_back();
-        }
-
-        if (!name.empty() && !type.empty())
-        {
-          fields.emplace_back(type, name);
-        }
-      }
-
-      return fields;
-    }
   }
 
   void Editor::properties(EntityManager &entityManager, ComponentManager &componentManager)
@@ -529,9 +403,6 @@ namespace hades
         const std::string label = script_component_label(attachment, index);
         if (ImGui::CollapsingHeader(label.c_str()))
         {
-          std::array<char, 160> classBuffer{};
-          std::snprintf(classBuffer.data(), classBuffer.size(), "%s", attachment.className.c_str());
-
           ImGui::Checkbox("Enabled", &attachment.enabled);
           std::vector<std::string> scriptOptions = workspaceScriptFiles_;
           if (!attachment.scriptPath.empty() &&
@@ -572,11 +443,7 @@ namespace hades
 
           if (previousScriptPath != attachment.scriptPath)
           {
-            const std::string previousStem = std::filesystem::path(previousScriptPath).stem().string();
-            if (attachment.className.empty() || attachment.className == previousStem)
-            {
-              attachment.className = std::filesystem::path(attachment.scriptPath).stem().string();
-            }
+            attachment.className.clear();
           }
 
           if (scriptOptions.empty())
@@ -592,21 +459,8 @@ namespace hades
             }
           }
 
-          if (ImGui::InputText("Class Name", classBuffer.data(), classBuffer.size()))
-          {
-            attachment.className = classBuffer.data();
-          }
-
-          if (ImGui::Button("Use File Name"))
-          {
-            attachment.className = std::filesystem::path(attachment.scriptPath).stem().string();
-          }
-          ImGui::SameLine();
-          if (ImGui::Button("Remove Script Component"))
-          {
-            removeAttachmentIndex = index;
-          }
-
+          const std::vector<ParsedScriptClass> *parsedClasses = nullptr;
+          const ParsedScriptClass *selectedClass = nullptr;
           if (!attachment.scriptPath.empty() && !activeWorkspacePath_.empty())
           {
             const auto resolvedPath = activeWorkspacePath_ / attachment.scriptPath;
@@ -617,23 +471,95 @@ namespace hades
             bool needsParse = false;
             if (!modEc)
             {
-              auto modIt = parsedFieldsModTimes_.find(pathKey);
-              if (modIt == parsedFieldsModTimes_.end() || modIt->second != modTime)
+              auto modIt = parsedScriptModTimes_.find(pathKey);
+              if (modIt == parsedScriptModTimes_.end() || modIt->second != modTime)
               {
                 needsParse = true;
-                parsedFieldsModTimes_[pathKey] = modTime;
+                parsedScriptModTimes_[pathKey] = modTime;
               }
             }
 
             if (needsParse)
             {
-              parsedFieldsCache_[pathKey] = parse_public_fields(resolvedPath);
+              parsedScriptCache_[pathKey] = parse_script_classes(resolvedPath);
             }
 
-            auto cacheIt = parsedFieldsCache_.find(pathKey);
-            if (cacheIt != parsedFieldsCache_.end() && !cacheIt->second.empty())
+            const auto cacheIt = parsedScriptCache_.find(pathKey);
+            if (cacheIt != parsedScriptCache_.end())
             {
-              const auto &fields = cacheIt->second;
+              parsedClasses = &cacheIt->second;
+            }
+          }
+
+          if (previousScriptPath != attachment.scriptPath)
+          {
+            if (parsedClasses != nullptr && !parsedClasses->empty())
+            {
+              attachment.className = parsedClasses->front().qualifiedName;
+            }
+          }
+          else if (parsedClasses != nullptr && !parsedClasses->empty() &&
+                   find_script_class(*parsedClasses, attachment.className) == nullptr)
+          {
+            attachment.className = parsedClasses->front().qualifiedName;
+          }
+
+          if (parsedClasses != nullptr && !parsedClasses->empty())
+          {
+            selectedClass = find_script_class(*parsedClasses, attachment.className);
+            if (selectedClass == nullptr)
+            {
+              attachment.className = parsedClasses->front().qualifiedName;
+              selectedClass = &parsedClasses->front();
+            }
+          }
+
+          if (attachment.scriptPath.empty())
+          {
+            ImGui::BeginDisabled();
+            if (ImGui::BeginCombo("Class", "<Select a script first>"))
+            {
+              ImGui::EndCombo();
+            }
+            ImGui::EndDisabled();
+          }
+          else if (parsedClasses == nullptr || parsedClasses->empty())
+          {
+            ImGui::BeginDisabled();
+            if (ImGui::BeginCombo("Class", "<No script classes found>"))
+            {
+              ImGui::EndCombo();
+            }
+            ImGui::EndDisabled();
+            ImGui::TextDisabled("No HadesScript classes found in this file.");
+          }
+          else if (selectedClass != nullptr &&
+                   ImGui::BeginCombo("Class", selectedClass->qualifiedName.c_str()))
+          {
+            for (const auto &parsedClass : *parsedClasses)
+            {
+              const bool selected = (selectedClass == &parsedClass);
+              if (ImGui::Selectable(parsedClass.qualifiedName.c_str(), selected))
+              {
+                attachment.className = parsedClass.qualifiedName;
+                selectedClass = find_script_class(*parsedClasses, attachment.className);
+              }
+              if (selected)
+              {
+                ImGui::SetItemDefaultFocus();
+              }
+            }
+            ImGui::EndCombo();
+          }
+
+          if (ImGui::Button("Remove Script Component"))
+          {
+            removeAttachmentIndex = index;
+          }
+
+          if (selectedClass != nullptr && !selectedClass->publicFields.empty())
+          {
+            const auto &fields = selectedClass->publicFields;
 
               std::set<std::string> currentFieldNames;
               for (const auto &[type, name] : fields)
@@ -666,7 +592,6 @@ namespace hades
                   value = fieldBuffer.data();
                 }
               }
-            }
           }
         }
 

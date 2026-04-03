@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "types.h"
+#include "script_analysis.hpp"
 #include "plugins/editor_plugin.hpp"
 #include "../engine/core/ecs/entity.hpp"
 #include "TextEditor.h"
@@ -155,9 +156,9 @@ namespace hades
     std::uint64_t currentCompileRequestId_ = 0;
     std::uint64_t nextCompileRequestId_ = 0;
 
-    // Parsed public field cache (keyed by resolved script path).
-    std::unordered_map<std::string, std::vector<std::pair<std::string, std::string>>> parsedFieldsCache_;
-    std::unordered_map<std::string, std::filesystem::file_time_type> parsedFieldsModTimes_;
+    // Parsed script class cache (keyed by resolved script path).
+    std::unordered_map<std::string, std::vector<ParsedScriptClass>> parsedScriptCache_;
+    std::unordered_map<std::string, std::filesystem::file_time_type> parsedScriptModTimes_;
     std::vector<std::unique_ptr<EditorPlugin>> plugins_;
 
     void register_builtin_plugins();
