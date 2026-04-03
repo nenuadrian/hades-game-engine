@@ -615,28 +615,6 @@ namespace hades
       {
         scriptComponent.attachments.erase(scriptComponent.attachments.begin() + static_cast<std::ptrdiff_t>(*removeAttachmentIndex));
       }
-
-      if (backgroundCompileInProgress_)
-      {
-        ImGui::TextDisabled("Compiling scripts...");
-      }
-      else if (scriptCompileStatus_ == ScriptCompileStatus::Failed)
-      {
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.3f, 0.3f, 1.0f));
-        ImGui::TextWrapped("Compile error: %s", lastCompileError_.c_str());
-        ImGui::PopStyleColor();
-      }
-      else if (scriptCompileStatus_ == ScriptCompileStatus::Succeeded &&
-               !scriptComponent.attachments.empty())
-      {
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.3f, 1.0f, 0.3f, 1.0f));
-        ImGui::TextDisabled("Scripts compiled successfully.");
-        ImGui::PopStyleColor();
-      }
-      else if (!scriptComponent.attachments.empty())
-      {
-        ImGui::TextDisabled("Attached scripts have not been compiled yet.");
-      }
     }
 
     ImGui::End();

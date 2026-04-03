@@ -1801,7 +1801,7 @@ namespace hades
       return;
     }
 
-    ImGui::SetNextWindowSize(ImVec2(420.0f, 0.0f), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(720.0f, 460.0f), ImGuiCond_FirstUseEver);
     if (focusSettingsWindow_)
     {
       ImGui::SetNextWindowFocus();
@@ -1814,39 +1814,96 @@ namespace hades
       return;
     }
 
-    ImGui::TextDisabled("Editor");
-    ImGui::Separator();
-    ImGui::Checkbox("Show Debug Window", &state.showDebugInfo);
-
-    ImGui::Spacing();
-    ImGui::TextDisabled("Scene Camera");
-    ImGui::Separator();
-
-    float target[3] = {sceneCameraTargetX_, sceneCameraTargetY_, sceneCameraTargetZ_};
-    if (ImGui::DragFloat3("Target", target, 0.1f))
+    if (ImGui::BeginTable(
+            "SettingsLayout",
+            2,
+            ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp))
     {
-      sceneCameraTargetX_ = target[0];
-      sceneCameraTargetY_ = target[1];
-      sceneCameraTargetZ_ = target[2];
-    }
+      ImGui::TableSetupColumn("Categories", ImGuiTableColumnFlags_WidthFixed, 180.0f);
+      ImGui::TableSetupColumn("Values", ImGuiTableColumnFlags_WidthStretch);
 
-    ImGui::SliderFloat(
-        "Distance",
-        &sceneCameraDistance_,
-        EDITOR_SCENE_CAMERA_MIN_DISTANCE,
-        EDITOR_SCENE_CAMERA_MAX_DISTANCE,
-        "%.1f");
-    ImGui::SliderFloat("Yaw", &sceneCameraYawDegrees_, -180.0f, 180.0f, "%.1f deg");
-    ImGui::SliderFloat(
-        "Pitch",
-        &sceneCameraPitchDegrees_,
-        EDITOR_SCENE_CAMERA_MIN_PITCH,
-        EDITOR_SCENE_CAMERA_MAX_PITCH,
-        "%.1f deg");
+      ImGui::TableNextColumn();
+      ImGui::BeginChild("SettingsCategories", ImVec2(0.0f, 0.0f), true);
+      if (ImGui::Selectable("Editor", selectedSettingsCategory_ == SettingsCategory::Editor))
+      {
+        selectedSettingsCategory_ = SettingsCategory::Editor;
+      }
+      if (ImGui::Selectable("Plugins", selectedSettingsCategory_ == SettingsCategory::Plugins))
+      {
+        selectedSettingsCategory_ = SettingsCategory::Plugins;
+      }
+      ImGui::EndChild();
 
-    if (ImGui::Button("Reset Scene Camera"))
-    {
-      reset_scene_camera();
+      ImGui::TableNextColumn();
+      ImGui::BeginChild("SettingsValues", ImVec2(0.0f, 0.0f), false);
+
+      if (selectedSettingsCategory_ == SettingsCategory::Editor)
+      {
+        ImGui::TextDisabled("Editor");
+        ImGui::Separator();
+        ImGui::Checkbox("Show Debug Window", &state.showDebugInfo);
+
+        ImGui::Spacing();
+        ImGui::TextDisabled("Scene Camera");
+        ImGui::Separator();
+
+        float target[3] = {sceneCameraTargetX_, sceneCameraTargetY_, sceneCameraTargetZ_};
+        if (ImGui::DragFloat3("Target", target, 0.1f))
+        {
+          sceneCameraTargetX_ = target[0];
+          sceneCameraTargetY_ = target[1];
+          sceneCameraTargetZ_ = target[2];
+        }
+
+        ImGui::SliderFloat(
+            "Distance",
+            &sceneCameraDistance_,
+            EDITOR_SCENE_CAMERA_MIN_DISTANCE,
+            EDITOR_SCENE_CAMERA_MAX_DISTANCE,
+            "%.1f");
+        ImGui::SliderFloat("Yaw", &sceneCameraYawDegrees_, -180.0f, 180.0f, "%.1f deg");
+        ImGui::SliderFloat(
+            "Pitch",
+            &sceneCameraPitchDegrees_,
+            EDITOR_SCENE_CAMERA_MIN_PITCH,
+            EDITOR_SCENE_CAMERA_MAX_PITCH,
+            "%.1f deg");
+
+        if (ImGui::Button("Reset Scene Camera"))
+        {
+          reset_scene_camera();
+        }
+      }
+      else
+      {
+        ImGui::TextDisabled("Plugins");
+        ImGui::Separator();
+
+        bool hasPluginSettings = false;
+        for (const auto &plugin : plugins_)
+        {
+          if (!should_expose_plugin_setting(*plugin))
+          {
+            continue;
+          }
+
+          hasPluginSettings = true;
+          bool visible = plugin->visible(*this);
+          const std::string label(plugin->display_name());
+          if (ImGui::Checkbox(label.c_str(), &visible))
+          {
+            plugin->set_visible(*this, visible);
+          }
+        }
+
+        if (!hasPluginSettings)
+        {
+          ImGui::TextDisabled("No plugins available.");
+        }
+      }
+
+      ImGui::EndChild();
+      ImGui::EndTable();
     }
 
     ImGui::End();

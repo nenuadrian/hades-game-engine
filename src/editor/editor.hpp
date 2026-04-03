@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "types.h"
+#include "editor_settings.hpp"
 #include "script_analysis.hpp"
 #include "plugins/editor_plugin.hpp"
 #include "../engine/core/ecs/entity.hpp"
@@ -34,6 +35,12 @@ namespace hades
       None,
       Folder,
       Script,
+    };
+
+    enum class SettingsCategory
+    {
+      Editor,
+      Plugins,
     };
 
     struct WorkspaceTreeNode
@@ -68,6 +75,8 @@ namespace hades
     void log_info(const std::string &text);
     void log_warning(const std::string &text);
     void log_error(const std::string &text);
+    bool load_workspace_settings(const std::filesystem::path &workspacePath, std::string *errorMessage = nullptr);
+    bool save_workspace_settings(const std::filesystem::path &workspacePath, std::string *errorMessage = nullptr) const;
 
   private:
     enum class ScriptCompileStatus
@@ -125,6 +134,7 @@ namespace hades
     bool openWorkspaceDeleteDialog_ = false;
     bool openSettingsWindow_ = false;
     bool focusSettingsWindow_ = false;
+    SettingsCategory selectedSettingsCategory_ = SettingsCategory::Editor;
     bool openDebugConsoleWindow_ = false;
     bool focusDebugConsoleWindow_ = false;
     std::filesystem::path pendingWorkspaceDeletePath_;
@@ -166,6 +176,9 @@ namespace hades
     void register_plugin(std::unique_ptr<EditorPlugin> plugin);
     EditorPlugin *find_plugin(std::string_view pluginId);
     const EditorPlugin *find_plugin(std::string_view pluginId) const;
+    bool should_expose_plugin_setting(const EditorPlugin &plugin) const;
+    WorkspaceEditorSettings capture_workspace_settings() const;
+    void apply_workspace_settings(const WorkspaceEditorSettings &settings);
     void render_plugins(EditorPluginPhase phase, EditorPluginContext &context);
     void sync_menu_bar(EntityManager &entityManager, ComponentManager &componentManager);
     void configure_default_dock_layout(std::uint32_t dockspaceId);

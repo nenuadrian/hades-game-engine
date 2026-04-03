@@ -677,7 +677,37 @@ namespace hades
       return true;
     }
 
-    return hades::save_all_worlds(workspacePath, entityManager, componentManager, errorMessage);
+    std::string worldError;
+    std::string settingsError;
+    const bool savedWorlds = hades::save_all_worlds(workspacePath, entityManager, componentManager, &worldError);
+    const bool savedSettings = editor.save_workspace_settings(workspacePath, &settingsError);
+    if (savedWorlds && savedSettings)
+    {
+      if (errorMessage != nullptr)
+      {
+        errorMessage->clear();
+      }
+      return true;
+    }
+
+    if (errorMessage != nullptr)
+    {
+      errorMessage->clear();
+      if (!savedWorlds)
+      {
+        *errorMessage = "Failed to save worlds: " + worldError;
+      }
+      if (!savedSettings)
+      {
+        if (!errorMessage->empty())
+        {
+          *errorMessage += " ";
+        }
+        *errorMessage += "Failed to save settings: " + settingsError;
+      }
+    }
+
+    return false;
   }
 
   void WindowManager::process_editor_events()
@@ -986,6 +1016,13 @@ namespace hades
 
     creatingWorkspace = false;
     workspaceStatusMessage = errorMessage;
+    std::string settingsError;
+    if (!editor.load_workspace_settings(workspace->path, &settingsError))
+    {
+      workspaceStatusMessage =
+          (workspaceStatusMessage.empty() ? std::string() : workspaceStatusMessage + " ") +
+          "Failed to load workspace settings: " + settingsError;
+    }
     set_buffer_text(createWorkspaceParentBuffer, workspace->path.parent_path().string());
     update_window_title();
   }
@@ -1038,6 +1075,13 @@ namespace hades
 
     creatingWorkspace = false;
     workspaceStatusMessage = errorMessage;
+    std::string settingsError;
+    if (!editor.load_workspace_settings(workspace->path, &settingsError))
+    {
+      workspaceStatusMessage =
+          (workspaceStatusMessage.empty() ? std::string() : workspaceStatusMessage + " ") +
+          "Failed to load workspace settings: " + settingsError;
+    }
     set_buffer_text(createWorkspaceParentBuffer, workspace->path.parent_path().string());
     set_buffer_text(createWorkspaceNameBuffer, std::string());
     update_window_title();

@@ -83,6 +83,7 @@ namespace hades
     backgroundCompileInProgress_ = false;
     currentCompileRequestId_ = 0;
     nextCompileRequestId_ = 0;
+    selectedSettingsCategory_ = SettingsCategory::Editor;
     state.debugConsoleMessages.clear();
     openDebugConsoleWindow_ = false;
     focusDebugConsoleWindow_ = false;
@@ -130,6 +131,23 @@ namespace hades
   void Editor::log_error(const std::string &text)
   {
     log_message(DebugMessageLevel::Error, text);
+  }
+
+  bool Editor::load_workspace_settings(const std::filesystem::path &workspacePath, std::string *errorMessage)
+  {
+    WorkspaceEditorSettings settings = capture_workspace_settings();
+    if (!hades::load_workspace_settings(workspacePath, settings, errorMessage))
+    {
+      return false;
+    }
+
+    apply_workspace_settings(settings);
+    return true;
+  }
+
+  bool Editor::save_workspace_settings(const std::filesystem::path &workspacePath, std::string *errorMessage) const
+  {
+    return hades::save_workspace_settings(workspacePath, capture_workspace_settings(), errorMessage);
   }
 
   void Editor::render(
@@ -390,46 +408,6 @@ namespace hades
     };
     windowsMenu.children_menu_items.push_back(std::move(debugConsoleWindow));
     gui->menu_bar_items.push_back(std::move(windowsMenu));
-
-    MenuBarItem pluginsMenu;
-    pluginsMenu.title = "Plugins";
-
-    for (const auto &plugin : plugins_)
-    {
-      if (!plugin->listed_in_menu() ||
-          plugin->id() == "settings" ||
-          plugin->id() == "script-editor-window" ||
-          plugin->id() == "debug-console")
-      {
-        continue;
-      }
-
-      MenuBarItem pluginItem;
-      pluginItem.title = std::string(plugin->display_name());
-      pluginItem.selected = plugin->visible(*this);
-      pluginItem.on_activate = [this, plugin = plugin.get()]()
-      {
-        if (plugin->visible(*this))
-        {
-          plugin->set_visible(*this, false);
-        }
-        else
-        {
-          plugin->activate(*this);
-        }
-      };
-      pluginsMenu.children_menu_items.push_back(std::move(pluginItem));
-    }
-
-    if (pluginsMenu.children_menu_items.empty())
-    {
-      MenuBarItem emptyPlugins;
-      emptyPlugins.title = "No Plugins Registered";
-      emptyPlugins.enabled = false;
-      pluginsMenu.children_menu_items.push_back(std::move(emptyPlugins));
-    }
-
-    gui->menu_bar_items.push_back(std::move(pluginsMenu));
   }
 
   void Editor::configure_default_dock_layout(std::uint32_t dockspaceId)
@@ -473,6 +451,12 @@ namespace hades
     if (!hades::save_all_worlds(activeWorkspacePath_, entityManager, componentManager, &error))
     {
       log_error("Failed to save worlds: " + error);
+      return;
+    }
+
+    if (!save_workspace_settings(activeWorkspacePath_, &error))
+    {
+      log_error("Failed to save workspace settings: " + error);
     }
   }
 
@@ -568,5 +552,64 @@ namespace hades
     }
 
     load_world(*worldEntity, componentManager);
+  }
+
+  bool Editor::should_expose_plugin_setting(const EditorPlugin &plugin) const
+  {
+    return plugin.listed_in_menu() &&
+        plugin.id() != "settings" &&
+        plugin.id() != "script-editor-window" &&
+        plugin.id() != "debug-console";
+  }
+
+  WorkspaceEditorSettings Editor::capture_workspace_settings() const
+  {
+    WorkspaceEditorSettings settings;
+    settings.showDebugInfo = state.showDebugInfo;
+    settings.sceneCameraTargetX = sceneCameraTargetX_;
+    settings.sceneCameraTargetY = sceneCameraTargetY_;
+    settings.sceneCameraTargetZ = sceneCameraTargetZ_;
+    settings.sceneCameraDistance = sceneCameraDistance_;
+    settings.sceneCameraYawDegrees = sceneCameraYawDegrees_;
+    settings.sceneCameraPitchDegrees = sceneCameraPitchDegrees_;
+
+    for (const auto &plugin : plugins_)
+    {
+      if (!should_expose_plugin_setting(*plugin))
+      {
+        continue;
+      }
+
+      settings.pluginVisibility.emplace(std::string(plugin->id()), plugin->visible(*this));
+    }
+
+    return settings;
+  }
+
+  void Editor::apply_workspace_settings(const WorkspaceEditorSettings &settings)
+  {
+    state.showDebugInfo = settings.showDebugInfo;
+    sceneCameraTargetX_ = settings.sceneCameraTargetX;
+    sceneCameraTargetY_ = settings.sceneCameraTargetY;
+    sceneCameraTargetZ_ = settings.sceneCameraTargetZ;
+    sceneCameraDistance_ = settings.sceneCameraDistance;
+    sceneCameraYawDegrees_ = settings.sceneCameraYawDegrees;
+    sceneCameraPitchDegrees_ = settings.sceneCameraPitchDegrees;
+
+    for (const auto &plugin : plugins_)
+    {
+      if (!should_expose_plugin_setting(*plugin))
+      {
+        continue;
+      }
+
+      const auto visibleIt = settings.pluginVisibility.find(std::string(plugin->id()));
+      if (visibleIt == settings.pluginVisibility.end())
+      {
+        continue;
+      }
+
+      plugin->set_visible(*this, visibleIt->second);
+    }
   }
 }

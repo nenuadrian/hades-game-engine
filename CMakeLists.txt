@@ -115,6 +115,7 @@ if(TARGET SDL2::SDL2main)
 endif()
 
 set(TEST_SUPPORT_SOURCES
+  src/editor/editor_settings.cpp
   src/editor/plugins/editor_plugin.cpp
   src/editor/script_analysis.cpp
   src/editor/script_document.cpp
