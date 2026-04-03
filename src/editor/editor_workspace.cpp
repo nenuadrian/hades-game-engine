@@ -842,7 +842,8 @@ namespace hades
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
     const ImGuiWindowFlags windowFlags =
         ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
-        ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings;
+        ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_MenuBar;
     if (!ImGui::Begin("Detached Script Editor Host", nullptr, windowFlags))
     {
       ImGui::End();
@@ -1225,6 +1226,101 @@ namespace hades
       ImGui::EndPopup();
     }
 
+    // --- Menu bar on the host window itself ---
+    bool saveRequested = false;
+    bool saveAllRequested = false;
+    bool compileRequested = false;
+    bool revertRequested = false;
+
+    {
+      const bool hasActiveTab = activeScriptEditorTabIndex_.has_value() &&
+                                *activeScriptEditorTabIndex_ < openScriptEditorTabs_.size();
+      const bool canSaveActive = hasActiveTab && openScriptEditorTabs_[*activeScriptEditorTabIndex_].dirty;
+
+      if (ImGui::BeginMenuBar())
+      {
+        if (ImGui::BeginMenu("Script"))
+        {
+          saveRequested = ImGui::MenuItem("Save", nullptr, false, canSaveActive);
+          saveAllRequested = ImGui::MenuItem("Save All", nullptr, false, !openScriptEditorTabs_.empty());
+          compileRequested = ImGui::MenuItem("Compile Workspace", nullptr, false, !activeWorkspacePath_.empty());
+          revertRequested = ImGui::MenuItem("Revert", nullptr, false, canSaveActive);
+          ImGui::EndMenu();
+        }
+        ImGui::EndMenuBar();
+      }
+    }
+
+    // --- Handle menu actions ---
+    if (saveRequested)
+    {
+      std::string errorMessage;
+      if (!save_active_script_document(true, &errorMessage))
+      {
+        scriptEditorStatusMessage_ = std::move(errorMessage);
+        scriptEditorStatusIsError_ = true;
+      }
+    }
+
+    if (saveAllRequested)
+    {
+      std::string errorMessage;
+      if (!save_all_script_documents(false, &errorMessage))
+      {
+        scriptEditorStatusMessage_ = std::move(errorMessage);
+        scriptEditorStatusIsError_ = true;
+      }
+    }
+
+    if (compileRequested)
+    {
+      std::string errorMessage;
+      if (!save_all_script_documents(false, &errorMessage))
+      {
+        scriptEditorStatusMessage_ = std::move(errorMessage);
+        scriptEditorStatusIsError_ = true;
+      }
+      else
+      {
+        queue_workspace_script_compile();
+      }
+    }
+
+    if (revertRequested)
+    {
+      ScriptEditorTab *revertTab = active_script_editor_tab();
+      if (revertTab != nullptr)
+      {
+        ScriptDocumentSnapshot snapshot;
+        std::string errorMessage;
+        if (!load_script_document(revertTab->path, snapshot, &errorMessage))
+        {
+          scriptEditorStatusMessage_ = std::move(errorMessage);
+          scriptEditorStatusIsError_ = true;
+        }
+        else
+        {
+          revertTab->contents = std::move(snapshot.contents);
+          revertTab->savedContents = revertTab->contents;
+          if (revertTab->textEditor == nullptr)
+          {
+            revertTab->textEditor = create_script_text_editor(revertTab->contents);
+          }
+          else
+          {
+            revertTab->textEditor->SetText(revertTab->contents);
+          }
+          revertTab->savedWriteTime = snapshot.hasLastWriteTime
+                                          ? std::optional<std::filesystem::file_time_type>(snapshot.lastWriteTime)
+                                          : std::nullopt;
+          revertTab->dirty = false;
+          scriptEditorStatusMessage_ = "Reverted unsaved changes.";
+          scriptEditorStatusIsError_ = false;
+        }
+      }
+    }
+
+    // --- Three-column layout below the menu bar ---
     if (ImGui::BeginTable(
             "ScriptEditorLayout",
             3,
@@ -1234,6 +1330,7 @@ namespace hades
       ImGui::TableSetupColumn("Editor", ImGuiTableColumnFlags_WidthStretch);
       ImGui::TableSetupColumn("Entities", ImGuiTableColumnFlags_WidthFixed, 300.0f);
 
+      // --- Left column: file tree ---
       ImGui::TableNextColumn();
       if (!workspaceScanError_.empty())
       {
@@ -1279,7 +1376,9 @@ namespace hades
       }
       ImGui::EndChild();
 
+      // --- Middle column: tabs + code editor ---
       ImGui::TableNextColumn();
+
       if (openScriptEditorTabs_.empty())
       {
         ImGui::TextDisabled("Open a .cs file from the file tree to start editing.");
@@ -1290,257 +1389,190 @@ namespace hades
                                    : ImVec4(0.42f, 0.88f, 0.42f, 1.0f);
           ImGui::TextColored(color, "%s", scriptEditorStatusMessage_.c_str());
         }
-        ImGui::EndTable();
-        return;
-      }
 
-      if (!activeScriptEditorTabIndex_.has_value() || *activeScriptEditorTabIndex_ >= openScriptEditorTabs_.size())
-      {
-        activeScriptEditorTabIndex_ = 0;
-      }
-
-      std::optional<std::size_t> closeTabIndex;
-      if (ImGui::BeginTabBar("ScriptEditorTabs", ImGuiTabBarFlags_AutoSelectNewTabs))
-      {
-        for (std::size_t index = 0; index < openScriptEditorTabs_.size(); ++index)
+        if (backgroundCompileInProgress_)
         {
-          ScriptEditorTab &tab = openScriptEditorTabs_[index];
-          bool keepTabOpen = true;
-          ImGuiTabItemFlags itemFlags = tab.dirty ? ImGuiTabItemFlags_UnsavedDocument : ImGuiTabItemFlags_None;
-          if (pendingScriptEditorTabSelectionIndex_.has_value() &&
-              *pendingScriptEditorTabSelectionIndex_ == index)
+          ImGui::TextDisabled("Compiling scripts...");
+        }
+        else if (scriptCompileStatus_ == ScriptCompileStatus::Failed)
+        {
+          ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "%s", lastCompileError_.c_str());
+        }
+        else if (scriptCompileStatus_ == ScriptCompileStatus::Succeeded &&
+                 !workspaceScriptFiles_.empty())
+        {
+          ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.3f, 1.0f), "Workspace scripts compiled successfully.");
+        }
+        else if (!workspaceScriptFiles_.empty())
+        {
+          ImGui::TextDisabled("Workspace scripts have not been compiled yet.");
+        }
+      }
+      else
+      {
+        if (!activeScriptEditorTabIndex_.has_value() || *activeScriptEditorTabIndex_ >= openScriptEditorTabs_.size())
+        {
+          activeScriptEditorTabIndex_ = 0;
+        }
+
+        std::optional<std::size_t> closeTabIndex;
+        if (ImGui::BeginTabBar("ScriptEditorTabs", ImGuiTabBarFlags_AutoSelectNewTabs))
+        {
+          for (std::size_t index = 0; index < openScriptEditorTabs_.size(); ++index)
           {
-            itemFlags |= ImGuiTabItemFlags_SetSelected;
+            ScriptEditorTab &tab = openScriptEditorTabs_[index];
+            bool keepTabOpen = true;
+            ImGuiTabItemFlags itemFlags = tab.dirty ? ImGuiTabItemFlags_UnsavedDocument : ImGuiTabItemFlags_None;
+            if (pendingScriptEditorTabSelectionIndex_.has_value() &&
+                *pendingScriptEditorTabSelectionIndex_ == index)
+            {
+              itemFlags |= ImGuiTabItemFlags_SetSelected;
+            }
+
+            const std::string tabLabel = path_display_name(tab.path) + "##" + tab.path.string();
+            if (ImGui::BeginTabItem(tabLabel.c_str(), &keepTabOpen, itemFlags))
+            {
+              activeScriptEditorTabIndex_ = index;
+              ImGui::EndTabItem();
+            }
+
+            if (!keepTabOpen)
+            {
+              closeTabIndex = index;
+            }
+          }
+          ImGui::EndTabBar();
+          pendingScriptEditorTabSelectionIndex_.reset();
+        }
+
+        if (closeTabIndex.has_value())
+        {
+          if (openScriptEditorTabs_[*closeTabIndex].dirty)
+          {
+            pendingScriptEditorClosePath_ = openScriptEditorTabs_[*closeTabIndex].path;
+            openScriptEditorUnsavedChangesDialog_ = true;
+          }
+          else
+          {
+            close_script_editor_tab(*closeTabIndex);
+          }
+        }
+
+        ScriptEditorTab *activeTab = active_script_editor_tab();
+        if (activeTab != nullptr)
+        {
+          if (!scriptEditorStatusMessage_.empty())
+          {
+            const ImVec4 color = scriptEditorStatusIsError_
+                                     ? ImVec4(0.88f, 0.42f, 0.42f, 1.0f)
+                                     : ImVec4(0.42f, 0.88f, 0.42f, 1.0f);
+            ImGui::TextColored(color, "%s", scriptEditorStatusMessage_.c_str());
           }
 
-          const std::string label = (tab.relativePath.empty() ? tab.path.filename().string() : tab.relativePath) + "##" + tab.path.string();
-          if (ImGui::BeginTabItem(label.c_str(), &keepTabOpen, itemFlags))
+          if (backgroundCompileInProgress_)
           {
-            activeScriptEditorTabIndex_ = index;
-            ImGui::EndTabItem();
+            ImGui::TextDisabled("Compiling scripts...");
+          }
+          else if (scriptCompileStatus_ == ScriptCompileStatus::Failed)
+          {
+            ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "%s", lastCompileError_.c_str());
+          }
+          else if (scriptCompileStatus_ == ScriptCompileStatus::Succeeded &&
+                   !workspaceScriptFiles_.empty())
+          {
+            ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.3f, 1.0f), "Workspace scripts compiled successfully.");
+          }
+          else if (!workspaceScriptFiles_.empty())
+          {
+            ImGui::TextDisabled("Workspace scripts have not been compiled yet.");
           }
 
-          if (!keepTabOpen)
-          {
-            closeTabIndex = index;
-          }
-        }
-        ImGui::EndTabBar();
-        pendingScriptEditorTabSelectionIndex_.reset();
-      }
-
-      if (closeTabIndex.has_value())
-      {
-        if (openScriptEditorTabs_[*closeTabIndex].dirty)
-        {
-          pendingScriptEditorClosePath_ = openScriptEditorTabs_[*closeTabIndex].path;
-          openScriptEditorUnsavedChangesDialog_ = true;
-        }
-        else
-        {
-          close_script_editor_tab(*closeTabIndex);
-        }
-      }
-
-      ScriptEditorTab *activeTab = active_script_editor_tab();
-      if (activeTab == nullptr)
-      {
-        ImGui::EndTable();
-        return;
-      }
-
-      const bool canSave = activeTab->dirty;
-      ImGui::BeginChild("ScriptEditorEditorPane", ImVec2(0.0f, 0.0f), false, ImGuiWindowFlags_MenuBar);
-
-      bool saveRequested = false;
-      bool saveAllRequested = false;
-      bool compileRequested = false;
-      bool revertRequested = false;
-
-      if (ImGui::BeginMenuBar())
-      {
-        if (ImGui::BeginMenu("Script"))
-        {
-          saveRequested = ImGui::MenuItem("Save", nullptr, false, canSave);
-          saveAllRequested = ImGui::MenuItem("Save All");
-          compileRequested = ImGui::MenuItem("Compile Workspace");
-          revertRequested = ImGui::MenuItem("Revert", nullptr, false, canSave);
-          ImGui::EndMenu();
-        }
-        ImGui::EndMenuBar();
-      }
-
-      if (saveRequested)
-      {
-        std::string errorMessage;
-        if (!save_active_script_document(true, &errorMessage))
-        {
-          scriptEditorStatusMessage_ = std::move(errorMessage);
-          scriptEditorStatusIsError_ = true;
-        }
-      }
-
-      if (saveAllRequested)
-      {
-        std::string errorMessage;
-        if (!save_all_script_documents(false, &errorMessage))
-        {
-          scriptEditorStatusMessage_ = std::move(errorMessage);
-          scriptEditorStatusIsError_ = true;
-        }
-      }
-
-      if (compileRequested)
-      {
-        std::string errorMessage;
-        if (!save_all_script_documents(false, &errorMessage))
-        {
-          scriptEditorStatusMessage_ = std::move(errorMessage);
-          scriptEditorStatusIsError_ = true;
-        }
-        else
-        {
-          queue_workspace_script_compile();
-        }
-      }
-
-      if (revertRequested)
-      {
-        ScriptDocumentSnapshot snapshot;
-        std::string errorMessage;
-        if (!load_script_document(activeTab->path, snapshot, &errorMessage))
-        {
-          scriptEditorStatusMessage_ = std::move(errorMessage);
-          scriptEditorStatusIsError_ = true;
-        }
-        else
-        {
-          activeTab->contents = std::move(snapshot.contents);
-          activeTab->savedContents = activeTab->contents;
+          ImVec2 editorSize = ImGui::GetContentRegionAvail();
+          editorSize.y = std::max(editorSize.y, 200.0f);
           if (activeTab->textEditor == nullptr)
           {
             activeTab->textEditor = create_script_text_editor(activeTab->contents);
           }
-          else
+          ImGui::PushID(activeTab->path.string().c_str());
+          activeTab->textEditor->Render("##ScriptEditorContents", editorSize, true);
+          if (activeTab->textEditor->IsTextChanged())
           {
-            activeTab->textEditor->SetText(activeTab->contents);
+            activeTab->contents = activeTab->textEditor->GetText();
+            activeTab->dirty = activeTab->contents != activeTab->savedContents;
+            if (!scriptEditorStatusIsError_)
+            {
+              scriptEditorStatusMessage_.clear();
+            }
           }
-          activeTab->savedWriteTime = snapshot.hasLastWriteTime
-                                          ? std::optional<std::filesystem::file_time_type>(snapshot.lastWriteTime)
-                                          : std::nullopt;
-          activeTab->dirty = false;
-          scriptEditorStatusMessage_ = "Reverted unsaved changes.";
-          scriptEditorStatusIsError_ = false;
+          ImGui::PopID();
         }
       }
 
-      ImGui::TextWrapped("%s", activeTab->relativePath.empty() ? activeTab->path.string().c_str() : activeTab->relativePath.c_str());
-      ImGui::Separator();
-      ImGui::TextDisabled("%s", activeTab->dirty ? "Unsaved changes" : "Saved");
-
-      if (!scriptEditorStatusMessage_.empty())
-      {
-        const ImVec4 color = scriptEditorStatusIsError_
-                                 ? ImVec4(0.88f, 0.42f, 0.42f, 1.0f)
-                                 : ImVec4(0.42f, 0.88f, 0.42f, 1.0f);
-        ImGui::TextColored(color, "%s", scriptEditorStatusMessage_.c_str());
-      }
-
-      if (backgroundCompileInProgress_)
-      {
-        ImGui::TextDisabled("Compiling scripts...");
-      }
-      else if (scriptCompileStatus_ == ScriptCompileStatus::Failed)
-      {
-        ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "%s", lastCompileError_.c_str());
-      }
-      else if (scriptCompileStatus_ == ScriptCompileStatus::Succeeded &&
-               !workspaceScriptFiles_.empty())
-      {
-        ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.3f, 1.0f), "Workspace scripts compiled successfully.");
-      }
-      else if (!workspaceScriptFiles_.empty())
-      {
-        ImGui::TextDisabled("Workspace scripts have not been compiled yet.");
-      }
-
-      ImGui::Separator();
-      ImVec2 editorSize = ImGui::GetContentRegionAvail();
-      editorSize.y = std::max(editorSize.y, 200.0f);
-      if (activeTab->textEditor == nullptr)
-      {
-        activeTab->textEditor = create_script_text_editor(activeTab->contents);
-      }
-      ImGui::PushID(activeTab->path.string().c_str());
-      activeTab->textEditor->Render("##ScriptEditorContents", editorSize, true);
-      if (activeTab->textEditor->IsTextChanged())
-      {
-        activeTab->contents = activeTab->textEditor->GetText();
-        activeTab->dirty = activeTab->contents != activeTab->savedContents;
-        if (!scriptEditorStatusIsError_)
-        {
-          scriptEditorStatusMessage_.clear();
-        }
-      }
-      ImGui::PopID();
-      ImGui::EndChild();
-
+      // --- Right column: entities using script ---
       ImGui::TableNextColumn();
       ImGui::TextUnformatted("Entities Using Script");
       ImGui::Separator();
 
-      const std::string activeScriptRelativePath =
-          activeWorkspacePath_.empty()
-              ? normalize_generic_path(activeTab->path)
-              : normalize_generic_path(relative_workspace_path(activeWorkspacePath_, activeTab->path));
-
-      std::vector<Entity::EntityId> matchingEntities;
-      for (const Entity::EntityId entity : entityManager.getAllEntities())
+      ScriptEditorTab *activeTab = active_script_editor_tab();
+      if (activeTab != nullptr)
       {
-        if (!componentManager.hasComponent<ScriptComponent>(entity))
+        const std::string activeScriptRelativePath =
+            activeWorkspacePath_.empty()
+                ? normalize_generic_path(activeTab->path)
+                : normalize_generic_path(relative_workspace_path(activeWorkspacePath_, activeTab->path));
+
+        std::vector<Entity::EntityId> matchingEntities;
+        for (const Entity::EntityId entity : entityManager.getAllEntities())
         {
-          continue;
+          if (!componentManager.hasComponent<ScriptComponent>(entity))
+          {
+            continue;
+          }
+
+          const auto &scriptComponent = componentManager.getComponent<ScriptComponent>(entity);
+          const bool usesScript = std::any_of(
+              scriptComponent.attachments.begin(),
+              scriptComponent.attachments.end(),
+              [&activeScriptRelativePath](const ScriptAttachment &attachment)
+              {
+                return !attachment.scriptPath.empty() &&
+                       normalize_generic_path(attachment.scriptPath) == activeScriptRelativePath;
+              });
+          if (usesScript)
+          {
+            matchingEntities.push_back(entity);
+          }
         }
 
-        const auto &scriptComponent = componentManager.getComponent<ScriptComponent>(entity);
-        const bool usesScript = std::any_of(
-            scriptComponent.attachments.begin(),
-            scriptComponent.attachments.end(),
-            [&activeScriptRelativePath](const ScriptAttachment &attachment)
+        ImGui::BeginChild("ScriptEditorEntityUsers");
+        if (matchingEntities.empty())
+        {
+          ImGui::TextDisabled("No entities use this script.");
+        }
+        else
+        {
+          ImGui::TextDisabled("%zu matching %s", matchingEntities.size(), matchingEntities.size() == 1 ? "entity" : "entities");
+          ImGui::Separator();
+
+          for (const Entity::EntityId entity : matchingEntities)
+          {
+            const bool selected = state.selectedEntity.has_value() && *state.selectedEntity == entity;
+            if (ImGui::Selectable(entity_label(entity, componentManager).c_str(), selected))
             {
-              return !attachment.scriptPath.empty() &&
-                     normalize_generic_path(attachment.scriptPath) == activeScriptRelativePath;
-            });
-        if (usesScript)
-        {
-          matchingEntities.push_back(entity);
+              if (const auto world = world_for_entity(entity, componentManager); world.has_value())
+              {
+                load_world(*world, componentManager);
+              }
+              state.selectedEntity = entity;
+            }
+          }
         }
-      }
-
-      ImGui::BeginChild("ScriptEditorEntityUsers");
-      if (matchingEntities.empty())
-      {
-        ImGui::TextDisabled("No entities use this script.");
+        ImGui::EndChild();
       }
       else
       {
-        ImGui::TextDisabled("%zu matching %s", matchingEntities.size(), matchingEntities.size() == 1 ? "entity" : "entities");
-        ImGui::Separator();
-
-        for (const Entity::EntityId entity : matchingEntities)
-        {
-          const bool selected = state.selectedEntity.has_value() && *state.selectedEntity == entity;
-          if (ImGui::Selectable(entity_label(entity, componentManager).c_str(), selected))
-          {
-            if (const auto world = world_for_entity(entity, componentManager); world.has_value())
-            {
-              load_world(*world, componentManager);
-            }
-            state.selectedEntity = entity;
-          }
-        }
+        ImGui::TextDisabled("No script selected.");
       }
-      ImGui::EndChild();
 
       ImGui::EndTable();
     }

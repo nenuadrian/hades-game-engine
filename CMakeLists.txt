@@ -95,9 +95,9 @@ target_link_libraries(
           assimp
           hades_imgui
           hades_imgui_textedit
+          Jolt
           miniaudio
           nlohmann_json::nlohmann_json
-          tinyobjloader
           Vulkan::Vulkan)
 if(WIN32)
   target_link_libraries(${PROJECT_NAME} PRIVATE Ole32 uuid)

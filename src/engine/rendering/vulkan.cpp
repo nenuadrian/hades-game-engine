@@ -162,10 +162,33 @@ namespace hades
 #endif
 
 #ifdef APP_USE_VULKAN_DEBUG_REPORT
-      const char *layers[] = {"VK_LAYER_KHRONOS_validation"};
-      create_info.enabledLayerCount = 1;
-      create_info.ppEnabledLayerNames = layers;
-      instance_extensions.push_back("VK_EXT_debug_report");
+      {
+        uint32_t layer_count;
+        vkEnumerateInstanceLayerProperties(&layer_count, nullptr);
+        ImVector<VkLayerProperties> available_layers;
+        available_layers.resize(layer_count);
+        vkEnumerateInstanceLayerProperties(&layer_count, available_layers.Data);
+        bool validation_available = false;
+        for (uint32_t i = 0; i < layer_count; i++)
+        {
+          if (std::strcmp(available_layers[i].layerName, "VK_LAYER_KHRONOS_validation") == 0)
+          {
+            validation_available = true;
+            break;
+          }
+        }
+        if (validation_available)
+        {
+          static const char *layers[] = {"VK_LAYER_KHRONOS_validation"};
+          create_info.enabledLayerCount = 1;
+          create_info.ppEnabledLayerNames = layers;
+          instance_extensions.push_back("VK_EXT_debug_report");
+        }
+        else
+        {
+          std::fprintf(stderr, "[vulkan] Warning: validation layer not available, skipping debug report\n");
+        }
+      }
 #endif
 
       create_info.enabledExtensionCount = (uint32_t)instance_extensions.Size;
@@ -177,17 +200,20 @@ namespace hades
 #endif
 
 #ifdef APP_USE_VULKAN_DEBUG_REPORT
-      auto f_vkCreateDebugReportCallbackEXT =
-          (PFN_vkCreateDebugReportCallbackEXT)vkGetInstanceProcAddr(g_Instance, "vkCreateDebugReportCallbackEXT");
-      assert(f_vkCreateDebugReportCallbackEXT != nullptr);
-      VkDebugReportCallbackCreateInfoEXT debug_report_ci = {};
-      debug_report_ci.sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT;
-      debug_report_ci.flags = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT |
-                              VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT;
-      debug_report_ci.pfnCallback = debug_report;
-      debug_report_ci.pUserData = nullptr;
-      err = f_vkCreateDebugReportCallbackEXT(g_Instance, &debug_report_ci, g_Allocator, &g_DebugReport);
-      check_vk_result(err);
+      if (create_info.enabledLayerCount > 0)
+      {
+        auto f_vkCreateDebugReportCallbackEXT =
+            (PFN_vkCreateDebugReportCallbackEXT)vkGetInstanceProcAddr(g_Instance, "vkCreateDebugReportCallbackEXT");
+        assert(f_vkCreateDebugReportCallbackEXT != nullptr);
+        VkDebugReportCallbackCreateInfoEXT debug_report_ci = {};
+        debug_report_ci.sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT;
+        debug_report_ci.flags = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT |
+                                VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT;
+        debug_report_ci.pfnCallback = debug_report;
+        debug_report_ci.pUserData = nullptr;
+        err = f_vkCreateDebugReportCallbackEXT(g_Instance, &debug_report_ci, g_Allocator, &g_DebugReport);
+        check_vk_result(err);
+      }
 #endif
     }
 

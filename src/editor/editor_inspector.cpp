@@ -18,7 +18,10 @@
 #include "../engine/components/name_component.hpp"
 #include "../engine/components/position_component_3d.hpp"
 #include "../engine/components/primitive_component.hpp"
+#include "../engine/components/collider_component.hpp"
 #include "../engine/components/render_component.hpp"
+#include "../engine/components/rigid_body_component.hpp"
+#include "../engine/components/rotation_component_3d.hpp"
 #include "../engine/components/script_component.hpp"
 #include "../engine/components/text_component.hpp"
 #include "../engine/components/transform_hierarchy_component.hpp"
@@ -145,6 +148,22 @@ namespace hades
         componentManager.getComponent<ScriptComponent>(entity).attachments.push_back(ScriptAttachment());
       }
     }
+    ImGui::SameLine();
+    if (ImGui::Button("Add Rigid Body"))
+    {
+      if (!componentManager.hasComponent<RigidBodyComponent>(entity))
+      {
+        componentManager.addComponent(entity, RigidBodyComponent{});
+      }
+      if (!componentManager.hasComponent<RotationComponent3D>(entity))
+      {
+        componentManager.addComponent(entity, RotationComponent3D{});
+      }
+      if (!componentManager.hasComponent<ColliderComponent>(entity))
+      {
+        componentManager.addComponent(entity, ColliderComponent{});
+      }
+    }
     if (isWorld)
     {
       ImGui::EndDisabled();
@@ -166,6 +185,65 @@ namespace hades
     {
       auto &position = componentManager.getComponent<PositionComponent3D>(entity);
       ImGui::DragFloat3("Position", &position.x, 0.1f);
+    }
+
+    if (componentManager.hasComponent<RotationComponent3D>(entity) && ImGui::CollapsingHeader("Rotation"))
+    {
+      auto &rot = componentManager.getComponent<RotationComponent3D>(entity);
+      ImGui::DragFloat4("Quaternion (x,y,z,w)", &rot.qx, 0.01f);
+    }
+
+    if (componentManager.hasComponent<RigidBodyComponent>(entity) && ImGui::CollapsingHeader("Rigid Body"))
+    {
+      auto &rb = componentManager.getComponent<RigidBodyComponent>(entity);
+
+      int bodyType = static_cast<int>(rb.type);
+      const char *bodyTypeLabels[] = {"Static", "Kinematic", "Dynamic"};
+      if (ImGui::Combo("Body Type", &bodyType, bodyTypeLabels, IM_ARRAYSIZE(bodyTypeLabels)))
+      {
+        rb.type = static_cast<RigidBodyType>(bodyType);
+      }
+
+      if (rb.type == RigidBodyType::Dynamic)
+      {
+        ImGui::DragFloat("Mass", &rb.mass, 0.1f, 0.01f, 10000.0f);
+      }
+      ImGui::DragFloat("Linear Damping", &rb.linearDamping, 0.01f, 0.0f, 10.0f);
+      ImGui::DragFloat("Angular Damping", &rb.angularDamping, 0.01f, 0.0f, 10.0f);
+      ImGui::DragFloat("Friction", &rb.friction, 0.01f, 0.0f, 2.0f);
+      ImGui::DragFloat("Restitution", &rb.restitution, 0.01f, 0.0f, 2.0f);
+      ImGui::DragFloat("Gravity Scale", &rb.gravityScale, 0.1f, 0.0f, 10.0f);
+
+      if (rb.mass < 0.01f)
+      {
+        rb.mass = 0.01f;
+      }
+    }
+
+    if (componentManager.hasComponent<ColliderComponent>(entity) && ImGui::CollapsingHeader("Collider"))
+    {
+      auto &col = componentManager.getComponent<ColliderComponent>(entity);
+
+      int shapeType = static_cast<int>(col.shape);
+      const char *shapeLabels[] = {"Box", "Sphere", "Capsule"};
+      if (ImGui::Combo("Shape", &shapeType, shapeLabels, IM_ARRAYSIZE(shapeLabels)))
+      {
+        col.shape = static_cast<ColliderShape>(shapeType);
+      }
+
+      switch (col.shape)
+      {
+      case ColliderShape::Box:
+        ImGui::DragFloat3("Half Extents", &col.halfExtentX, 0.05f, 0.01f, 100.0f);
+        break;
+      case ColliderShape::Sphere:
+        ImGui::DragFloat("Radius", &col.radius, 0.05f, 0.01f, 100.0f);
+        break;
+      case ColliderShape::Capsule:
+        ImGui::DragFloat("Half Height", &col.capsuleHalfHeight, 0.05f, 0.01f, 100.0f);
+        ImGui::DragFloat("Capsule Radius", &col.capsuleRadius, 0.05f, 0.01f, 100.0f);
+        break;
+      }
     }
 
     if (componentManager.hasComponent<CameraComponent>(entity) && ImGui::CollapsingHeader("Camera"))

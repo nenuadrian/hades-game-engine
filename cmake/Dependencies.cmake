@@ -20,9 +20,9 @@ set(HADES_MINIAUDIO_TAG "0.11.25" CACHE STRING "miniaudio git tag or branch.")
 # Use the nearest stable release tag for on-demand downloads.
 set(HADES_SDL2_TAG "release-2.32.0" CACHE STRING "SDL2 git tag or branch.")
 set(HADES_ASSIMP_TAG "v6.0.4" CACHE STRING "Assimp git tag or branch.")
-set(HADES_TINYOBJLOADER_TAG "v2.0.0rc13" CACHE STRING "tinyobjloader git tag or branch.")
 set(HADES_IMGUI_TEXTEDIT_TAG "master" CACHE STRING "ImGuiColorTextEdit git tag or branch.")
 set(HADES_NLOHMANN_JSON_TAG "v3.11.3" CACHE STRING "nlohmann/json git tag or branch.")
+set(HADES_JOLTPHYSICS_TAG "v5.3.0" CACHE STRING "JoltPhysics git tag or branch.")
 
 function(hades_prefer_local_source fetch_name local_dir)
   string(TOUPPER "${fetch_name}" fetch_name_upper)
@@ -52,7 +52,6 @@ function(hades_configure_dependencies)
   hades_prefer_local_source(miniaudio "${CMAKE_SOURCE_DIR}/lib/miniaudio")
   hades_prefer_local_source(sdl2 "${CMAKE_SOURCE_DIR}/lib/imgui/lib/SDL2")
   hades_prefer_local_source(assimp "${CMAKE_SOURCE_DIR}/lib/assimp")
-  hades_prefer_local_source(tinyobjloader "${CMAKE_SOURCE_DIR}/lib/tinyobjloader")
   hades_prefer_local_source(imgui_color_text_edit "${CMAKE_SOURCE_DIR}/lib/ImGuiColorTextEdit")
   hades_prefer_local_source(nlohmann_json "${CMAKE_SOURCE_DIR}/lib/json")
 
@@ -92,10 +91,6 @@ function(hades_configure_dependencies)
   set(ASSIMP_WARNINGS_AS_ERRORS OFF CACHE BOOL "" FORCE)
   set(ASSIMP_INJECT_DEBUG_POSTFIX OFF CACHE BOOL "" FORCE)
 
-  set(TINYOBJLOADER_BUILD_TEST_LOADER OFF CACHE BOOL "" FORCE)
-  set(TINYOBJLOADER_BUILD_OBJ_STICHER OFF CACHE BOOL "" FORCE)
-  set(TINYOBJLOADER_WITH_PYTHON OFF CACHE BOOL "" FORCE)
-
   FetchContent_Declare(
     cli11
     GIT_REPOSITORY https://github.com/CLIUtils/CLI11.git
@@ -127,11 +122,6 @@ function(hades_configure_dependencies)
     GIT_TAG ${HADES_ASSIMP_TAG}
     GIT_SHALLOW TRUE)
   FetchContent_Declare(
-    tinyobjloader
-    GIT_REPOSITORY https://github.com/tinyobjloader/tinyobjloader.git
-    GIT_TAG ${HADES_TINYOBJLOADER_TAG}
-    GIT_SHALLOW TRUE)
-  FetchContent_Declare(
     imgui_color_text_edit
     GIT_REPOSITORY https://github.com/BalazsJako/ImGuiColorTextEdit.git
     GIT_TAG ${HADES_IMGUI_TEXTEDIT_TAG}
@@ -140,13 +130,28 @@ function(hades_configure_dependencies)
   set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
   set(JSON_Install OFF CACHE BOOL "" FORCE)
   set(JSON_MultipleHeaders OFF CACHE BOOL "" FORCE)
+
+  set(TARGET_HELLO_WORLD OFF CACHE BOOL "" FORCE)
+  set(TARGET_UNIT_TESTS OFF CACHE BOOL "" FORCE)
+  set(TARGET_PERFORMANCE_TEST OFF CACHE BOOL "" FORCE)
+  set(TARGET_SAMPLES OFF CACHE BOOL "" FORCE)
+  set(TARGET_VIEWER OFF CACHE BOOL "" FORCE)
+  set(ENABLE_ALL_WARNINGS OFF CACHE BOOL "" FORCE)
+  set(INTERPROCEDURAL_OPTIMIZATION OFF CACHE BOOL "" FORCE)
   FetchContent_Declare(
     nlohmann_json
     GIT_REPOSITORY https://github.com/nlohmann/json.git
     GIT_TAG ${HADES_NLOHMANN_JSON_TAG}
     GIT_SHALLOW TRUE)
 
-  FetchContent_MakeAvailable(cli11 googletest miniaudio sdl2 assimp tinyobjloader imgui_color_text_edit nlohmann_json)
+  FetchContent_Declare(
+    joltphysics
+    GIT_REPOSITORY https://github.com/jrouwe/JoltPhysics.git
+    GIT_TAG ${HADES_JOLTPHYSICS_TAG}
+    GIT_SHALLOW TRUE
+    SOURCE_SUBDIR Build)
+
+  FetchContent_MakeAvailable(cli11 googletest miniaudio sdl2 assimp imgui_color_text_edit nlohmann_json joltphysics)
 
   FetchContent_GetProperties(imgui)
   if(NOT imgui_POPULATED)

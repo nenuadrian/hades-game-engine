@@ -24,6 +24,8 @@ namespace hades
 {
   class AudioEngine;
   class AudioSystem;
+  class PhysicsSystem;
+  class PhysicsWorld;
   class Renderer;
 
   class WindowManager
@@ -106,6 +108,8 @@ namespace hades
     std::unique_ptr<Renderer> renderer;
     std::unique_ptr<AudioEngine> audio_engine;
     std::shared_ptr<AudioSystem> audioSystem;
+    std::unique_ptr<PhysicsWorld> physics_world;
+    std::shared_ptr<PhysicsSystem> physicsSystem;
     ImGuiSession imgui_session;
     bool initialized = false;
     bool running = false;

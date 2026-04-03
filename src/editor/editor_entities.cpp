@@ -246,6 +246,9 @@ namespace hades
     case EditorEntityPreset::AudioEmitter:
       createdEntity = EntityFactory::createAudioEmitter(entityManager, componentManager, parent);
       break;
+    case EditorEntityPreset::PhysicsCube:
+      createdEntity = EntityFactory::createPhysicsCube(entityManager, componentManager, parent);
+      break;
     case EditorEntityPreset::None:
       break;
     }
@@ -570,6 +573,10 @@ namespace hades
         if (ImGui::MenuItem("Audio Emitter"))
         {
           request_entity_creation(EditorEntityPreset::AudioEmitter, entity);
+        }
+        if (ImGui::MenuItem("Physics Cube"))
+        {
+          request_entity_creation(EditorEntityPreset::PhysicsCube, entity);
         }
         if (ImGui::MenuItem("Import Model..."))
         {

@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace hades
@@ -14,7 +15,7 @@ namespace hades
   public:
     struct Entry
     {
-      const char *name = nullptr;
+      std::string name;
       double lastMs = 0.0;
       double totalMs = 0.0;
       std::uint32_t count = 0;

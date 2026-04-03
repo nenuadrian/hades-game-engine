@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "imgui.h"
+#include "../engine/profiling/frame_metrics.hpp"
 
 namespace hades
 {
@@ -367,7 +368,15 @@ namespace hades
     {
       if (plugin->phase() == phase)
       {
+#ifdef HADES_ENABLE_FRAME_METRICS
+        const auto pluginId = plugin->id();
+        std::string metricName = "plugin:" + std::string(pluginId);
+        HADES_FRAME_METRIC_BEGIN(metricName.c_str());
         plugin->render(context);
+        HADES_FRAME_METRIC_END(metricName.c_str());
+#else
+        plugin->render(context);
+#endif
       }
     }
   }

@@ -15,11 +15,14 @@
 #include "../../components/audio_listener_component.hpp"
 #include "../../components/audio_source_component.hpp"
 #include "../../components/camera_component.hpp"
+#include "../../components/collider_component.hpp"
 #include "../../components/model_component.hpp"
 #include "../../components/name_component.hpp"
 #include "../../components/position_component_3d.hpp"
 #include "../../components/primitive_component.hpp"
 #include "../../components/render_component.hpp"
+#include "../../components/rigid_body_component.hpp"
+#include "../../components/rotation_component_3d.hpp"
 #include "../../components/script_component.hpp"
 #include "../../components/text_component.hpp"
 #include "../../components/transform_hierarchy_component.hpp"
@@ -192,6 +195,38 @@ namespace hades
             {"formatHint", c.model.formatHint}};
       }
 
+      if (componentManager.hasComponent<RotationComponent3D>(entity))
+      {
+        const auto &c = componentManager.getComponent<RotationComponent3D>(entity);
+        components["rotation3d"] = {{"qx", c.qx}, {"qy", c.qy}, {"qz", c.qz}, {"qw", c.qw}};
+      }
+
+      if (componentManager.hasComponent<RigidBodyComponent>(entity))
+      {
+        const auto &c = componentManager.getComponent<RigidBodyComponent>(entity);
+        components["rigidBody"] = {
+            {"type", static_cast<int>(c.type)},
+            {"mass", c.mass},
+            {"linearDamping", c.linearDamping},
+            {"angularDamping", c.angularDamping},
+            {"friction", c.friction},
+            {"restitution", c.restitution},
+            {"gravityScale", c.gravityScale}};
+      }
+
+      if (componentManager.hasComponent<ColliderComponent>(entity))
+      {
+        const auto &c = componentManager.getComponent<ColliderComponent>(entity);
+        components["collider"] = {
+            {"shape", static_cast<int>(c.shape)},
+            {"halfExtentX", c.halfExtentX},
+            {"halfExtentY", c.halfExtentY},
+            {"halfExtentZ", c.halfExtentZ},
+            {"radius", c.radius},
+            {"capsuleHalfHeight", c.capsuleHalfHeight},
+            {"capsuleRadius", c.capsuleRadius}};
+      }
+
       j["components"] = components;
       return j;
     }
@@ -350,6 +385,45 @@ namespace hades
         {
           std::fprintf(stderr, "Warning: failed to re-import model from '%s'\n", sourcePath.c_str());
         }
+      }
+
+      if (components.contains("rotation3d"))
+      {
+        const auto &r = components["rotation3d"];
+        RotationComponent3D c;
+        c.qx = r["qx"].get<float>();
+        c.qy = r["qy"].get<float>();
+        c.qz = r["qz"].get<float>();
+        c.qw = r["qw"].get<float>();
+        componentManager.addComponent(newEntity, c);
+      }
+
+      if (components.contains("rigidBody"))
+      {
+        const auto &rb = components["rigidBody"];
+        RigidBodyComponent c;
+        c.type = static_cast<RigidBodyType>(rb["type"].get<int>());
+        c.mass = rb["mass"].get<float>();
+        c.linearDamping = rb["linearDamping"].get<float>();
+        c.angularDamping = rb["angularDamping"].get<float>();
+        c.friction = rb["friction"].get<float>();
+        c.restitution = rb["restitution"].get<float>();
+        c.gravityScale = rb["gravityScale"].get<float>();
+        componentManager.addComponent(newEntity, c);
+      }
+
+      if (components.contains("collider"))
+      {
+        const auto &col = components["collider"];
+        ColliderComponent c;
+        c.shape = static_cast<ColliderShape>(col["shape"].get<int>());
+        c.halfExtentX = col["halfExtentX"].get<float>();
+        c.halfExtentY = col["halfExtentY"].get<float>();
+        c.halfExtentZ = col["halfExtentZ"].get<float>();
+        c.radius = col["radius"].get<float>();
+        c.capsuleHalfHeight = col["capsuleHalfHeight"].get<float>();
+        c.capsuleRadius = col["capsuleRadius"].get<float>();
+        componentManager.addComponent(newEntity, c);
       }
     }
 

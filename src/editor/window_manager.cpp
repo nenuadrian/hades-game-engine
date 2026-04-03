@@ -22,8 +22,10 @@
 #include "../engine/rendering/renderer.hpp"
 #include "../engine/profiling/frame_metrics.hpp"
 #include "../engine/rendering/vulkan.hpp"
+#include "../engine/physics/physics_world.hpp"
 #include "../engine/systems/audio_system.hpp"
 #include "../engine/systems/movement_system.hpp"
+#include "../engine/systems/physics_system.hpp"
 #include "../engine/systems/render_system.hpp"
 
 namespace
@@ -649,7 +651,8 @@ namespace hades
 
   WindowManager::WindowManager()
       : renderer(std::make_unique<VulkanRenderer>()),
-        audio_engine(std::make_unique<AudioEngine>()) {}
+        audio_engine(std::make_unique<AudioEngine>()),
+        physics_world(std::make_unique<PhysicsWorld>()) {}
 
   WindowManager::~WindowManager()
   {
@@ -1131,6 +1134,11 @@ namespace hades
     {
       audioSystem->set_active_world(std::nullopt);
     }
+    if (physicsSystem != nullptr)
+    {
+      physicsSystem->set_active_world(std::nullopt);
+      physicsSystem->clear_bodies();
+    }
   }
 
   void WindowManager::sync_play_window()
@@ -1271,6 +1279,14 @@ namespace hades
       audio_engine.reset();
     }
 
+    if (!physics_world->init())
+    {
+      std::fprintf(stderr, "Warning: physics engine is unavailable. Physics simulation has been disabled.\n");
+      physics_world.reset();
+    }
+
+    physicsSystem = systemManager.registerSystem<PhysicsSystem>();
+    physicsSystem->setPhysicsWorld(physics_world.get());
     systemManager.registerSystem<MovementSystem>();
     systemManager.registerSystem<RenderSystem>();
     audioSystem = systemManager.registerSystem<AudioSystem>();
@@ -1379,6 +1395,10 @@ namespace hades
       if (audioSystem != nullptr)
       {
         audioSystem->set_active_world(editor.state.isPlaying ? editor.state.activeWorld : std::nullopt);
+      }
+      if (physicsSystem != nullptr)
+      {
+        physicsSystem->set_active_world(editor.state.isPlaying ? editor.state.activeWorld : std::nullopt);
       }
       if (editor.state.isPlaying)
       {

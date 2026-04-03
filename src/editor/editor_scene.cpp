@@ -496,18 +496,91 @@ namespace hades
           alpha);
     }
 
-    bool draw_model_mesh(
-        ImDrawList *drawList,
+    bool is_entity_potentially_visible(
+        const PositionComponent3D &position,
+        const EditorSceneViewCamera &sceneCamera,
+        const CameraComponent &camera,
+        float boundsRadius)
+    {
+      const Vec3 toEntity = subtract_vec3(
+          make_vec3(position.x, position.y, position.z),
+          make_vec3(sceneCamera.position));
+      const float depthAlongForward = dot_vec3(toEntity, sceneCamera.forward);
+      if (depthAlongForward + boundsRadius < camera.nearClip ||
+          depthAlongForward - boundsRadius > camera.farClip)
+      {
+        return false;
+      }
+
+      return true;
+    }
+
+    float entity_bounds_radius(const ImportedModel &model)
+    {
+      if (!model.hasBounds)
+      {
+        return CUBE_HALF_EXTENT * 1.732f;
+      }
+
+      const float dx = std::max(std::abs(model.minX), std::abs(model.maxX));
+      const float dy = std::max(std::abs(model.minY), std::abs(model.maxY));
+      const float dz = std::max(std::abs(model.minZ), std::abs(model.maxZ));
+      return std::sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    struct ModelProjectionCacheKey
+    {
+      float cameraX, cameraY, cameraZ;
+      float cameraDistance, cameraYaw, cameraPitch;
+      float canvasW, canvasH;
+      float posX, posY, posZ;
+      const void *modelPtr;
+
+      bool operator==(const ModelProjectionCacheKey &other) const
+      {
+        return cameraX == other.cameraX && cameraY == other.cameraY && cameraZ == other.cameraZ &&
+               cameraDistance == other.cameraDistance && cameraYaw == other.cameraYaw &&
+               cameraPitch == other.cameraPitch && canvasW == other.canvasW && canvasH == other.canvasH &&
+               posX == other.posX && posY == other.posY && posZ == other.posZ &&
+               modelPtr == other.modelPtr;
+      }
+    };
+
+    struct ModelProjectionCacheEntry
+    {
+      ModelProjectionCacheKey key{};
+      std::vector<hades::preview::ProjectedTriangle> triangles;
+    };
+
+    std::unordered_map<Entity::EntityId, ModelProjectionCacheEntry> modelProjectionCache_;
+
+    const std::vector<hades::preview::ProjectedTriangle> &get_or_project_model(
+        Entity::EntityId entity,
         const EditorSceneViewCamera &sceneCamera,
         const CameraComponent &camera,
         const ImVec2 &canvasOrigin,
         const ImVec2 &canvasSize,
         const PositionComponent3D &position,
         const ImportedModel &model,
-        const std::string *label = nullptr,
-        ImU32 labelColor = IM_COL32(205, 210, 218, 255))
+        float cameraDistance,
+        float cameraYaw,
+        float cameraPitch)
     {
-      const auto projectedTriangles = hades::preview::project_model_triangles(
+      ModelProjectionCacheKey key{
+          sceneCamera.position.x, sceneCamera.position.y, sceneCamera.position.z,
+          cameraDistance, cameraYaw, cameraPitch,
+          canvasSize.x, canvasSize.y,
+          position.x, position.y, position.z,
+          static_cast<const void *>(&model)};
+
+      auto &entry = modelProjectionCache_[entity];
+      if (entry.key == key)
+      {
+        return entry.triangles;
+      }
+
+      entry.key = key;
+      entry.triangles = hades::preview::project_model_triangles(
           model,
           position,
           [&](const hades::preview::Vec3 &worldPoint)
@@ -531,6 +604,30 @@ namespace hades
             screenPoint.y = projectedPoint.y;
             return true;
           });
+
+      return entry.triangles;
+    }
+
+    bool draw_model_mesh(
+        ImDrawList *drawList,
+        const EditorSceneViewCamera &sceneCamera,
+        const CameraComponent &camera,
+        const ImVec2 &canvasOrigin,
+        const ImVec2 &canvasSize,
+        const PositionComponent3D &position,
+        const ImportedModel &model,
+        const std::string *label = nullptr,
+        ImU32 labelColor = IM_COL32(205, 210, 218, 255),
+        Entity::EntityId entity = Entity::INVALID,
+        float cameraDistance = 0.0f,
+        float cameraYaw = 0.0f,
+        float cameraPitch = 0.0f)
+    {
+      const auto &projectedTriangles = (entity != Entity::INVALID)
+          ? get_or_project_model(entity, sceneCamera, camera, canvasOrigin, canvasSize,
+                                 position, model, cameraDistance, cameraYaw, cameraPitch)
+          : get_or_project_model(Entity::INVALID, sceneCamera, camera, canvasOrigin, canvasSize,
+                                 position, model, cameraDistance, cameraYaw, cameraPitch);
 
       if (projectedTriangles.empty())
       {
@@ -1335,7 +1432,10 @@ namespace hades
         ComponentManager &componentManager,
         std::optional<Entity::EntityId> world,
         std::optional<Entity::EntityId> excludedEntity,
-        std::optional<Entity::EntityId> selectedEntity)
+        std::optional<Entity::EntityId> selectedEntity,
+        float cameraDistance = 0.0f,
+        float cameraYaw = 0.0f,
+        float cameraPitch = 0.0f)
     {
       int visibleRenderableCount = 0;
       for (Entity::EntityId entity : entityManager.getAllEntities())
@@ -1412,7 +1512,10 @@ namespace hades
         if (componentManager.hasComponent<ModelComponent>(entity))
         {
           const auto &model = componentManager.getComponent<ModelComponent>(entity).model;
-          const bool modelDrawn = hades::preview::has_renderable_geometry(model) &&
+          const bool modelInFrustum = is_entity_potentially_visible(
+              position, sceneCamera, camera, entity_bounds_radius(model));
+          const bool modelDrawn = modelInFrustum &&
+                                  hades::preview::has_renderable_geometry(model) &&
                                   draw_model_mesh(
                                       drawList,
                                       sceneCamera,
@@ -1422,7 +1525,11 @@ namespace hades
                                       position,
                                       model,
                                       &label,
-                                      isSelected ? selectedLabelColor : IM_COL32(205, 210, 218, 255));
+                                      isSelected ? selectedLabelColor : IM_COL32(205, 210, 218, 255),
+                                      entity,
+                                      cameraDistance,
+                                      cameraYaw,
+                                      cameraPitch);
           if (modelDrawn)
           {
             ++visibleRenderableCount;
@@ -1776,7 +1883,10 @@ namespace hades
         componentManager,
         sceneWorld,
         std::nullopt,
-        state.selectedEntity);
+        state.selectedEntity,
+        sceneCameraDistance_,
+        sceneCameraYawDegrees_,
+        sceneCameraPitchDegrees_);
 
     if (selectedEntityIsEditableInScene)
     {
@@ -2042,7 +2152,7 @@ namespace hades
       {
         ImGui::TableNextRow();
         ImGui::TableNextColumn();
-        ImGui::TextUnformatted(entry.name);
+        ImGui::TextUnformatted(entry.name.c_str());
         ImGui::TableNextColumn();
         ImGui::Text("%.3f", entry.lastMs);
         ImGui::TableNextColumn();

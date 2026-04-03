@@ -25,6 +25,7 @@ namespace hades
     Cube,
     Text,
     AudioEmitter,
+    PhysicsCube,
   };
 
   enum class EditorPlayAction
