@@ -23,6 +23,7 @@
 #include "../core/ecs/entity_manager.hpp"
 #include "../core/ecs/world_utils.hpp"
 #include "clr_host.hpp"
+#include "dotnet_config.hpp"
 #include "subprocess.hpp"
 
 namespace hades
@@ -167,6 +168,16 @@ namespace hades
     std::string to_utf8(const std::filesystem::path &path)
     {
       return path.u8string();
+    }
+
+    std::string dotnet_executable()
+    {
+      if (dotnet_config::configured_dotnet_executable[0] != '\0')
+      {
+        return dotnet_config::configured_dotnet_executable;
+      }
+
+      return "dotnet";
     }
 
     bool write_text_file(
@@ -507,7 +518,7 @@ namespace Hades.Scripting
         }
 
         [UnmanagedCallersOnly]
-        public static void LoadScene(
+        public static unsafe void LoadScene(
             IntPtr entitiesPtr, int entityCount,
             IntPtr namesPtr, IntPtr classNamesPtr,
             IntPtr resultPtr)
@@ -579,7 +590,7 @@ namespace Hades.Scripting
         }
 
         [UnmanagedCallersOnly]
-        public static void UpdateFrame(
+        public static unsafe void UpdateFrame(
             float deltaTime,
             IntPtr positionsInPtr, int entityCount,
             IntPtr positionsOutPtr,
@@ -729,7 +740,8 @@ namespace Hades.Scripting
         BuildArtifacts &artifacts,
         std::string *errorMessage)
     {
-      const ProcessResult dotnetVersion = Subprocess::run_capture({"dotnet", "--version"});
+      const std::string dotnetCommand = dotnet_executable();
+      const ProcessResult dotnetVersion = Subprocess::run_capture({dotnetCommand, "--version"});
       if (!dotnetVersion.launched)
       {
         if (errorMessage != nullptr)
@@ -742,7 +754,15 @@ namespace Hades.Scripting
       {
         if (errorMessage != nullptr)
         {
-          *errorMessage = "Failed to query the installed dotnet SDK version.\n" + dotnetVersion.output;
+          if (dotnetVersion.exitCode == 127)
+          {
+            *errorMessage = "Could not launch the configured dotnet SDK command: " + dotnetCommand +
+                            ". Re-run CMake after installing .NET SDK 7.0+ or make dotnet available on PATH.";
+          }
+          else
+          {
+            *errorMessage = "Failed to query the installed dotnet SDK version.\n" + dotnetVersion.output;
+          }
         }
         return false;
       }
@@ -795,7 +815,7 @@ namespace Hades.Scripting
 
       const ProcessResult buildResult = Subprocess::run_capture(
           {
-              "dotnet",
+              dotnetCommand,
               "build",
               to_utf8(artifacts.projectPath),
               "-c",
