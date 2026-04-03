@@ -24,11 +24,15 @@ compile or load, the error appears there in red.
 
 ## Script Shape
 
-Scripts must derive from `Hades.Scripting.HadesScript`. The host exposes two
+Scripts must derive from `Hades.Scripting.HadesScript`. The host exposes four
 virtual entry points:
 
 - `OnStart(EntityContext context)` -- called once when play starts
 - `OnUpdate(EntityContext context, float deltaTime)` -- called every frame
+- `OnKeyDown(EntityContext context, int keyCode)` -- called when SDL emits a
+  key down event during play mode
+- `OnKeyUp(EntityContext context, int keyCode)` -- called when SDL emits a key
+  up event during play mode
 
 `EntityContext` exposes:
 
@@ -52,6 +56,16 @@ public sealed class MoveAlongX : HadesScript
         var position = context.Position;
         position.X += 1.0f * deltaTime;
         context.Position = position;
+    }
+
+    public override void OnKeyDown(EntityContext context, int keyCode)
+    {
+        if (keyCode == 32)
+        {
+            var position = context.Position;
+            position.Y += 1.0f;
+            context.Position = position;
+        }
     }
 }
 ```
@@ -87,11 +101,13 @@ When play mode starts, the engine runs through these steps in
    `libhostfxr` (see [Runtime Location](#runtime-location)), loads it via
    `dlopen`/`LoadLibrary`, and calls `hostfxr_initialize_for_runtime_config`
    to create a host context.
-9. **Entry point resolution** (`ClrHost::get_managed_function`) -- three
+9. **Entry point resolution** (`ClrHost::get_managed_function`) -- five
    managed methods are resolved as native function pointers using the
    `[UnmanagedCallersOnly]` convention:
    - `ScriptHost.LoadScene`
    - `ScriptHost.UpdateFrame`
+   - `ScriptHost.OnKeyDown`
+   - `ScriptHost.OnKeyUp`
    - `ScriptHost.Shutdown`
 10. **Scene loading** -- `LoadScene` is called with packed interop structs
     containing entity IDs, names, positions, and class names. The managed host
@@ -105,7 +121,9 @@ After initialization, every frame during play mode:
 2. The managed host calls `OnUpdate` on every script instance.
 3. Updated positions are written to an output buffer and read back into each
    entity's `PositionComponent3D`.
-4. If the managed host throws, play mode stops and the exception message is
+4. SDL key down/up events are forwarded to `OnKeyDown` and `OnKeyUp` with the
+   raw SDL keycode from `event.key.keysym.sym`.
+5. If the managed host throws, play mode stops and the exception message is
    shown in the Debug Console.
 
 When play stops (or the user clicks **Game > Stop**), `Shutdown` is called,
@@ -176,6 +194,8 @@ and whenever an error is logged. Common errors and what they mean:
 | `Unable to locate script class '...'` | The class name in the script attachment does not match any type in the compiled assembly. Check spelling and namespace. |
 | `Type '...' must derive from Hades.Scripting.HadesScript` | The specified class exists but does not extend the required base class. |
 | `A managed script threw an exception during OnUpdate` | A runtime exception occurred in user script code. The exception message is included. |
+| `A managed script threw an exception during OnKeyDown` | A runtime exception occurred in a key-down handler. The exception message is included. |
+| `A managed script threw an exception during OnKeyUp` | A runtime exception occurred in a key-up handler. The exception message is included. |
 | `Play mode requires at least one camera` | Add a camera entity to the active world. |
 | `Play mode requires one camera ... marked as Main Camera` | Select a camera entity and tick the "Main Camera" checkbox in the inspector. |
 

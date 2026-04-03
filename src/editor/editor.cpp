@@ -66,6 +66,7 @@ namespace hades
     workspaceScanError_.clear();
     openScriptEditorTabs_.clear();
     activeScriptEditorTabIndex_.reset();
+    pendingScriptEditorTabSelectionIndex_.reset();
     scriptEditorStatusMessage_.clear();
     scriptEditorStatusIsError_ = false;
     openScriptEditorWindow_ = false;

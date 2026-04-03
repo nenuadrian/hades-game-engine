@@ -47,6 +47,8 @@ namespace hades
     bool is_running() const;
     bool faulted() const;
     const std::string &last_error() const;
+    void on_key_down(int keyCode);
+    void on_key_up(int keyCode);
 
     /// Compile the given .cs source files without loading or running them.
     /// Returns true on success. On failure, sets errorMessage with build output.

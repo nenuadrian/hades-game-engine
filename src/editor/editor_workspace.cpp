@@ -226,6 +226,14 @@ namespace hades
              "    public override void OnUpdate(EntityContext context, float deltaTime)\n"
              "    {\n"
              "    }\n"
+             "\n"
+             "    public override void OnKeyDown(EntityContext context, int keyCode)\n"
+             "    {\n"
+             "    }\n"
+             "\n"
+             "    public override void OnKeyUp(EntityContext context, int keyCode)\n"
+             "    {\n"
+             "    }\n"
              "}\n";
     }
 
@@ -910,6 +918,7 @@ namespace hades
     }
 
     activeScriptEditorTabIndex_ = index;
+    pendingScriptEditorTabSelectionIndex_ = index;
     openScriptEditorWindow_ = true;
     focusScriptEditorWindow_ = true;
   }
@@ -933,24 +942,36 @@ namespace hades
     if (openScriptEditorTabs_.empty())
     {
       activeScriptEditorTabIndex_.reset();
+      pendingScriptEditorTabSelectionIndex_.reset();
       return;
     }
 
     if (!activeScriptEditorTabIndex_.has_value())
     {
       activeScriptEditorTabIndex_ = 0;
+      pendingScriptEditorTabSelectionIndex_ = 0;
       return;
     }
 
     if (*activeScriptEditorTabIndex_ > index)
     {
       --(*activeScriptEditorTabIndex_);
+      if (pendingScriptEditorTabSelectionIndex_.has_value() && *pendingScriptEditorTabSelectionIndex_ > index)
+      {
+        --(*pendingScriptEditorTabSelectionIndex_);
+      }
       return;
     }
 
     if (*activeScriptEditorTabIndex_ >= openScriptEditorTabs_.size())
     {
       activeScriptEditorTabIndex_ = openScriptEditorTabs_.size() - 1;
+      pendingScriptEditorTabSelectionIndex_ = activeScriptEditorTabIndex_;
+    }
+    else if (pendingScriptEditorTabSelectionIndex_.has_value() &&
+             *pendingScriptEditorTabSelectionIndex_ >= openScriptEditorTabs_.size())
+    {
+      pendingScriptEditorTabSelectionIndex_.reset();
     }
   }
 
@@ -1312,7 +1333,8 @@ namespace hades
           ScriptEditorTab &tab = openScriptEditorTabs_[index];
           bool keepTabOpen = true;
           ImGuiTabItemFlags itemFlags = tab.dirty ? ImGuiTabItemFlags_UnsavedDocument : ImGuiTabItemFlags_None;
-          if (activeScriptEditorTabIndex_.has_value() && *activeScriptEditorTabIndex_ == index)
+          if (pendingScriptEditorTabSelectionIndex_.has_value() &&
+              *pendingScriptEditorTabSelectionIndex_ == index)
           {
             itemFlags |= ImGuiTabItemFlags_SetSelected;
           }
@@ -1330,6 +1352,7 @@ namespace hades
           }
         }
         ImGui::EndTabBar();
+        pendingScriptEditorTabSelectionIndex_.reset();
       }
 
       if (closeTabIndex.has_value())

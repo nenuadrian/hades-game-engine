@@ -104,6 +104,7 @@ namespace hades
     std::string workspaceScanError_;
     std::vector<ScriptEditorTab> openScriptEditorTabs_;
     std::optional<std::size_t> activeScriptEditorTabIndex_;
+    std::optional<std::size_t> pendingScriptEditorTabSelectionIndex_;
     std::string scriptEditorStatusMessage_;
     bool scriptEditorStatusIsError_ = false;
     bool openScriptEditorWindow_ = false;

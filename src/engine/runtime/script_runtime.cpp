@@ -73,6 +73,13 @@ namespace hades
       const char *errorMessage;
       int32_t errorLength;
     };
+
+    struct InteropEventResult
+    {
+      int32_t success;
+      const char *errorMessage;
+      int32_t errorLength;
+    };
 #pragma pack(pop)
 
     // Function pointer types for managed entry points.
@@ -86,6 +93,10 @@ namespace hades
         const InteropEntityPosition *positionsIn, int32_t entityCount,
         InteropEntityPosition *positionsOut,
         InteropUpdateResult *result);
+
+    using KeyEventFn = void (*)(
+        int32_t keyCode,
+        InteropEventResult *result);
 
     using ShutdownFn = void (*)();
 
@@ -397,6 +408,8 @@ namespace Hades.Scripting
     {
         public virtual void OnStart(EntityContext context) { }
         public virtual void OnUpdate(EntityContext context, float deltaTime) { }
+        public virtual void OnKeyDown(EntityContext context, int keyCode) { }
+        public virtual void OnKeyUp(EntityContext context, int keyCode) { }
     }
 
     // Interop structures matching the C++ side (packed, blittable).
@@ -450,6 +463,14 @@ namespace Hades.Scripting
         public int ErrorLength;
     }
 
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    internal struct InteropEventResult
+    {
+        public int Success;
+        public IntPtr ErrorMessage;
+        public int ErrorLength;
+    }
+
     public static class ScriptHost
     {
         private sealed class ScriptInstance
@@ -478,6 +499,15 @@ namespace Hades.Scripting
         }
 
         private static void SetError(ref InteropUpdateResult result, string message)
+        {
+            FreeLastError();
+            _lastErrorPtr = Marshal.StringToCoTaskMemUTF8(message);
+            result.ErrorMessage = _lastErrorPtr;
+            result.ErrorLength = System.Text.Encoding.UTF8.GetByteCount(message);
+            result.Success = 0;
+        }
+
+        private static void SetError(ref InteropEventResult result, string message)
         {
             FreeLastError();
             _lastErrorPtr = Marshal.StringToCoTaskMemUTF8(message);
@@ -653,6 +683,64 @@ namespace Hades.Scripting
                 }
 
                 result.EntityCount = outIndex;
+            }
+            catch (Exception ex)
+            {
+                SetError(ref result, ex.Message);
+            }
+        }
+
+        [UnmanagedCallersOnly]
+        public static unsafe void OnKeyDown(
+            int keyCode,
+            IntPtr resultPtr)
+        {
+            ref var result = ref Unsafe.AsRef<InteropEventResult>((void*)resultPtr);
+            result.Success = 1;
+            result.ErrorMessage = IntPtr.Zero;
+            result.ErrorLength = 0;
+
+            try
+            {
+                foreach (var entityId in EntityOrder)
+                {
+                    if (InstancesByEntity.TryGetValue(entityId, out var instances))
+                    {
+                        foreach (var instance in instances)
+                        {
+                            instance.Script.OnKeyDown(instance.Context, keyCode);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                SetError(ref result, ex.Message);
+            }
+        }
+
+        [UnmanagedCallersOnly]
+        public static unsafe void OnKeyUp(
+            int keyCode,
+            IntPtr resultPtr)
+        {
+            ref var result = ref Unsafe.AsRef<InteropEventResult>((void*)resultPtr);
+            result.Success = 1;
+            result.ErrorMessage = IntPtr.Zero;
+            result.ErrorLength = 0;
+
+            try
+            {
+                foreach (var entityId in EntityOrder)
+                {
+                    if (InstancesByEntity.TryGetValue(entityId, out var instances))
+                    {
+                        foreach (var instance in instances)
+                        {
+                            instance.Script.OnKeyUp(instance.Context, keyCode);
+                        }
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -903,6 +991,8 @@ namespace Hades.Scripting
 
     LoadSceneFn loadSceneFn = nullptr;
     UpdateFrameFn updateFrameFn = nullptr;
+    KeyEventFn keyDownFn = nullptr;
+    KeyEventFn keyUpFn = nullptr;
     ShutdownFn shutdownFn = nullptr;
   };
 
@@ -1001,10 +1091,14 @@ namespace Hades.Scripting
 
     void *loadScenePtr = nullptr;
     void *updateFramePtr = nullptr;
+    void *keyDownPtr = nullptr;
+    void *keyUpPtr = nullptr;
     void *shutdownPtr = nullptr;
 
     if (!impl_->clrHost.get_managed_function(assemblyPath, typeName, "LoadScene", &loadScenePtr, &localError) ||
         !impl_->clrHost.get_managed_function(assemblyPath, typeName, "UpdateFrame", &updateFramePtr, &localError) ||
+        !impl_->clrHost.get_managed_function(assemblyPath, typeName, "OnKeyDown", &keyDownPtr, &localError) ||
+        !impl_->clrHost.get_managed_function(assemblyPath, typeName, "OnKeyUp", &keyUpPtr, &localError) ||
         !impl_->clrHost.get_managed_function(assemblyPath, typeName, "Shutdown", &shutdownPtr, &localError))
     {
       impl_->clrHost.close();
@@ -1019,6 +1113,8 @@ namespace Hades.Scripting
 
     impl_->loadSceneFn = reinterpret_cast<LoadSceneFn>(loadScenePtr);
     impl_->updateFrameFn = reinterpret_cast<UpdateFrameFn>(updateFramePtr);
+    impl_->keyDownFn = reinterpret_cast<KeyEventFn>(keyDownPtr);
+    impl_->keyUpFn = reinterpret_cast<KeyEventFn>(keyUpPtr);
     impl_->shutdownFn = reinterpret_cast<ShutdownFn>(shutdownPtr);
 
     // Prepare interop data for LoadScene.
@@ -1196,6 +1292,8 @@ namespace Hades.Scripting
     impl_->clrHost.close();
     impl_->loadSceneFn = nullptr;
     impl_->updateFrameFn = nullptr;
+    impl_->keyDownFn = nullptr;
+    impl_->keyUpFn = nullptr;
     impl_->shutdownFn = nullptr;
     impl_->trackedEntities.clear();
     impl_->running = false;
@@ -1216,6 +1314,66 @@ namespace Hades.Scripting
   const std::string &ScriptRuntime::last_error() const
   {
     return impl_->lastError;
+  }
+
+  void ScriptRuntime::on_key_down(int keyCode)
+  {
+    if (!impl_->running || impl_->trackedEntities.empty() || impl_->keyDownFn == nullptr)
+    {
+      return;
+    }
+
+    InteropEventResult result{};
+    impl_->keyDownFn(static_cast<int32_t>(keyCode), &result);
+
+    if (result.success != 0)
+    {
+      return;
+    }
+
+    if (result.errorMessage != nullptr && result.errorLength > 0)
+    {
+      impl_->lastError.assign(
+          reinterpret_cast<const char *>(result.errorMessage),
+          static_cast<std::size_t>(result.errorLength));
+    }
+    else
+    {
+      impl_->lastError = "A managed script threw an exception during OnKeyDown.";
+    }
+
+    impl_->faulted = true;
+    impl_->running = false;
+  }
+
+  void ScriptRuntime::on_key_up(int keyCode)
+  {
+    if (!impl_->running || impl_->trackedEntities.empty() || impl_->keyUpFn == nullptr)
+    {
+      return;
+    }
+
+    InteropEventResult result{};
+    impl_->keyUpFn(static_cast<int32_t>(keyCode), &result);
+
+    if (result.success != 0)
+    {
+      return;
+    }
+
+    if (result.errorMessage != nullptr && result.errorLength > 0)
+    {
+      impl_->lastError.assign(
+          reinterpret_cast<const char *>(result.errorMessage),
+          static_cast<std::size_t>(result.errorLength));
+    }
+    else
+    {
+      impl_->lastError = "A managed script threw an exception during OnKeyUp.";
+    }
+
+    impl_->faulted = true;
+    impl_->running = false;
   }
 
   bool ScriptRuntime::compile(

@@ -1288,6 +1288,26 @@ namespace hades
           stop_active_play_mode();
         }
       }
+
+      if (editor.state.isPlaying)
+      {
+        if (event.type == SDL_KEYDOWN)
+        {
+          scriptRuntime.on_key_down(static_cast<int>(event.key.keysym.sym));
+          if (scriptRuntime.faulted())
+          {
+            stop_active_play_mode(scriptRuntime.last_error());
+          }
+        }
+        else if (event.type == SDL_KEYUP)
+        {
+          scriptRuntime.on_key_up(static_cast<int>(event.key.keysym.sym));
+          if (scriptRuntime.faulted())
+          {
+            stop_active_play_mode(scriptRuntime.last_error());
+          }
+        }
+      }
     }
 
     renderer->render_frame(window.get());
