@@ -15,6 +15,7 @@
 #include "../engine/core/ecs/scene_serializer.hpp"
 #include "../engine/core/ecs/world_utils.hpp"
 #include "../engine/gui/imgui.hpp"
+#include "../engine/profiling/frame_metrics.hpp"
 #include "../engine/runtime/script_runtime.hpp"
 
 namespace hades
@@ -156,10 +157,16 @@ namespace hades
       ComponentManager &componentManager,
       ScriptRuntime &scriptRuntime)
   {
-    refresh_workspace_cache(workspacePath);
+    {
+      HADES_FRAME_METRIC_SCOPE("workspace_cache");
+      refresh_workspace_cache(workspacePath);
+    }
     restore_saved_worlds_if_needed(entityManager, componentManager);
     ensure_world_state(entityManager, componentManager);
-    sync_menu_bar(entityManager, componentManager);
+    {
+      HADES_FRAME_METRIC_SCOPE("menu_bar");
+      sync_menu_bar(entityManager, componentManager);
+    }
     configure_default_dock_layout(gui->render_frame());
 
     if (backgroundCompileInProgress_ && backgroundCompileResult_.valid() &&
@@ -188,9 +195,15 @@ namespace hades
         componentManager,
         scriptRuntime,
     };
-    render_plugins(EditorPluginPhase::PreEntityDeletion, pluginContext);
+    {
+      HADES_FRAME_METRIC_SCOPE("plugins_pre");
+      render_plugins(EditorPluginPhase::PreEntityDeletion, pluginContext);
+    }
     handle_entity_deletion_requests(entityManager, componentManager, scriptRuntime);
-    render_plugins(EditorPluginPhase::PostEntityDeletion, pluginContext);
+    {
+      HADES_FRAME_METRIC_SCOPE("plugins_post");
+      render_plugins(EditorPluginPhase::PostEntityDeletion, pluginContext);
+    }
     render_workspace_dialogs(entityManager, componentManager);
   }
 

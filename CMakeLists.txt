@@ -82,8 +82,13 @@ file(
 
 set(SOURCES ${APP_SOURCE_FILES} ${HEADER_FILES})
 
+option(HADES_FRAME_METRICS "Enable frame metrics profiling" OFF)
+
 add_executable(${PROJECT_NAME} ${SOURCES})
 target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_BINARY_DIR}/generated")
+if(HADES_FRAME_METRICS)
+  target_compile_definitions(${PROJECT_NAME} PRIVATE HADES_ENABLE_FRAME_METRICS)
+endif()
 target_link_libraries(
   ${PROJECT_NAME}
   PRIVATE CLI11::CLI11

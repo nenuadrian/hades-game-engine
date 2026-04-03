@@ -18,6 +18,7 @@
 #include "../engine/core/ecs/component_manager.hpp"
 #include "../engine/core/ecs/entity_manager.hpp"
 #include "../engine/core/ecs/world_utils.hpp"
+#include "../engine/profiling/frame_metrics.hpp"
 #include "../engine/rendering/model_preview.hpp"
 #include "../engine/rendering/vector_text.hpp"
 
@@ -2014,7 +2015,7 @@ namespace hades
     }
 
     ImGui::Begin("Debug Window");
-    ImGui::Text("FPS: %f", 1 / deltaTime);
+    ImGui::Text("FPS: %.1f  (%.2f ms)", 1.0f / deltaTime, deltaTime * 1000.0f);
     ImGui::Text("Play Mode: %s", state.isPlaying ? "Playing" : "Stopped");
     if (state.activeCamera.has_value())
     {
@@ -2024,6 +2025,35 @@ namespace hades
     {
       ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "Play error: %s", state.playModeMessage.c_str());
     }
+
+#ifdef HADES_ENABLE_FRAME_METRICS
+    ImGui::Separator();
+    ImGui::Text("Frame Metrics");
+    if (ImGui::BeginTable("##metrics", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
+    {
+      ImGui::TableSetupColumn("Section");
+      ImGui::TableSetupColumn("Last (ms)");
+      ImGui::TableSetupColumn("Avg (ms)");
+      ImGui::TableSetupColumn("Count");
+      ImGui::TableHeadersRow();
+
+      const auto &entries = FrameMetrics::instance().entries();
+      for (const auto &entry : entries)
+      {
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(entry.name);
+        ImGui::TableNextColumn();
+        ImGui::Text("%.3f", entry.lastMs);
+        ImGui::TableNextColumn();
+        ImGui::Text("%.3f", entry.frames > 0 ? entry.totalMs / entry.frames : 0.0);
+        ImGui::TableNextColumn();
+        ImGui::Text("%u", entry.count);
+      }
+      ImGui::EndTable();
+    }
+#endif
+
     ImGui::End();
   }
 }

@@ -20,6 +20,7 @@
 #include "../engine/core/ecs/scene_serializer.hpp"
 #include "../engine/audio/audio_engine.hpp"
 #include "../engine/rendering/renderer.hpp"
+#include "../engine/profiling/frame_metrics.hpp"
 #include "../engine/rendering/vulkan.hpp"
 #include "../engine/systems/audio_system.hpp"
 #include "../engine/systems/movement_system.hpp"
@@ -1283,74 +1284,85 @@ namespace hades
 
   void WindowManager::render_frame()
   {
-    const Uint32 editorWindowId = window != nullptr ? SDL_GetWindowID(window.get()) : 0U;
-    const auto scriptEditorWindowId = scriptEditorWindow.window_id();
-    bool closedAuxiliaryWindowThisFrame = false;
-    SDL_Event event;
-    while (SDL_PollEvent(&event))
-    {
-      const auto targetWindowId = event_window_id(event);
-      const auto playWindowId = playWindow.window_id();
-      if (!targetWindowId.has_value() || *targetWindowId == editorWindowId)
-      {
-        imgui_session.process_event(event);
-      }
-      else if (scriptEditorWindowId.has_value() && *targetWindowId == *scriptEditorWindowId)
-      {
-        scriptEditorWindow.process_event(event);
-      }
-      if (event.type == SDL_QUIT)
-      {
-        if (!closedAuxiliaryWindowThisFrame)
-        {
-          running = false;
-        }
-      }
-      if (event.type == SDL_WINDOWEVENT &&
-          event.window.event == SDL_WINDOWEVENT_CLOSE)
-      {
-        if (event.window.windowID == editorWindowId)
-        {
-          running = false;
-        }
-        else if (scriptEditorWindowId.has_value() &&
-                 event.window.windowID == *scriptEditorWindowId)
-        {
-          closedAuxiliaryWindowThisFrame = true;
-          editor.set_script_editor_window_open(false);
-          scriptEditorWindow.close();
-        }
-        else if (playWindowId.has_value() &&
-                 event.window.windowID == *playWindowId)
-        {
-          closedAuxiliaryWindowThisFrame = true;
-          stop_active_play_mode();
-        }
-      }
+    HADES_FRAME_METRIC_SCOPE("frame_total");
 
-      if (editor.state.isPlaying)
+    {
+      HADES_FRAME_METRIC_SCOPE("event_poll");
+      const Uint32 editorWindowId = window != nullptr ? SDL_GetWindowID(window.get()) : 0U;
+      const auto scriptEditorWindowId = scriptEditorWindow.window_id();
+      bool closedAuxiliaryWindowThisFrame = false;
+      SDL_Event event;
+      while (SDL_PollEvent(&event))
       {
-        if (event.type == SDL_KEYDOWN)
+        const auto targetWindowId = event_window_id(event);
+        const auto playWindowId = playWindow.window_id();
+        if (!targetWindowId.has_value() || *targetWindowId == editorWindowId)
         {
-          scriptRuntime.on_key_down(static_cast<int>(event.key.keysym.sym));
-          if (scriptRuntime.faulted())
+          imgui_session.process_event(event);
+        }
+        else if (scriptEditorWindowId.has_value() && *targetWindowId == *scriptEditorWindowId)
+        {
+          scriptEditorWindow.process_event(event);
+        }
+        if (event.type == SDL_QUIT)
+        {
+          if (!closedAuxiliaryWindowThisFrame)
           {
-            stop_active_play_mode(scriptRuntime.last_error());
+            running = false;
           }
         }
-        else if (event.type == SDL_KEYUP)
+        if (event.type == SDL_WINDOWEVENT &&
+            event.window.event == SDL_WINDOWEVENT_CLOSE)
         {
-          scriptRuntime.on_key_up(static_cast<int>(event.key.keysym.sym));
-          if (scriptRuntime.faulted())
+          if (event.window.windowID == editorWindowId)
           {
-            stop_active_play_mode(scriptRuntime.last_error());
+            running = false;
+          }
+          else if (scriptEditorWindowId.has_value() &&
+                   event.window.windowID == *scriptEditorWindowId)
+          {
+            closedAuxiliaryWindowThisFrame = true;
+            editor.set_script_editor_window_open(false);
+            scriptEditorWindow.close();
+          }
+          else if (playWindowId.has_value() &&
+                   event.window.windowID == *playWindowId)
+          {
+            closedAuxiliaryWindowThisFrame = true;
+            stop_active_play_mode();
+          }
+        }
+
+        if (editor.state.isPlaying)
+        {
+          if (event.type == SDL_KEYDOWN)
+          {
+            scriptRuntime.on_key_down(static_cast<int>(event.key.keysym.sym));
+            if (scriptRuntime.faulted())
+            {
+              stop_active_play_mode(scriptRuntime.last_error());
+            }
+          }
+          else if (event.type == SDL_KEYUP)
+          {
+            scriptRuntime.on_key_up(static_cast<int>(event.key.keysym.sym));
+            if (scriptRuntime.faulted())
+            {
+              stop_active_play_mode(scriptRuntime.last_error());
+            }
           }
         }
       }
     }
 
-    renderer->render_frame(window.get());
-    imgui_session.begin_frame();
+    {
+      HADES_FRAME_METRIC_SCOPE("vulkan_render_frame");
+      renderer->render_frame(window.get());
+    }
+    {
+      HADES_FRAME_METRIC_SCOPE("imgui_begin");
+      imgui_session.begin_frame();
+    }
 
     ImGuiIO &io = ImGui::GetIO();
     if (!workspaceManager.has_current_workspace())
@@ -1360,20 +1372,27 @@ namespace hades
     }
     else
     {
-      editor.render(io.DeltaTime, workspaceManager.current_workspace()->path, entityManager, componentManager, scriptRuntime);
+      {
+        HADES_FRAME_METRIC_SCOPE("editor_render");
+        editor.render(io.DeltaTime, workspaceManager.current_workspace()->path, entityManager, componentManager, scriptRuntime);
+      }
       if (audioSystem != nullptr)
       {
         audioSystem->set_active_world(editor.state.isPlaying ? editor.state.activeWorld : std::nullopt);
       }
       if (editor.state.isPlaying)
       {
-        scriptRuntime.update(io.DeltaTime, componentManager, entityManager);
+        {
+          HADES_FRAME_METRIC_SCOPE("script_update");
+          scriptRuntime.update(io.DeltaTime, componentManager, entityManager);
+        }
         if (scriptRuntime.faulted())
         {
           stop_active_play_mode(scriptRuntime.last_error());
         }
         else
         {
+          HADES_FRAME_METRIC_SCOPE("systems_update");
           systemManager.updateSystems(io.DeltaTime, componentManager, entityManager);
         }
       }
@@ -1390,9 +1409,20 @@ namespace hades
       }
     }
 
-    imgui_session.render();
-    sync_script_editor_window();
-    sync_play_window();
+    {
+      HADES_FRAME_METRIC_SCOPE("imgui_render");
+      imgui_session.render();
+    }
+    {
+      HADES_FRAME_METRIC_SCOPE("sync_script_editor");
+      sync_script_editor_window();
+    }
+    {
+      HADES_FRAME_METRIC_SCOPE("sync_play_window");
+      sync_play_window();
+    }
+
+    HADES_FRAME_METRIC_END_FRAME();
   }
 
   int WindowManager::run()
