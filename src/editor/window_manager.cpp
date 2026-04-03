@@ -27,10 +27,13 @@
 namespace
 {
   constexpr char EDITOR_WINDOW_TITLE[] = "Hades Editor";
+  constexpr char SCRIPT_EDITOR_WINDOW_TITLE[] = "Hades Script Editor";
   constexpr char WORKSPACE_HISTORY_FILENAME[] = "recent_workspaces.txt";
   constexpr char LOGO_ASSET_PATH[] = "assets/logo.bmp";
   constexpr int EDITOR_WINDOW_WIDTH = 1280;
   constexpr int EDITOR_WINDOW_HEIGHT = 720;
+  constexpr int SCRIPT_EDITOR_WINDOW_WIDTH = 1280;
+  constexpr int SCRIPT_EDITOR_WINDOW_HEIGHT = 720;
   constexpr int WORKSPACE_LOGO_MAX_SIZE = 160;
 
   using SdlStringPtr = std::unique_ptr<char, decltype(&SDL_free)>;
@@ -160,6 +163,29 @@ namespace
 
     return std::nullopt;
   }
+
+  class ImGuiContextScope
+  {
+  public:
+    explicit ImGuiContextScope(ImGuiContext *context)
+        : previousContext_(ImGui::GetCurrentContext()),
+          currentContext_(context)
+    {
+      ImGui::SetCurrentContext(context);
+    }
+
+    ~ImGuiContextScope()
+    {
+      if (previousContext_ != currentContext_)
+      {
+        ImGui::SetCurrentContext(previousContext_);
+      }
+    }
+
+  private:
+    ImGuiContext *previousContext_ = nullptr;
+    ImGuiContext *currentContext_ = nullptr;
+  };
 
   void build_workspace_logo_preview(
       SDL_Surface *logoSurface,
@@ -370,7 +396,7 @@ namespace hades
     }
   }
 
-  bool WindowManager::ImGuiSession::init(SDL_Window *window, Renderer &renderer)
+  bool WindowManager::ImGuiSession::init(SDL_Window *window, Renderer &renderer, bool enableViewports)
   {
     if (initialized)
     {
@@ -378,35 +404,53 @@ namespace hades
     }
 
     IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
+    context_ = ImGui::CreateContext();
+    ImGuiContextScope contextScope(context_);
 
     ImGuiIO &io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-    io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+    if (enableViewports)
+    {
+      io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+    }
     apply_editor_theme();
 
     if (!ImGui_ImplSDL2_InitForVulkan(window))
     {
       std::fprintf(stderr, "Error: ImGui_ImplSDL2_InitForVulkan() failed.\n");
-      ImGui::DestroyContext();
+      ImGui::DestroyContext(context_);
+      context_ = nullptr;
       return false;
     }
 
     renderer_ = &renderer;
+    enableViewports_ = enableViewports;
     renderer_->init_imgui_backend();
     initialized = true;
     return true;
   }
 
-  void WindowManager::ImGuiSession::begin_frame()
+  void WindowManager::ImGuiSession::process_event(const SDL_Event &event)
   {
-    if (!initialized)
+    if (!initialized || context_ == nullptr)
     {
       return;
     }
 
+    ImGuiContextScope contextScope(context_);
+    ImGui_ImplSDL2_ProcessEvent(&event);
+  }
+
+  void WindowManager::ImGuiSession::begin_frame()
+  {
+    if (!initialized || context_ == nullptr)
+    {
+      return;
+    }
+
+    ImGuiContextScope contextScope(context_);
     renderer_->start_imgui_frame();
     ImGui_ImplSDL2_NewFrame();
     ImGui::NewFrame();
@@ -414,11 +458,12 @@ namespace hades
 
   void WindowManager::ImGuiSession::render()
   {
-    if (!initialized)
+    if (!initialized || context_ == nullptr)
     {
       return;
     }
 
+    ImGuiContextScope contextScope(context_);
     ImGui::Render();
     ImDrawData *draw_data = ImGui::GetDrawData();
     const bool is_minimized = (draw_data->DisplaySize.x <= 0.0f || draw_data->DisplaySize.y <= 0.0f);
@@ -427,12 +472,16 @@ namespace hades
       renderer_->render_imgui(draw_data);
     }
 
-    ImGuiIO &io = ImGui::GetIO();
-    if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
+    if (enableViewports_)
     {
       ImGui::UpdatePlatformWindows();
       ImGui::RenderPlatformWindowsDefault();
     }
+  }
+
+  void WindowManager::ImGuiSession::close()
+  {
+    shutdown();
   }
 
   WindowManager::ImGuiSession::~ImGuiSession()
@@ -447,11 +496,124 @@ namespace hades
       return;
     }
 
+    ImGuiContextScope contextScope(context_);
     renderer_->shutdown_imgui_backend();
     ImGui_ImplSDL2_Shutdown();
-    ImGui::DestroyContext();
+    ImGui::DestroyContext(context_);
+    context_ = nullptr;
     renderer_ = nullptr;
+    enableViewports_ = false;
     initialized = false;
+  }
+
+  WindowManager::DetachedScriptEditorWindow::~DetachedScriptEditorWindow()
+  {
+    close();
+  }
+
+  bool WindowManager::DetachedScriptEditorWindow::open(std::string *errorMessage)
+  {
+    if (is_open())
+    {
+      return true;
+    }
+
+    const SDL_WindowFlags windowFlags =
+        static_cast<SDL_WindowFlags>(SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE |
+                                     SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_HIDDEN);
+    WindowPtr window(SDL_CreateWindow(
+        SCRIPT_EDITOR_WINDOW_TITLE,
+        SDL_WINDOWPOS_CENTERED,
+        SDL_WINDOWPOS_CENTERED,
+        SCRIPT_EDITOR_WINDOW_WIDTH,
+        SCRIPT_EDITOR_WINDOW_HEIGHT,
+        windowFlags));
+    if (window == nullptr)
+    {
+      if (errorMessage != nullptr)
+      {
+        *errorMessage = std::string("Failed to create script editor window: ") + SDL_GetError();
+      }
+      return false;
+    }
+
+    SurfacePtr logoSurface = load_logo_surface();
+    set_window_icon(window.get(), logoSurface.get());
+
+    auto renderer = std::make_unique<VulkanRenderer>();
+    if (!renderer->init(window.get()))
+    {
+      if (errorMessage != nullptr)
+      {
+        *errorMessage = "Failed to initialize the script editor renderer.";
+      }
+      return false;
+    }
+
+    if (!imgui_session_.init(window.get(), *renderer, false))
+    {
+      if (errorMessage != nullptr)
+      {
+        *errorMessage = "Failed to initialize the script editor UI.";
+      }
+      return false;
+    }
+
+    window_ = std::move(window);
+    renderer_ = std::move(renderer);
+    SDL_ShowWindow(window_.get());
+    SDL_RaiseWindow(window_.get());
+    if (errorMessage != nullptr)
+    {
+      errorMessage->clear();
+    }
+    return true;
+  }
+
+  void WindowManager::DetachedScriptEditorWindow::close()
+  {
+    imgui_session_.close();
+    renderer_.reset();
+    window_.reset();
+  }
+
+  bool WindowManager::DetachedScriptEditorWindow::is_open() const
+  {
+    return window_ != nullptr && renderer_ != nullptr;
+  }
+
+  std::optional<std::uint32_t> WindowManager::DetachedScriptEditorWindow::window_id() const
+  {
+    if (window_ == nullptr)
+    {
+      return std::nullopt;
+    }
+
+    return SDL_GetWindowID(window_.get());
+  }
+
+  void WindowManager::DetachedScriptEditorWindow::process_event(const SDL_Event &event)
+  {
+    imgui_session_.process_event(event);
+  }
+
+  void WindowManager::DetachedScriptEditorWindow::render(Editor &editor)
+  {
+    if (!is_open())
+    {
+      return;
+    }
+
+    if (editor.consume_script_editor_focus_request())
+    {
+      SDL_RestoreWindow(window_.get());
+      SDL_RaiseWindow(window_.get());
+    }
+
+    renderer_->render_frame(window_.get());
+    imgui_session_.begin_frame();
+    editor.render_script_editor_window();
+    imgui_session_.render();
   }
 
   WindowManager::WindowManager()
@@ -802,6 +964,7 @@ namespace hades
     }
 
     playWindow.close();
+    scriptEditorWindow.close();
     entityManager = EntityManager();
     componentManager = ComponentManager();
     editor.reset_workspace_session();
@@ -856,6 +1019,28 @@ namespace hades
         componentManager,
         editor.state.activeWorld,
         editor.state.activeCamera);
+  }
+
+  void WindowManager::sync_script_editor_window()
+  {
+    if (!editor.is_script_editor_window_open())
+    {
+      scriptEditorWindow.close();
+      return;
+    }
+
+    std::string errorMessage;
+    if (!scriptEditorWindow.is_open() && !scriptEditorWindow.open(&errorMessage))
+    {
+      editor.set_script_editor_window_open(false);
+      if (!errorMessage.empty())
+      {
+        std::fprintf(stderr, "Script editor window error: %s\n", errorMessage.c_str());
+      }
+      return;
+    }
+
+    scriptEditorWindow.render(editor);
   }
 
   void WindowManager::update_window_title()
@@ -958,12 +1143,20 @@ namespace hades
   void WindowManager::render_frame()
   {
     const Uint32 editorWindowId = window != nullptr ? SDL_GetWindowID(window.get()) : 0U;
+    const auto scriptEditorWindowId = scriptEditorWindow.window_id();
     SDL_Event event;
     while (SDL_PollEvent(&event))
     {
       const auto targetWindowId = event_window_id(event);
       const auto playWindowId = playWindow.window_id();
-      ImGui_ImplSDL2_ProcessEvent(&event);
+      if (!targetWindowId.has_value() || *targetWindowId == editorWindowId)
+      {
+        imgui_session.process_event(event);
+      }
+      else if (scriptEditorWindowId.has_value() && *targetWindowId == *scriptEditorWindowId)
+      {
+        scriptEditorWindow.process_event(event);
+      }
       if (event.type == SDL_QUIT)
       {
         running = false;
@@ -974,6 +1167,12 @@ namespace hades
         if (event.window.windowID == editorWindowId)
         {
           running = false;
+        }
+        else if (scriptEditorWindowId.has_value() &&
+                 event.window.windowID == *scriptEditorWindowId)
+        {
+          editor.set_script_editor_window_open(false);
+          scriptEditorWindow.close();
         }
         else if (playWindowId.has_value() &&
                  event.window.windowID == *playWindowId)
@@ -1025,6 +1224,7 @@ namespace hades
     }
 
     imgui_session.render();
+    sync_script_editor_window();
     sync_play_window();
   }
 

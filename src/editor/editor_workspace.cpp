@@ -14,7 +14,6 @@
 #include <utility>
 
 #include "imgui.h"
-#include "misc/cpp/imgui_stdlib.h"
 #include "TextEditor.h"
 #include "../engine/runtime/script_runtime.hpp"
 
@@ -92,6 +91,19 @@ namespace hades
       langDef.mName = "C#";
 
       return langDef;
+    }
+
+    std::unique_ptr<TextEditor> create_script_text_editor(const std::string &contents)
+    {
+      static const TextEditor::LanguageDefinition csharpLanguageDefinition = create_csharp_language_definition();
+
+      auto editor = std::make_unique<TextEditor>();
+      editor->SetLanguageDefinition(csharpLanguageDefinition);
+      editor->SetPalette(TextEditor::GetDarkPalette());
+      editor->SetTabSize(4);
+      editor->SetShowWhitespaces(false);
+      editor->SetText(contents);
+      return editor;
     }
 
     std::string path_display_name(const std::filesystem::path &path)
@@ -403,6 +415,11 @@ namespace hades
       return;
     }
 
+    const bool isInitialWorkspaceLoad =
+        workspaceScriptFiles_.empty() &&
+        scriptModTimes_.empty() &&
+        !workspaceTreeRoot_.has_value();
+
     WorkspaceTreeNode rootNode;
     std::vector<std::string> scriptFiles;
     std::string scanError;
@@ -410,7 +427,7 @@ namespace hades
     std::sort(scriptFiles.begin(), scriptFiles.end());
     if (scriptFiles != workspaceScriptFiles_)
     {
-      workspaceScriptListDirty_ = true;
+      workspaceScriptListDirty_ = !isInitialWorkspaceLoad;
 
       std::unordered_map<std::string, std::filesystem::file_time_type> retainedModTimes;
       retainedModTimes.reserve(scriptFiles.size());
@@ -796,9 +813,41 @@ namespace hades
     }
   }
 
+  bool Editor::consume_script_editor_focus_request()
+  {
+    const bool focusRequested = focusScriptEditorWindow_;
+    focusScriptEditorWindow_ = false;
+    return focusRequested;
+  }
+
   void Editor::render_script_editor_window()
   {
+    if (!openScriptEditorWindow_)
+    {
+      return;
+    }
+
+    const ImGuiViewport *mainViewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(mainViewport->Pos);
+    ImGui::SetNextWindowSize(mainViewport->Size);
+    ImGui::SetNextWindowViewport(mainViewport->ID);
+
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    const ImGuiWindowFlags windowFlags =
+        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings;
+    if (!ImGui::Begin("Detached Script Editor Host", nullptr, windowFlags))
+    {
+      ImGui::End();
+      ImGui::PopStyleVar(2);
+      return;
+    }
+
     render_script_editor();
+
+    ImGui::End();
+    ImGui::PopStyleVar(2);
   }
 
   std::optional<std::size_t> Editor::find_script_editor_tab_index(const std::filesystem::path &scriptPath) const
@@ -914,6 +963,11 @@ namespace hades
   {
     if (const auto existingIndex = find_script_editor_tab_index(scriptPath); existingIndex.has_value())
     {
+      ScriptEditorTab &existingTab = openScriptEditorTabs_[*existingIndex];
+      if (existingTab.textEditor == nullptr)
+      {
+        existingTab.textEditor = create_script_text_editor(existingTab.contents);
+      }
       activate_script_editor_tab(*existingIndex);
       return true;
     }
@@ -930,6 +984,8 @@ namespace hades
                            ? relative_workspace_path(activeWorkspacePath_, scriptPath)
                            : relativePath;
     tab.contents = std::move(snapshot.contents);
+    tab.savedContents = tab.contents;
+    tab.textEditor = create_script_text_editor(tab.contents);
     if (snapshot.hasLastWriteTime)
     {
       tab.savedWriteTime = snapshot.lastWriteTime;
@@ -955,12 +1011,17 @@ namespace hades
     }
 
     ScriptEditorTab &tab = openScriptEditorTabs_[index];
+    if (tab.textEditor != nullptr)
+    {
+      tab.contents = tab.textEditor->GetText();
+    }
     ScriptDocumentSnapshot snapshot;
     if (!save_script_document(tab.path, tab.contents, &snapshot, errorMessage))
     {
       return false;
     }
 
+    tab.savedContents = tab.contents;
     tab.dirty = false;
     if (snapshot.hasLastWriteTime)
     {
@@ -1066,36 +1127,6 @@ namespace hades
 
   void Editor::render_script_editor()
   {
-    ImGuiWindowClass scriptEditorWindowClass;
-    scriptEditorWindowClass.ViewportFlagsOverrideSet = ImGuiViewportFlags_NoAutoMerge;
-    ImGui::SetNextWindowClass(&scriptEditorWindowClass);
-    const ImGuiViewport *mainViewport = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(
-        ImVec2(mainViewport->Pos.x + 72.0f, mainViewport->Pos.y + 72.0f),
-        ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(1080.0f, 720.0f), ImGuiCond_FirstUseEver);
-    if (focusScriptEditorWindow_)
-    {
-      ImGui::SetNextWindowFocus();
-    }
-
-    bool keepWindowOpen = openScriptEditorWindow_;
-    if (!ImGui::Begin(SCRIPT_EDITOR_WINDOW_TITLE, &keepWindowOpen, ImGuiWindowFlags_NoDocking))
-    {
-      openScriptEditorWindow_ = keepWindowOpen;
-      focusScriptEditorWindow_ = false;
-      ImGui::End();
-      return;
-    }
-
-    openScriptEditorWindow_ = keepWindowOpen;
-    if (!openScriptEditorWindow_)
-    {
-      openScriptEditorUnsavedChangesDialog_ = false;
-      pendingScriptEditorClosePath_.reset();
-    }
-    focusScriptEditorWindow_ = false;
-
     if (openScriptEditorUnsavedChangesDialog_)
     {
       ImGui::OpenPopup(SCRIPT_EDITOR_UNSAVED_POPUP_TITLE);
@@ -1236,7 +1267,6 @@ namespace hades
           ImGui::TextColored(color, "%s", scriptEditorStatusMessage_.c_str());
         }
         ImGui::EndTable();
-        ImGui::End();
         return;
       }
 
@@ -1290,7 +1320,6 @@ namespace hades
       if (activeTab == nullptr)
       {
         ImGui::EndTable();
-        ImGui::End();
         return;
       }
 
@@ -1359,6 +1388,15 @@ namespace hades
         else
         {
           activeTab->contents = std::move(snapshot.contents);
+          activeTab->savedContents = activeTab->contents;
+          if (activeTab->textEditor == nullptr)
+          {
+            activeTab->textEditor = create_script_text_editor(activeTab->contents);
+          }
+          else
+          {
+            activeTab->textEditor->SetText(activeTab->contents);
+          }
           activeTab->savedWriteTime = snapshot.hasLastWriteTime
                                           ? std::optional<std::filesystem::file_time_type>(snapshot.lastWriteTime)
                                           : std::nullopt;
@@ -1399,14 +1437,16 @@ namespace hades
       ImGui::Separator();
       ImVec2 editorSize = ImGui::GetContentRegionAvail();
       editorSize.y = std::max(editorSize.y, 200.0f);
-      ImGui::PushID(activeTab->path.string().c_str());
-      if (ImGui::InputTextMultiline(
-              "##ScriptEditorContents",
-              &activeTab->contents,
-              editorSize,
-              ImGuiInputTextFlags_AllowTabInput))
+      if (activeTab->textEditor == nullptr)
       {
-        activeTab->dirty = true;
+        activeTab->textEditor = create_script_text_editor(activeTab->contents);
+      }
+      ImGui::PushID(activeTab->path.string().c_str());
+      activeTab->textEditor->Render("##ScriptEditorContents", editorSize, true);
+      if (activeTab->textEditor->IsTextChanged())
+      {
+        activeTab->contents = activeTab->textEditor->GetText();
+        activeTab->dirty = activeTab->contents != activeTab->savedContents;
         if (!scriptEditorStatusIsError_)
         {
           scriptEditorStatusMessage_.clear();
@@ -1416,8 +1456,6 @@ namespace hades
 
       ImGui::EndTable();
     }
-
-    ImGui::End();
   }
 
   void Editor::workspace(EntityManager &entityManager, ComponentManager &componentManager)

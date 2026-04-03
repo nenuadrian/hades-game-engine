@@ -61,6 +61,7 @@ namespace hades
     bool is_plugin_visible(std::string_view pluginId) const;
     bool is_script_editor_window_open() const;
     void set_script_editor_window_open(bool open);
+    bool consume_script_editor_focus_request();
     void render_script_editor_window();
 
   private:
@@ -69,6 +70,7 @@ namespace hades
       std::filesystem::path path;
       std::string relativePath;
       std::string contents;
+      std::string savedContents;
       std::unique_ptr<TextEditor> textEditor;
       std::optional<std::filesystem::file_time_type> savedWriteTime;
       bool dirty = false;
@@ -113,6 +115,16 @@ namespace hades
     float sceneCameraDistance_ = 1.0f;
     float sceneCameraYawDegrees_ = 0.0f;
     float sceneCameraPitchDegrees_ = 0.0f;
+    SceneGizmoAxis activeSceneGizmoAxis_ = SceneGizmoAxis::None;
+    Entity::EntityId activeSceneGizmoEntity_ = Entity::INVALID;
+    float sceneGizmoDragStartMouseX_ = 0.0f;
+    float sceneGizmoDragStartMouseY_ = 0.0f;
+    float sceneGizmoDragStartPositionX_ = 0.0f;
+    float sceneGizmoDragStartPositionY_ = 0.0f;
+    float sceneGizmoDragStartPositionZ_ = 0.0f;
+    float sceneGizmoAxisScreenDirectionX_ = 0.0f;
+    float sceneGizmoAxisScreenDirectionY_ = 0.0f;
+    float sceneGizmoPixelsPerWorldUnit_ = 1.0f;
 
     // File watch / background compile state.
     std::unordered_map<std::string, std::filesystem::file_time_type> scriptModTimes_;

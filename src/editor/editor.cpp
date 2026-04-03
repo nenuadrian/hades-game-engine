@@ -43,6 +43,16 @@ namespace hades
     state.playModeMessage.clear();
     pendingEntityDeletion_.reset();
     reset_scene_camera();
+    activeSceneGizmoAxis_ = SceneGizmoAxis::None;
+    activeSceneGizmoEntity_ = Entity::INVALID;
+    sceneGizmoDragStartMouseX_ = 0.0f;
+    sceneGizmoDragStartMouseY_ = 0.0f;
+    sceneGizmoDragStartPositionX_ = 0.0f;
+    sceneGizmoDragStartPositionY_ = 0.0f;
+    sceneGizmoDragStartPositionZ_ = 0.0f;
+    sceneGizmoAxisScreenDirectionX_ = 0.0f;
+    sceneGizmoAxisScreenDirectionY_ = 0.0f;
+    sceneGizmoPixelsPerWorldUnit_ = 1.0f;
 
     activeWorkspacePath_.clear();
     workspaceTreeRoot_.reset();
@@ -78,6 +88,14 @@ namespace hades
     sync_menu_bar(entityManager, componentManager);
     configure_default_dock_layout(gui->render_frame());
 
+    if (backgroundCompileInProgress_ && backgroundCompileResult_.valid() &&
+        backgroundCompileResult_.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+    {
+      lastCompileError_ = backgroundCompileResult_.get();
+      lastCompileSucceeded_ = lastCompileError_.empty();
+      backgroundCompileInProgress_ = false;
+    }
+
     bool scriptsChanged = workspaceScriptListDirty_;
     if (!activeWorkspacePath_.empty())
     {
@@ -94,7 +112,6 @@ namespace hades
         if (it == scriptModTimes_.end())
         {
           scriptModTimes_[relPath] = modTime;
-          scriptsChanged = true;
         }
         else if (it->second != modTime)
         {
@@ -107,14 +124,6 @@ namespace hades
       {
         queue_workspace_script_compile();
       }
-    }
-
-    if (backgroundCompileInProgress_ && backgroundCompileResult_.valid() &&
-        backgroundCompileResult_.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
-    {
-      lastCompileError_ = backgroundCompileResult_.get();
-      lastCompileSucceeded_ = lastCompileError_.empty();
-      backgroundCompileInProgress_ = false;
     }
 
     handle_entity_creation_requests(entityManager, componentManager);

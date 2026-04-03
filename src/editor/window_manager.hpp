@@ -16,6 +16,8 @@
 #include "workspace_manager.hpp"
 
 struct SDL_Window;
+union SDL_Event;
+struct ImGuiContext;
 
 namespace hades
 {
@@ -44,19 +46,45 @@ namespace hades
     class ImGuiSession
     {
     public:
-      bool init(SDL_Window *window, Renderer &renderer);
+      bool init(SDL_Window *window, Renderer &renderer, bool enableViewports = true);
+      void process_event(const SDL_Event &event);
       void begin_frame();
       void render();
+      void close();
       ~ImGuiSession();
 
     private:
       void shutdown();
 
+      ImGuiContext *context_ = nullptr;
       Renderer *renderer_ = nullptr;
+      bool enableViewports_ = false;
       bool initialized = false;
     };
 
     using WindowPtr = std::unique_ptr<SDL_Window, SDLWindowDeleter>;
+
+    class DetachedScriptEditorWindow
+    {
+    public:
+      DetachedScriptEditorWindow() = default;
+      ~DetachedScriptEditorWindow();
+
+      DetachedScriptEditorWindow(const DetachedScriptEditorWindow &) = delete;
+      DetachedScriptEditorWindow &operator=(const DetachedScriptEditorWindow &) = delete;
+
+      bool open(std::string *errorMessage = nullptr);
+      void close();
+      bool is_open() const;
+      std::optional<std::uint32_t> window_id() const;
+      void process_event(const SDL_Event &event);
+      void render(Editor &editor);
+
+    private:
+      WindowPtr window_{nullptr};
+      std::unique_ptr<Renderer> renderer_;
+      ImGuiSession imgui_session_;
+    };
 
     EntityManager entityManager;
     ComponentManager componentManager;
@@ -68,6 +96,7 @@ namespace hades
     SdlSession sdl_session;
     WindowPtr window{nullptr};
     DetachedPlayWindow playWindow;
+    DetachedScriptEditorWindow scriptEditorWindow;
     std::unique_ptr<Renderer> renderer;
     std::unique_ptr<AudioEngine> audio_engine;
     std::shared_ptr<AudioSystem> audioSystem;
@@ -92,6 +121,7 @@ namespace hades
     void reset_workspace_session();
     void stop_active_play_mode(const std::string &message = std::string());
     void sync_play_window();
+    void sync_script_editor_window();
     void update_window_title();
     bool init();
     void render_frame();

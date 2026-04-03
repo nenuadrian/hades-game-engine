@@ -153,7 +153,6 @@ namespace hades
         [this](EditorPluginContext &context)
         {
           (void)context;
-          render_script_editor_window();
         },
         false,
         [this](const Editor &editor)

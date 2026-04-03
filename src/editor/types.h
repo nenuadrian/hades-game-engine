@@ -32,6 +32,14 @@ namespace hades
     Stop,
   };
 
+  enum class SceneGizmoAxis
+  {
+    None,
+    X,
+    Y,
+    Z,
+  };
+
   struct EditorState
   {
     std::queue<EDITOR_EventType> events = std::queue<EDITOR_EventType>();

@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <string>
 
 #include "imgui.h"
@@ -41,6 +42,15 @@ namespace hades
     constexpr float EDITOR_SCENE_CAMERA_ROTATION_SENSITIVITY_Y = 0.25f;
     constexpr float EDITOR_SCENE_CAMERA_ZOOM_FACTOR = 0.85f;
     constexpr float CAMERA_FRUSTUM_PREVIEW_MAX_DEPTH = 12.0f;
+    constexpr float SCENE_PICK_THRESHOLD_PIXELS = 12.0f;
+    constexpr float SCENE_MARKER_RADIUS = 4.0f;
+    constexpr float SCENE_SELECTED_MARKER_RADIUS = 6.0f;
+    constexpr float SCENE_GIZMO_MIN_AXIS_LENGTH = 0.85f;
+    constexpr float SCENE_GIZMO_MAX_AXIS_LENGTH = 4.0f;
+    constexpr float SCENE_GIZMO_AXIS_LENGTH_SCALE = 0.18f;
+    constexpr float SCENE_GIZMO_HIT_THRESHOLD_PIXELS = 10.0f;
+    constexpr float SCENE_GIZMO_MIN_SCREEN_LENGTH_PIXELS = 18.0f;
+    constexpr float SCENE_GIZMO_ARROW_SIZE = 8.0f;
     constexpr int BOX_EDGES[12][2] = {
         {0, 1}, {1, 2}, {2, 3}, {3, 0},
         {4, 5}, {5, 6}, {6, 7}, {7, 4},
@@ -60,6 +70,29 @@ namespace hades
       Vec3 right;
       Vec3 up;
       Vec3 forward;
+    };
+
+    struct SceneHitCandidate
+    {
+      std::optional<Entity::EntityId> entity;
+      float distanceSquared = std::numeric_limits<float>::max();
+      float depth = std::numeric_limits<float>::max();
+    };
+
+    struct SceneRect
+    {
+      ImVec2 min;
+      ImVec2 max;
+    };
+
+    struct SceneGizmoAxisProjection
+    {
+      SceneGizmoAxis axis = SceneGizmoAxis::None;
+      Vec3 direction{0.0f, 0.0f, 0.0f};
+      ImVec2 originScreen{};
+      ImVec2 endScreen{};
+      float pixelsPerWorldUnit = 0.0f;
+      bool visible = false;
     };
 
     std::string entity_display_label(Entity::EntityId entity, ComponentManager &componentManager)
@@ -738,6 +771,558 @@ namespace hades
       return visibleSegmentCount > 0;
     }
 
+    float squared_distance(const ImVec2 &lhs, const ImVec2 &rhs)
+    {
+      const float deltaX = lhs.x - rhs.x;
+      const float deltaY = lhs.y - rhs.y;
+      return (deltaX * deltaX) + (deltaY * deltaY);
+    }
+
+    float point_to_segment_distance_squared(
+        const ImVec2 &point,
+        const ImVec2 &start,
+        const ImVec2 &end)
+    {
+      const float segmentX = end.x - start.x;
+      const float segmentY = end.y - start.y;
+      const float segmentLengthSquared = (segmentX * segmentX) + (segmentY * segmentY);
+      if (segmentLengthSquared <= 1e-5f)
+      {
+        return squared_distance(point, start);
+      }
+
+      const float t = std::clamp(
+          (((point.x - start.x) * segmentX) + ((point.y - start.y) * segmentY)) / segmentLengthSquared,
+          0.0f,
+          1.0f);
+      return squared_distance(
+          point,
+          ImVec2(start.x + (segmentX * t), start.y + (segmentY * t)));
+    }
+
+    float point_to_rect_distance_squared(const ImVec2 &point, const SceneRect &rect)
+    {
+      const float nearestX = std::clamp(point.x, rect.min.x, rect.max.x);
+      const float nearestY = std::clamp(point.y, rect.min.y, rect.max.y);
+      return squared_distance(point, ImVec2(nearestX, nearestY));
+    }
+
+    Vec3 gizmo_axis_direction(SceneGizmoAxis axis)
+    {
+      switch (axis)
+      {
+      case SceneGizmoAxis::X:
+        return make_vec3(1.0f, 0.0f, 0.0f);
+      case SceneGizmoAxis::Y:
+        return make_vec3(0.0f, 1.0f, 0.0f);
+      case SceneGizmoAxis::Z:
+        return make_vec3(0.0f, 0.0f, 1.0f);
+      case SceneGizmoAxis::None:
+        break;
+      }
+
+      return make_vec3(0.0f, 0.0f, 0.0f);
+    }
+
+    ImU32 gizmo_axis_color(SceneGizmoAxis axis, bool highlighted)
+    {
+      switch (axis)
+      {
+      case SceneGizmoAxis::X:
+        return highlighted ? IM_COL32(255, 118, 118, 255) : IM_COL32(228, 77, 77, 255);
+      case SceneGizmoAxis::Y:
+        return highlighted ? IM_COL32(131, 242, 151, 255) : IM_COL32(87, 204, 108, 255);
+      case SceneGizmoAxis::Z:
+        return highlighted ? IM_COL32(117, 171, 255, 255) : IM_COL32(68, 122, 232, 255);
+      case SceneGizmoAxis::None:
+        break;
+      }
+
+      return IM_COL32(214, 220, 228, 255);
+    }
+
+    void register_scene_hit(
+        SceneHitCandidate &candidate,
+        Entity::EntityId entity,
+        float distanceSquared,
+        float depth,
+        float maxDistanceSquared = std::numeric_limits<float>::max())
+    {
+      if (distanceSquared > maxDistanceSquared)
+      {
+        return;
+      }
+
+      if (!candidate.entity.has_value() ||
+          distanceSquared < candidate.distanceSquared - 0.25f ||
+          (std::abs(distanceSquared - candidate.distanceSquared) <= 0.25f && depth < candidate.depth))
+      {
+        candidate.entity = entity;
+        candidate.distanceSquared = distanceSquared;
+        candidate.depth = depth;
+      }
+    }
+
+    float projected_entity_depth(
+        const PositionComponent3D &position,
+        const EditorSceneViewCamera &sceneCamera)
+    {
+      return std::max(world_to_camera_space(make_vec3(position), sceneCamera).z, 0.0f);
+    }
+
+    std::optional<SceneRect> project_box_screen_rect(
+        const std::array<Vec3, 8> &corners,
+        const EditorSceneViewCamera &sceneCamera,
+        const CameraComponent &camera,
+        const ImVec2 &canvasOrigin,
+        const ImVec2 &canvasSize)
+    {
+      bool hasProjectedPoint = false;
+      ImVec2 minPoint(0.0f, 0.0f);
+      ImVec2 maxPoint(0.0f, 0.0f);
+      for (const Vec3 &corner : corners)
+      {
+        ImVec2 projectedPoint;
+        if (!project_point(corner, sceneCamera, camera, canvasOrigin, canvasSize, projectedPoint))
+        {
+          continue;
+        }
+
+        if (!hasProjectedPoint)
+        {
+          minPoint = projectedPoint;
+          maxPoint = projectedPoint;
+          hasProjectedPoint = true;
+          continue;
+        }
+
+        minPoint.x = std::min(minPoint.x, projectedPoint.x);
+        minPoint.y = std::min(minPoint.y, projectedPoint.y);
+        maxPoint.x = std::max(maxPoint.x, projectedPoint.x);
+        maxPoint.y = std::max(maxPoint.y, projectedPoint.y);
+      }
+
+      if (!hasProjectedPoint)
+      {
+        return std::nullopt;
+      }
+
+      return SceneRect{minPoint, maxPoint};
+    }
+
+    void draw_position_marker(
+        ImDrawList *drawList,
+        const ImVec2 &screenPoint,
+        bool selected,
+        const std::string *label = nullptr,
+        ImU32 labelColor = IM_COL32(225, 231, 239, 255))
+    {
+      const float radius = selected ? SCENE_SELECTED_MARKER_RADIUS : SCENE_MARKER_RADIUS;
+      const ImU32 fillColor = selected
+                                  ? IM_COL32(255, 196, 96, 255)
+                                  : IM_COL32(104, 116, 132, 240);
+      const ImU32 outlineColor = selected
+                                     ? IM_COL32(255, 232, 182, 255)
+                                     : IM_COL32(217, 223, 230, 220);
+
+      drawList->AddCircleFilled(screenPoint, radius, fillColor, 18);
+      drawList->AddCircle(screenPoint, radius, outlineColor, 18, 1.5f);
+      drawList->AddLine(
+          ImVec2(screenPoint.x - radius - 2.0f, screenPoint.y),
+          ImVec2(screenPoint.x + radius + 2.0f, screenPoint.y),
+          outlineColor,
+          1.0f);
+      drawList->AddLine(
+          ImVec2(screenPoint.x, screenPoint.y - radius - 2.0f),
+          ImVec2(screenPoint.x, screenPoint.y + radius + 2.0f),
+          outlineColor,
+          1.0f);
+
+      if (label != nullptr)
+      {
+        drawList->AddText(
+            ImVec2(screenPoint.x + radius + 6.0f, screenPoint.y - radius - 8.0f),
+            labelColor,
+            label->c_str());
+      }
+    }
+
+    float scene_gizmo_axis_length(
+        const PositionComponent3D &position,
+        const EditorSceneViewCamera &sceneCamera)
+    {
+      return std::clamp(
+          length_vec3(subtract_vec3(make_vec3(position), make_vec3(sceneCamera.position))) *
+              SCENE_GIZMO_AXIS_LENGTH_SCALE,
+          SCENE_GIZMO_MIN_AXIS_LENGTH,
+          SCENE_GIZMO_MAX_AXIS_LENGTH);
+    }
+
+    std::array<SceneGizmoAxisProjection, 3> build_gizmo_axis_projections(
+        const PositionComponent3D &position,
+        const EditorSceneViewCamera &sceneCamera,
+        const CameraComponent &camera,
+        const ImVec2 &canvasOrigin,
+        const ImVec2 &canvasSize)
+    {
+      const float axisLength = scene_gizmo_axis_length(position, sceneCamera);
+      const Vec3 origin = make_vec3(position);
+      std::array<SceneGizmoAxisProjection, 3> projections = {
+          SceneGizmoAxisProjection{SceneGizmoAxis::X, gizmo_axis_direction(SceneGizmoAxis::X)},
+          SceneGizmoAxisProjection{SceneGizmoAxis::Y, gizmo_axis_direction(SceneGizmoAxis::Y)},
+          SceneGizmoAxisProjection{SceneGizmoAxis::Z, gizmo_axis_direction(SceneGizmoAxis::Z)}};
+
+      for (SceneGizmoAxisProjection &projection : projections)
+      {
+        const Vec3 endpoint = add_vec3(origin, scale_vec3(projection.direction, axisLength));
+        if (!project_point(origin, sceneCamera, camera, canvasOrigin, canvasSize, projection.originScreen) ||
+            !project_point(endpoint, sceneCamera, camera, canvasOrigin, canvasSize, projection.endScreen))
+        {
+          continue;
+        }
+
+        const float lineLength = std::sqrt(squared_distance(projection.originScreen, projection.endScreen));
+        if (lineLength < SCENE_GIZMO_MIN_SCREEN_LENGTH_PIXELS)
+        {
+          continue;
+        }
+
+        projection.pixelsPerWorldUnit = lineLength / axisLength;
+        projection.visible = projection.pixelsPerWorldUnit > 1e-5f;
+      }
+
+      return projections;
+    }
+
+    const SceneGizmoAxisProjection *find_gizmo_axis_projection(
+        const std::array<SceneGizmoAxisProjection, 3> &projections,
+        SceneGizmoAxis axis)
+    {
+      for (const SceneGizmoAxisProjection &projection : projections)
+      {
+        if (projection.axis == axis)
+        {
+          return &projection;
+        }
+      }
+
+      return nullptr;
+    }
+
+    SceneGizmoAxis hit_test_gizmo_axes(
+        const std::array<SceneGizmoAxisProjection, 3> &projections,
+        const ImVec2 &mousePosition)
+    {
+      SceneGizmoAxis hoveredAxis = SceneGizmoAxis::None;
+      float bestDistanceSquared = SCENE_GIZMO_HIT_THRESHOLD_PIXELS * SCENE_GIZMO_HIT_THRESHOLD_PIXELS;
+
+      for (const SceneGizmoAxisProjection &projection : projections)
+      {
+        if (!projection.visible)
+        {
+          continue;
+        }
+
+        const float distanceSquared = point_to_segment_distance_squared(
+            mousePosition,
+            projection.originScreen,
+            projection.endScreen);
+        if (distanceSquared <= bestDistanceSquared)
+        {
+          hoveredAxis = projection.axis;
+          bestDistanceSquared = distanceSquared;
+        }
+      }
+
+      return hoveredAxis;
+    }
+
+    void draw_translation_gizmo(
+        ImDrawList *drawList,
+        const std::array<SceneGizmoAxisProjection, 3> &projections,
+        SceneGizmoAxis highlightedAxis)
+    {
+      const SceneGizmoAxisProjection *originProjection = nullptr;
+      for (const SceneGizmoAxisProjection &projection : projections)
+      {
+        if (!projection.visible)
+        {
+          continue;
+        }
+
+        if (originProjection == nullptr)
+        {
+          originProjection = &projection;
+        }
+
+        const bool highlighted = projection.axis == highlightedAxis;
+        const ImU32 color = gizmo_axis_color(projection.axis, highlighted);
+        const float thickness = highlighted ? 3.5f : 2.5f;
+        drawList->AddLine(projection.originScreen, projection.endScreen, color, thickness);
+
+        const float lineLength = std::sqrt(squared_distance(projection.originScreen, projection.endScreen));
+        if (lineLength <= SCENE_GIZMO_ARROW_SIZE + 1.0f)
+        {
+          continue;
+        }
+
+        const ImVec2 direction(
+            (projection.endScreen.x - projection.originScreen.x) / lineLength,
+            (projection.endScreen.y - projection.originScreen.y) / lineLength);
+        const ImVec2 perpendicular(-direction.y, direction.x);
+        const ImVec2 arrowBase(
+            projection.endScreen.x - (direction.x * SCENE_GIZMO_ARROW_SIZE),
+            projection.endScreen.y - (direction.y * SCENE_GIZMO_ARROW_SIZE));
+        const ImVec2 arrowOffset(
+            perpendicular.x * (SCENE_GIZMO_ARROW_SIZE * 0.35f),
+            perpendicular.y * (SCENE_GIZMO_ARROW_SIZE * 0.35f));
+        drawList->AddTriangleFilled(
+            projection.endScreen,
+            ImVec2(arrowBase.x + arrowOffset.x, arrowBase.y + arrowOffset.y),
+            ImVec2(arrowBase.x - arrowOffset.x, arrowBase.y - arrowOffset.y),
+            color);
+      }
+
+      if (originProjection != nullptr)
+      {
+        drawList->AddCircleFilled(originProjection->originScreen, 4.5f, IM_COL32(246, 247, 250, 255), 16);
+        drawList->AddCircle(originProjection->originScreen, 4.5f, IM_COL32(36, 39, 45, 255), 16, 1.5f);
+      }
+    }
+
+    SceneHitCandidate pick_entity_in_scene(
+        const EditorSceneViewCamera &sceneCamera,
+        const CameraComponent &camera,
+        const ImVec2 &canvasOrigin,
+        const ImVec2 &canvasSize,
+        EntityManager &entityManager,
+        ComponentManager &componentManager,
+        std::optional<Entity::EntityId> world,
+        const ImVec2 &mousePosition)
+    {
+      SceneHitCandidate hitCandidate;
+
+      for (Entity::EntityId entity : entityManager.getAllEntities())
+      {
+        if (world.has_value() && !entity_belongs_to_world(entity, *world, componentManager))
+        {
+          continue;
+        }
+
+        if (!componentManager.hasComponent<PositionComponent3D>(entity))
+        {
+          continue;
+        }
+
+        const auto &position = componentManager.getComponent<PositionComponent3D>(entity);
+        const float entityDepth = projected_entity_depth(position, sceneCamera);
+        bool hasPreviewGeometry = false;
+
+        if (componentManager.hasComponent<PrimitiveComponent>(entity))
+        {
+          const auto &primitive = componentManager.getComponent<PrimitiveComponent>(entity);
+          if (primitive.type == PrimitiveType::Cube)
+          {
+            hasPreviewGeometry = true;
+            if (const auto rect = project_box_screen_rect(
+                    box_corners(
+                        make_vec3(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT),
+                        make_vec3(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT),
+                        position),
+                    sceneCamera,
+                    camera,
+                    canvasOrigin,
+                    canvasSize);
+                rect.has_value())
+            {
+              register_scene_hit(
+                  hitCandidate,
+                  entity,
+                  point_to_rect_distance_squared(mousePosition, *rect),
+                  entityDepth,
+                  SCENE_PICK_THRESHOLD_PIXELS * SCENE_PICK_THRESHOLD_PIXELS);
+            }
+          }
+        }
+
+        if (componentManager.hasComponent<ModelComponent>(entity))
+        {
+          hasPreviewGeometry = true;
+          const auto &model = componentManager.getComponent<ModelComponent>(entity).model;
+          const Vec3 minCorner = model.hasBounds
+                                     ? make_vec3(model.minX, model.minY, model.minZ)
+                                     : make_vec3(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT);
+          const Vec3 maxCorner = model.hasBounds
+                                     ? make_vec3(model.maxX, model.maxY, model.maxZ)
+                                     : make_vec3(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT);
+          if (const auto rect = project_box_screen_rect(
+                  box_corners(minCorner, maxCorner, position),
+                  sceneCamera,
+                  camera,
+                  canvasOrigin,
+                  canvasSize);
+              rect.has_value())
+          {
+            register_scene_hit(
+                hitCandidate,
+                entity,
+                point_to_rect_distance_squared(mousePosition, *rect),
+                entityDepth,
+                SCENE_PICK_THRESHOLD_PIXELS * SCENE_PICK_THRESHOLD_PIXELS);
+          }
+        }
+
+        if (componentManager.hasComponent<CameraComponent>(entity))
+        {
+          hasPreviewGeometry = true;
+          const auto &entityCamera = componentManager.getComponent<CameraComponent>(entity);
+          if (canvasSize.x > 0.0f &&
+              canvasSize.y > 0.0f &&
+              entityCamera.fovY > 0.0f &&
+              entityCamera.nearClip > 0.0f &&
+              entityCamera.farClip > entityCamera.nearClip)
+          {
+            const float previewDepth = std::min(
+                entityCamera.farClip,
+                std::max(CAMERA_FRUSTUM_PREVIEW_MAX_DEPTH, entityCamera.nearClip + 0.001f));
+            const float aspectRatio = canvasSize.x / canvasSize.y;
+            const float halfFovRadians = degrees_to_radians(entityCamera.fovY * 0.5f);
+            const float tanHalfFov = std::tan(halfFovRadians);
+
+            if (aspectRatio > 0.0f && tanHalfFov > 0.0f)
+            {
+              const float nearHalfHeight = tanHalfFov * entityCamera.nearClip;
+              const float nearHalfWidth = nearHalfHeight * aspectRatio;
+              const float farHalfHeight = tanHalfFov * previewDepth;
+              const float farHalfWidth = farHalfHeight * aspectRatio;
+              const auto nearCorners = frustum_plane_corners(position, entityCamera.nearClip, nearHalfWidth, nearHalfHeight);
+              const auto farCorners = frustum_plane_corners(position, previewDepth, farHalfWidth, farHalfHeight);
+
+              for (std::size_t index = 0; index < nearCorners.size(); ++index)
+              {
+                const std::size_t nextIndex = (index + 1) % nearCorners.size();
+                ImVec2 lineStart;
+                ImVec2 lineEnd;
+
+                if (project_line_segment(
+                        nearCorners[index],
+                        nearCorners[nextIndex],
+                        sceneCamera,
+                        camera,
+                        canvasOrigin,
+                        canvasSize,
+                        lineStart,
+                        lineEnd))
+                {
+                  register_scene_hit(
+                      hitCandidate,
+                      entity,
+                      point_to_segment_distance_squared(mousePosition, lineStart, lineEnd),
+                      entityDepth,
+                      SCENE_PICK_THRESHOLD_PIXELS * SCENE_PICK_THRESHOLD_PIXELS);
+                }
+
+                if (project_line_segment(
+                        farCorners[index],
+                        farCorners[nextIndex],
+                        sceneCamera,
+                        camera,
+                        canvasOrigin,
+                        canvasSize,
+                        lineStart,
+                        lineEnd))
+                {
+                  register_scene_hit(
+                      hitCandidate,
+                      entity,
+                      point_to_segment_distance_squared(mousePosition, lineStart, lineEnd),
+                      entityDepth,
+                      SCENE_PICK_THRESHOLD_PIXELS * SCENE_PICK_THRESHOLD_PIXELS);
+                }
+
+                if (project_line_segment(
+                        nearCorners[index],
+                        farCorners[index],
+                        sceneCamera,
+                        camera,
+                        canvasOrigin,
+                        canvasSize,
+                        lineStart,
+                        lineEnd))
+                {
+                  register_scene_hit(
+                      hitCandidate,
+                      entity,
+                      point_to_segment_distance_squared(mousePosition, lineStart, lineEnd),
+                      entityDepth,
+                      SCENE_PICK_THRESHOLD_PIXELS * SCENE_PICK_THRESHOLD_PIXELS);
+                }
+              }
+            }
+          }
+        }
+
+        if (componentManager.hasComponent<TextComponent>(entity))
+        {
+          hasPreviewGeometry = true;
+          const auto &text = componentManager.getComponent<TextComponent>(entity);
+          const VectorTextGeometry3D geometry = build_vector_text_geometry(
+              text.content,
+              VectorTextStyle{
+                  std::max(0.05f, text.fontSize),
+                  std::max(0.0f, text.wrapWidth),
+                  std::max(0.8f, text.lineSpacing),
+              },
+              make_vector_text_frame_from_euler(
+                  VectorTextPoint3D{position.x, position.y, position.z},
+                  text.yawDegrees,
+                  text.pitchDegrees,
+                  text.rollDegrees));
+
+          for (const auto &segment : geometry.segments)
+          {
+            ImVec2 lineStart;
+            ImVec2 lineEnd;
+            if (!project_line_segment(
+                    make_vec3(segment.start.x, segment.start.y, segment.start.z),
+                    make_vec3(segment.end.x, segment.end.y, segment.end.z),
+                    sceneCamera,
+                    camera,
+                    canvasOrigin,
+                    canvasSize,
+                    lineStart,
+                    lineEnd))
+            {
+              continue;
+            }
+
+            register_scene_hit(
+                hitCandidate,
+                entity,
+                point_to_segment_distance_squared(mousePosition, lineStart, lineEnd),
+                entityDepth,
+                SCENE_PICK_THRESHOLD_PIXELS * SCENE_PICK_THRESHOLD_PIXELS);
+          }
+        }
+
+        ImVec2 screenPoint;
+        if (project_point(make_vec3(position), sceneCamera, camera, canvasOrigin, canvasSize, screenPoint))
+        {
+          const float markerRadius = hasPreviewGeometry
+                                         ? SCENE_PICK_THRESHOLD_PIXELS * 0.75f
+                                         : SCENE_PICK_THRESHOLD_PIXELS;
+          register_scene_hit(
+              hitCandidate,
+              entity,
+              squared_distance(mousePosition, screenPoint),
+              entityDepth,
+              markerRadius * markerRadius);
+        }
+      }
+
+      return hitCandidate;
+    }
+
     int draw_world_preview(
         ImDrawList *drawList,
         const EditorSceneViewCamera &sceneCamera,
@@ -747,7 +1332,8 @@ namespace hades
         EntityManager &entityManager,
         ComponentManager &componentManager,
         std::optional<Entity::EntityId> world,
-        std::optional<Entity::EntityId> excludedEntity)
+        std::optional<Entity::EntityId> excludedEntity,
+        std::optional<Entity::EntityId> selectedEntity)
     {
       int visibleRenderableCount = 0;
       for (Entity::EntityId entity : entityManager.getAllEntities())
@@ -769,6 +1355,10 @@ namespace hades
 
         const auto &position = componentManager.getComponent<PositionComponent3D>(entity);
         const std::string label = entity_display_label(entity, componentManager);
+        const bool isSelected = selectedEntity.has_value() && *selectedEntity == entity;
+        const ImU32 selectedColor = IM_COL32(255, 205, 107, 255);
+        const ImU32 selectedLabelColor = IM_COL32(255, 235, 186, 255);
+        bool previewDrawn = false;
 
         if (componentManager.hasComponent<CameraComponent>(entity))
         {
@@ -781,10 +1371,11 @@ namespace hades
                   canvasSize,
                   position,
                   entityCamera,
-                  IM_COL32(255, 165, 0, 255),
-                  1.5f))
+                  isSelected ? selectedColor : IM_COL32(255, 165, 0, 255),
+                  isSelected ? 2.5f : 1.5f))
           {
             ++visibleRenderableCount;
+            previewDrawn = true;
           }
         }
 
@@ -805,11 +1396,13 @@ namespace hades
                   position,
                   make_vec3(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT),
                   make_vec3(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT),
-                  IM_COL32(223, 228, 235, 255),
-                  1.5f,
-                  &label))
+                  isSelected ? selectedColor : IM_COL32(223, 228, 235, 255),
+                  isSelected ? 2.5f : 1.5f,
+                  &label,
+                  isSelected ? selectedLabelColor : IM_COL32(205, 210, 218, 255)))
           {
             ++visibleRenderableCount;
+            previewDrawn = true;
           }
           continue;
         }
@@ -817,20 +1410,21 @@ namespace hades
         if (componentManager.hasComponent<ModelComponent>(entity))
         {
           const auto &model = componentManager.getComponent<ModelComponent>(entity).model;
-          if (hades::preview::has_renderable_geometry(model) &&
-              draw_model_mesh(
-                  drawList,
-                  sceneCamera,
-                  camera,
-                  canvasOrigin,
-                  canvasSize,
-                  position,
-                  model,
-                  &label,
-                  IM_COL32(205, 210, 218, 255)))
+          const bool modelDrawn = hades::preview::has_renderable_geometry(model) &&
+                                  draw_model_mesh(
+                                      drawList,
+                                      sceneCamera,
+                                      camera,
+                                      canvasOrigin,
+                                      canvasSize,
+                                      position,
+                                      model,
+                                      &label,
+                                      isSelected ? selectedLabelColor : IM_COL32(205, 210, 218, 255));
+          if (modelDrawn)
           {
             ++visibleRenderableCount;
-            continue;
+            previewDrawn = true;
           }
 
           const Vec3 minCorner = model.hasBounds
@@ -840,7 +1434,8 @@ namespace hades
                                      ? make_vec3(model.maxX, model.maxY, model.maxZ)
                                      : make_vec3(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT);
 
-          if (draw_wire_box(
+          if ((!modelDrawn || isSelected) &&
+              draw_wire_box(
                   drawList,
                   sceneCamera,
                   camera,
@@ -849,12 +1444,16 @@ namespace hades
                   position,
                   minCorner,
                   maxCorner,
-                  IM_COL32(179, 189, 202, 255),
-                  1.5f,
-                  &label,
-                  IM_COL32(205, 210, 218, 255)))
+                  isSelected ? selectedColor : IM_COL32(179, 189, 202, 255),
+                  isSelected ? 2.5f : 1.5f,
+                  modelDrawn ? nullptr : &label,
+                  isSelected ? selectedLabelColor : IM_COL32(205, 210, 218, 255)))
           {
-            ++visibleRenderableCount;
+            if (!modelDrawn)
+            {
+              ++visibleRenderableCount;
+            }
+            previewDrawn = true;
           }
         }
 
@@ -869,8 +1468,26 @@ namespace hades
                   canvasSize,
                   position,
                   text,
-                  IM_COL32(227, 233, 240, 255),
-                  1.5f))
+                  isSelected ? selectedColor : IM_COL32(227, 233, 240, 255),
+                  isSelected ? 2.5f : 1.5f))
+          {
+            ++visibleRenderableCount;
+            previewDrawn = true;
+          }
+        }
+
+        ImVec2 screenPoint;
+        if (project_point(make_vec3(position), sceneCamera, camera, canvasOrigin, canvasSize, screenPoint) &&
+            (!previewDrawn || isSelected || componentManager.hasComponent<CameraComponent>(entity)))
+        {
+          const bool showLabel = !previewDrawn || componentManager.hasComponent<CameraComponent>(entity);
+          draw_position_marker(
+              drawList,
+              screenPoint,
+              isSelected,
+              showLabel ? &label : nullptr,
+              isSelected ? selectedLabelColor : IM_COL32(225, 231, 239, 255));
+          if (!previewDrawn)
           {
             ++visibleRenderableCount;
           }
@@ -1006,6 +1623,132 @@ namespace hades
     }
 
     const CameraComponent camera = editor_scene_camera();
+    const bool selectedEntityIsEditableInScene =
+        !state.isPlaying &&
+        state.selectedEntity.has_value() &&
+        sceneWorld.has_value() &&
+        entity_belongs_to_world(*state.selectedEntity, *sceneWorld, componentManager) &&
+        componentManager.hasComponent<PositionComponent3D>(*state.selectedEntity);
+
+    if (activeSceneGizmoAxis_ != SceneGizmoAxis::None)
+    {
+      const bool activeGizmoStillValid =
+          !state.isPlaying &&
+          activeSceneGizmoEntity_ != Entity::INVALID &&
+          state.selectedEntity.has_value() &&
+          *state.selectedEntity == activeSceneGizmoEntity_ &&
+          sceneWorld.has_value() &&
+          entity_belongs_to_world(activeSceneGizmoEntity_, *sceneWorld, componentManager) &&
+          componentManager.hasComponent<PositionComponent3D>(activeSceneGizmoEntity_);
+
+      if (!activeGizmoStillValid)
+      {
+        activeSceneGizmoAxis_ = SceneGizmoAxis::None;
+        activeSceneGizmoEntity_ = Entity::INVALID;
+      }
+    }
+
+    if (activeSceneGizmoAxis_ != SceneGizmoAxis::None)
+    {
+      if (!ImGui::IsMouseDown(ImGuiMouseButton_Left))
+      {
+        activeSceneGizmoAxis_ = SceneGizmoAxis::None;
+        activeSceneGizmoEntity_ = Entity::INVALID;
+      }
+      else if (componentManager.hasComponent<PositionComponent3D>(activeSceneGizmoEntity_))
+      {
+        auto &position = componentManager.getComponent<PositionComponent3D>(activeSceneGizmoEntity_);
+        const float mouseDeltaAlongAxis =
+            ((io.MousePos.x - sceneGizmoDragStartMouseX_) * sceneGizmoAxisScreenDirectionX_) +
+            ((io.MousePos.y - sceneGizmoDragStartMouseY_) * sceneGizmoAxisScreenDirectionY_);
+        const float worldDelta = sceneGizmoPixelsPerWorldUnit_ > 1e-5f
+                                     ? (mouseDeltaAlongAxis / sceneGizmoPixelsPerWorldUnit_)
+                                     : 0.0f;
+
+        position.x = sceneGizmoDragStartPositionX_;
+        position.y = sceneGizmoDragStartPositionY_;
+        position.z = sceneGizmoDragStartPositionZ_;
+
+        switch (activeSceneGizmoAxis_)
+        {
+        case SceneGizmoAxis::X:
+          position.x += worldDelta;
+          break;
+        case SceneGizmoAxis::Y:
+          position.y += worldDelta;
+          break;
+        case SceneGizmoAxis::Z:
+          position.z += worldDelta;
+          break;
+        case SceneGizmoAxis::None:
+          break;
+        }
+      }
+    }
+
+    std::array<SceneGizmoAxisProjection, 3> gizmoAxes{};
+    if (selectedEntityIsEditableInScene)
+    {
+      gizmoAxes = build_gizmo_axis_projections(
+          componentManager.getComponent<PositionComponent3D>(*state.selectedEntity),
+          sceneCamera,
+          camera,
+          canvasOrigin,
+          canvasSize);
+    }
+
+    const SceneGizmoAxis hoveredGizmoAxis =
+        selectedEntityIsEditableInScene && sceneCanvasHovered && !rotateModifierDown
+            ? hit_test_gizmo_axes(gizmoAxes, io.MousePos)
+            : SceneGizmoAxis::None;
+
+    if (sceneCanvasHovered && !rotateModifierDown && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+    {
+      bool handledClick = false;
+
+      if (selectedEntityIsEditableInScene && hoveredGizmoAxis != SceneGizmoAxis::None)
+      {
+        const SceneGizmoAxisProjection *projection = find_gizmo_axis_projection(gizmoAxes, hoveredGizmoAxis);
+        if (projection != nullptr && projection->visible && state.selectedEntity.has_value())
+        {
+          const float axisScreenLength = std::sqrt(squared_distance(projection->originScreen, projection->endScreen));
+          if (axisScreenLength > 1e-5f)
+          {
+            const auto &position = componentManager.getComponent<PositionComponent3D>(*state.selectedEntity);
+            activeSceneGizmoAxis_ = hoveredGizmoAxis;
+            activeSceneGizmoEntity_ = *state.selectedEntity;
+            sceneGizmoDragStartMouseX_ = io.MousePos.x;
+            sceneGizmoDragStartMouseY_ = io.MousePos.y;
+            sceneGizmoDragStartPositionX_ = position.x;
+            sceneGizmoDragStartPositionY_ = position.y;
+            sceneGizmoDragStartPositionZ_ = position.z;
+            sceneGizmoAxisScreenDirectionX_ = (projection->endScreen.x - projection->originScreen.x) / axisScreenLength;
+            sceneGizmoAxisScreenDirectionY_ = (projection->endScreen.y - projection->originScreen.y) / axisScreenLength;
+            sceneGizmoPixelsPerWorldUnit_ = projection->pixelsPerWorldUnit;
+            handledClick = true;
+          }
+        }
+      }
+
+      if (!handledClick)
+      {
+        const SceneHitCandidate hitCandidate = pick_entity_in_scene(
+            sceneCamera,
+            camera,
+            canvasOrigin,
+            canvasSize,
+            entityManager,
+            componentManager,
+            sceneWorld,
+            io.MousePos);
+        if (hitCandidate.entity.has_value())
+        {
+          state.selectedEntity = *hitCandidate.entity;
+          activeSceneGizmoAxis_ = SceneGizmoAxis::None;
+          activeSceneGizmoEntity_ = Entity::INVALID;
+        }
+      }
+    }
 
     ImDrawList *drawList = ImGui::GetWindowDrawList();
     drawList->AddRectFilled(canvasOrigin, canvasMax, IM_COL32(17, 20, 24, 255));
@@ -1014,7 +1757,9 @@ namespace hades
     drawList->AddText(
         ImVec2(canvasOrigin.x + 12.0f, canvasOrigin.y + 12.0f),
         IM_COL32(135, 142, 154, 255),
-        "Arrows move  |  Wheel zoom  |  Ctrl/Cmd + drag rotate");
+        state.isPlaying
+            ? "Click entities select  |  Arrows move  |  Wheel zoom  |  Ctrl/Cmd + drag rotate"
+            : "Click entities select  |  Drag RGB axes move  |  Arrows move  |  Wheel zoom  |  Ctrl/Cmd + drag rotate");
 
     if (!state.isPlaying)
     {
@@ -1030,7 +1775,21 @@ namespace hades
         entityManager,
         componentManager,
         sceneWorld,
-        std::nullopt);
+        std::nullopt,
+        state.selectedEntity);
+
+    if (selectedEntityIsEditableInScene)
+    {
+      const SceneGizmoAxis highlightedAxis =
+          activeSceneGizmoAxis_ != SceneGizmoAxis::None
+              ? activeSceneGizmoAxis_
+              : hoveredGizmoAxis;
+      draw_translation_gizmo(drawList, gizmoAxes, highlightedAxis);
+      if (highlightedAxis != SceneGizmoAxis::None)
+      {
+        ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+      }
+    }
 
     drawList->PopClipRect();
     ImGui::End();
