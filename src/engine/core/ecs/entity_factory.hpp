@@ -25,6 +25,11 @@ namespace hades
         ComponentManager &componentManager,
         std::optional<Entity::EntityId> parent = std::nullopt);
 
+    static Entity::EntityId createText(
+        EntityManager &entityManager,
+        ComponentManager &componentManager,
+        std::optional<Entity::EntityId> parent = std::nullopt);
+
     static Entity::EntityId createAudioEmitter(
         EntityManager &entityManager,
         ComponentManager &componentManager,

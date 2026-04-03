@@ -21,6 +21,7 @@ namespace hades
     None,
     Camera,
     Cube,
+    Text,
     AudioEmitter,
   };
 

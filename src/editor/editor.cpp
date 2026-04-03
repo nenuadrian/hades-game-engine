@@ -31,6 +31,7 @@
 #include "../engine/components/primitive_component.hpp"
 #include "../engine/components/render_component.hpp"
 #include "../engine/components/script_component.hpp"
+#include "../engine/components/text_component.hpp"
 #include "../engine/components/transform_hierarchy_component.hpp"
 #include "../engine/components/world_component.hpp"
 #include "../engine/core/ecs/component_manager.hpp"
@@ -39,6 +40,7 @@
 #include "../engine/core/ecs/world_utils.hpp"
 #include "../engine/gui/imgui.hpp"
 #include "../engine/rendering/model_preview.hpp"
+#include "../engine/rendering/vector_text.hpp"
 #include "../engine/runtime/main_camera_selection.hpp"
 #include "../engine/runtime/script_runtime.hpp"
 
@@ -750,6 +752,57 @@ namespace hades
       return true;
     }
 
+    bool draw_vector_text(
+        ImDrawList *drawList,
+        const EditorSceneViewCamera &sceneCamera,
+        const CameraComponent &camera,
+        const ImVec2 &canvasOrigin,
+        const ImVec2 &canvasSize,
+        const PositionComponent3D &position,
+        const TextComponent &text,
+        ImU32 lineColor,
+        float thickness)
+    {
+      const VectorTextGeometry3D geometry = build_vector_text_geometry(
+          text.content,
+          VectorTextStyle{
+              std::max(0.05f, text.fontSize),
+              std::max(0.0f, text.wrapWidth),
+              std::max(0.8f, text.lineSpacing),
+          },
+          VectorTextFrame3D{
+              VectorTextPoint3D{position.x, position.y, position.z},
+              VectorTextPoint3D{sceneCamera.right.x, sceneCamera.right.y, sceneCamera.right.z},
+              VectorTextPoint3D{sceneCamera.up.x, sceneCamera.up.y, sceneCamera.up.z},
+              0.5f,
+              0.5f,
+          });
+
+      int visibleSegmentCount = 0;
+      for (const auto &segment : geometry.segments)
+      {
+        ImVec2 screenStart;
+        ImVec2 screenEnd;
+        if (!project_line_segment(
+                make_vec3(segment.start.x, segment.start.y, segment.start.z),
+                make_vec3(segment.end.x, segment.end.y, segment.end.z),
+                sceneCamera,
+                camera,
+                canvasOrigin,
+                canvasSize,
+                screenStart,
+                screenEnd))
+        {
+          continue;
+        }
+
+        drawList->AddLine(screenStart, screenEnd, lineColor, thickness);
+        ++visibleSegmentCount;
+      }
+
+      return visibleSegmentCount > 0;
+    }
+
     int draw_world_preview(
         ImDrawList *drawList,
         const EditorSceneViewCamera &sceneCamera,
@@ -865,6 +918,24 @@ namespace hades
                   1.5f,
                   &label,
                   IM_COL32(205, 210, 218, 255)))
+          {
+            ++visibleRenderableCount;
+          }
+        }
+
+        if (componentManager.hasComponent<TextComponent>(entity))
+        {
+          const auto &text = componentManager.getComponent<TextComponent>(entity);
+          if (draw_vector_text(
+                  drawList,
+                  sceneCamera,
+                  camera,
+                  canvasOrigin,
+                  canvasSize,
+                  position,
+                  text,
+                  IM_COL32(227, 233, 240, 255),
+                  1.5f))
           {
             ++visibleRenderableCount;
           }
@@ -1881,7 +1952,29 @@ namespace hades
         }
 
         workspaceDeleteError_.clear();
+        const std::filesystem::path deletedPath = pendingWorkspaceDeletePath_;
         pendingWorkspaceDeletePath_.clear();
+
+        if (activeScriptEditorPath_.has_value() &&
+            path_is_same_or_within(deletedPath, *activeScriptEditorPath_))
+        {
+          activeScriptEditorPath_.reset();
+          activeScriptEditorRelativePath_.clear();
+          activeScriptEditorContents_.clear();
+          activeScriptEditorSavedWriteTime_.reset();
+          activeScriptEditorDirty_ = false;
+          scriptEditorStatusMessage_ = "Closed the script that was deleted from the workspace.";
+          scriptEditorStatusIsError_ = false;
+        }
+
+        if (pendingScriptEditorPath_.has_value() &&
+            path_is_same_or_within(deletedPath, *pendingScriptEditorPath_))
+        {
+          pendingScriptEditorPath_.reset();
+          pendingScriptEditorRelativePath_.clear();
+          openScriptEditorUnsavedChangesDialog_ = false;
+        }
+
         invalidate_workspace_cache();
         ImGui::CloseCurrentPopup();
       }
@@ -1913,8 +2006,21 @@ namespace hades
     {
       flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
     }
+    if (!node.directory &&
+        activeScriptEditorPath_.has_value() &&
+        activeScriptEditorPath_->lexically_normal() == node.path.lexically_normal())
+    {
+      flags |= ImGuiTreeNodeFlags_Selected;
+    }
 
     const bool open = ImGui::TreeNodeEx(treeNodeId.c_str(), flags);
+    if (!node.directory &&
+        node.path.extension() == ".cs" &&
+        ImGui::IsItemClicked(ImGuiMouseButton_Left))
+    {
+      request_script_editor_open(node.path, relative_workspace_path(activeWorkspacePath_, node.path));
+    }
+
     if (ImGui::BeginPopupContextItem())
     {
       const std::filesystem::path destinationDirectory =
@@ -1932,6 +2038,13 @@ namespace hades
       if (ImGui::MenuItem("Import"))
       {
         request_workspace_item_import(destinationDirectory);
+      }
+      if (!node.directory && node.path.extension() == ".cs")
+      {
+        if (ImGui::MenuItem("Open in Script Editor"))
+        {
+          request_script_editor_open(node.path, relative_workspace_path(activeWorkspacePath_, node.path));
+        }
       }
 
       if (!isWorkspaceRoot)
@@ -1956,6 +2069,359 @@ namespace hades
     }
 
     ImGui::TreePop();
+  }
+
+  void Editor::request_script_editor_open(
+      const std::filesystem::path &scriptPath,
+      const std::string &relativePath)
+  {
+    if (scriptPath.extension() != ".cs")
+    {
+      return;
+    }
+
+    const std::filesystem::path normalizedPath = scriptPath.lexically_normal();
+    if (activeScriptEditorPath_.has_value() &&
+        activeScriptEditorPath_->lexically_normal() == normalizedPath)
+    {
+      focusScriptEditorWindow_ = true;
+      return;
+    }
+
+    scriptEditorStatusMessage_.clear();
+    scriptEditorStatusIsError_ = false;
+
+    if (activeScriptEditorDirty_)
+    {
+      pendingScriptEditorPath_ = normalizedPath;
+      pendingScriptEditorRelativePath_ = relativePath;
+      openScriptEditorUnsavedChangesDialog_ = true;
+      return;
+    }
+
+    std::string errorMessage;
+    if (!open_script_document(normalizedPath, relativePath, &errorMessage))
+    {
+      scriptEditorStatusMessage_ = std::move(errorMessage);
+      scriptEditorStatusIsError_ = true;
+    }
+  }
+
+  bool Editor::open_script_document(
+      const std::filesystem::path &scriptPath,
+      const std::string &relativePath,
+      std::string *errorMessage)
+  {
+    ScriptDocumentSnapshot snapshot;
+    if (!load_script_document(scriptPath, snapshot, errorMessage))
+    {
+      return false;
+    }
+
+    activeScriptEditorPath_ = scriptPath;
+    activeScriptEditorRelativePath_ = relativePath;
+    activeScriptEditorContents_ = std::move(snapshot.contents);
+    if (snapshot.hasLastWriteTime)
+    {
+      activeScriptEditorSavedWriteTime_ = snapshot.lastWriteTime;
+    }
+    else
+    {
+      activeScriptEditorSavedWriteTime_.reset();
+    }
+    activeScriptEditorDirty_ = false;
+    scriptEditorStatusMessage_.clear();
+    scriptEditorStatusIsError_ = false;
+    focusScriptEditorWindow_ = true;
+    return true;
+  }
+
+  bool Editor::save_active_script_document(bool triggerCompile, std::string *errorMessage)
+  {
+    if (!activeScriptEditorPath_.has_value())
+    {
+      if (errorMessage != nullptr)
+      {
+        *errorMessage = "No script is currently open in the editor.";
+      }
+      return false;
+    }
+
+    ScriptDocumentSnapshot snapshot;
+    if (!save_script_document(*activeScriptEditorPath_, activeScriptEditorContents_, &snapshot, errorMessage))
+    {
+      return false;
+    }
+
+    activeScriptEditorDirty_ = false;
+    if (snapshot.hasLastWriteTime)
+    {
+      activeScriptEditorSavedWriteTime_ = snapshot.lastWriteTime;
+      if (!activeScriptEditorRelativePath_.empty())
+      {
+        scriptModTimes_[activeScriptEditorRelativePath_] = snapshot.lastWriteTime;
+      }
+    }
+    else
+    {
+      activeScriptEditorSavedWriteTime_.reset();
+    }
+
+    scriptEditorStatusMessage_ = "Saved " +
+        (activeScriptEditorRelativePath_.empty() ? activeScriptEditorPath_->filename().string() : activeScriptEditorRelativePath_) +
+        ".";
+    scriptEditorStatusIsError_ = false;
+
+    if (triggerCompile)
+    {
+      queue_workspace_script_compile();
+    }
+
+    return true;
+  }
+
+  void Editor::queue_workspace_script_compile()
+  {
+    if (activeWorkspacePath_.empty())
+    {
+      return;
+    }
+
+    if (workspaceScriptFiles_.empty())
+    {
+      lastCompileError_.clear();
+      lastCompileSucceeded_ = true;
+      workspaceScriptListDirty_ = false;
+      return;
+    }
+
+    if (backgroundCompileInProgress_)
+    {
+      workspaceScriptListDirty_ = true;
+      return;
+    }
+
+    std::vector<std::filesystem::path> sourceFiles;
+    sourceFiles.reserve(workspaceScriptFiles_.size());
+    for (const auto &relPath : workspaceScriptFiles_)
+    {
+      sourceFiles.push_back(activeWorkspacePath_ / relPath);
+    }
+
+    backgroundCompileInProgress_ = true;
+    workspaceScriptListDirty_ = false;
+    backgroundCompileResult_ = std::async(std::launch::async,
+        [files = std::move(sourceFiles)]() -> std::string
+        {
+          std::string error;
+          ScriptRuntime::compile(files, &error);
+          return error;
+        });
+  }
+
+  void Editor::render_script_editor()
+  {
+    if (focusScriptEditorWindow_)
+    {
+      ImGui::SetNextWindowFocus();
+    }
+
+    ImGui::Begin(SCRIPT_EDITOR_WINDOW_TITLE);
+    focusScriptEditorWindow_ = false;
+
+    if (openScriptEditorUnsavedChangesDialog_)
+    {
+      ImGui::OpenPopup(SCRIPT_EDITOR_UNSAVED_POPUP_TITLE);
+      openScriptEditorUnsavedChangesDialog_ = false;
+    }
+
+    if (ImGui::BeginPopupModal(SCRIPT_EDITOR_UNSAVED_POPUP_TITLE, nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    {
+      const std::string label =
+          activeScriptEditorRelativePath_.empty() ? "the current script" : activeScriptEditorRelativePath_;
+      ImGui::TextWrapped("Save changes to %s before opening another script?", label.c_str());
+
+      if (scriptEditorStatusIsError_ && !scriptEditorStatusMessage_.empty())
+      {
+        ImGui::TextColored(ImVec4(0.88f, 0.42f, 0.42f, 1.0f), "%s", scriptEditorStatusMessage_.c_str());
+      }
+
+      if (ImGui::Button("Save and Open"))
+      {
+        std::string errorMessage;
+        if (save_active_script_document(true, &errorMessage) &&
+            pendingScriptEditorPath_.has_value() &&
+            open_script_document(*pendingScriptEditorPath_, pendingScriptEditorRelativePath_, &errorMessage))
+        {
+          pendingScriptEditorPath_.reset();
+          pendingScriptEditorRelativePath_.clear();
+          ImGui::CloseCurrentPopup();
+        }
+        else
+        {
+          scriptEditorStatusMessage_ = std::move(errorMessage);
+          scriptEditorStatusIsError_ = true;
+        }
+      }
+
+      ImGui::SameLine();
+      if (ImGui::Button("Discard Changes"))
+      {
+        std::string errorMessage;
+        if (pendingScriptEditorPath_.has_value() &&
+            open_script_document(*pendingScriptEditorPath_, pendingScriptEditorRelativePath_, &errorMessage))
+        {
+          pendingScriptEditorPath_.reset();
+          pendingScriptEditorRelativePath_.clear();
+          ImGui::CloseCurrentPopup();
+        }
+        else
+        {
+          scriptEditorStatusMessage_ = std::move(errorMessage);
+          scriptEditorStatusIsError_ = true;
+        }
+      }
+
+      ImGui::SameLine();
+      if (ImGui::Button("Cancel"))
+      {
+        pendingScriptEditorPath_.reset();
+        pendingScriptEditorRelativePath_.clear();
+        scriptEditorStatusMessage_.clear();
+        scriptEditorStatusIsError_ = false;
+        ImGui::CloseCurrentPopup();
+      }
+
+      ImGui::EndPopup();
+    }
+
+    if (!activeScriptEditorPath_.has_value())
+    {
+      ImGui::TextDisabled("Select a .cs file in the Workspace panel to start editing.");
+      if (!scriptEditorStatusMessage_.empty())
+      {
+        const ImVec4 color = scriptEditorStatusIsError_
+                                 ? ImVec4(0.88f, 0.42f, 0.42f, 1.0f)
+                                 : ImVec4(0.42f, 0.88f, 0.42f, 1.0f);
+        ImGui::TextColored(color, "%s", scriptEditorStatusMessage_.c_str());
+      }
+      ImGui::End();
+      return;
+    }
+
+    ImGui::TextWrapped("%s", activeScriptEditorRelativePath_.empty()
+                               ? activeScriptEditorPath_->string().c_str()
+                               : activeScriptEditorRelativePath_.c_str());
+    ImGui::Separator();
+
+    const bool canSave = activeScriptEditorDirty_;
+    if (!canSave)
+    {
+      ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("Save"))
+    {
+      std::string errorMessage;
+      if (!save_active_script_document(true, &errorMessage))
+      {
+        scriptEditorStatusMessage_ = std::move(errorMessage);
+        scriptEditorStatusIsError_ = true;
+      }
+    }
+    if (!canSave)
+    {
+      ImGui::EndDisabled();
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("Compile Workspace"))
+    {
+      std::string errorMessage;
+      bool compileQueuedBySave = false;
+      if (activeScriptEditorDirty_)
+      {
+        if (!save_active_script_document(true, &errorMessage))
+        {
+          scriptEditorStatusMessage_ = std::move(errorMessage);
+          scriptEditorStatusIsError_ = true;
+        }
+        else
+        {
+          compileQueuedBySave = true;
+        }
+      }
+
+      if (errorMessage.empty() && !compileQueuedBySave)
+      {
+        queue_workspace_script_compile();
+      }
+    }
+
+    ImGui::SameLine();
+    if (!canSave)
+    {
+      ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("Revert"))
+    {
+      std::string errorMessage;
+      if (!open_script_document(*activeScriptEditorPath_, activeScriptEditorRelativePath_, &errorMessage))
+      {
+        scriptEditorStatusMessage_ = std::move(errorMessage);
+        scriptEditorStatusIsError_ = true;
+      }
+      else
+      {
+        scriptEditorStatusMessage_ = "Reverted unsaved changes.";
+        scriptEditorStatusIsError_ = false;
+      }
+    }
+    if (!canSave)
+    {
+      ImGui::EndDisabled();
+    }
+
+    ImGui::SameLine();
+    ImGui::TextDisabled("%s", activeScriptEditorDirty_ ? "Unsaved changes" : "Saved");
+
+    if (!scriptEditorStatusMessage_.empty())
+    {
+      const ImVec4 color = scriptEditorStatusIsError_
+                               ? ImVec4(0.88f, 0.42f, 0.42f, 1.0f)
+                               : ImVec4(0.42f, 0.88f, 0.42f, 1.0f);
+      ImGui::TextColored(color, "%s", scriptEditorStatusMessage_.c_str());
+    }
+
+    if (backgroundCompileInProgress_)
+    {
+      ImGui::TextDisabled("Compiling scripts...");
+    }
+    else if (!lastCompileSucceeded_)
+    {
+      ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "%s", lastCompileError_.c_str());
+    }
+    else if (!workspaceScriptFiles_.empty())
+    {
+      ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.3f, 1.0f), "Workspace scripts compiled successfully.");
+    }
+
+    ImGui::Separator();
+    ImVec2 editorSize = ImGui::GetContentRegionAvail();
+    editorSize.y = std::max(editorSize.y, 200.0f);
+    if (ImGui::InputTextMultiline(
+            "##ScriptEditorContents",
+            &activeScriptEditorContents_,
+            editorSize,
+            ImGuiInputTextFlags_AllowTabInput))
+    {
+      activeScriptEditorDirty_ = true;
+      if (!scriptEditorStatusIsError_)
+      {
+        scriptEditorStatusMessage_.clear();
+      }
+    }
+
+    ImGui::End();
   }
 
   void Editor::workspace(EntityManager &entityManager, ComponentManager &componentManager)
@@ -2876,6 +3342,10 @@ namespace hades
           else if (!attachment.scriptPath.empty())
           {
             ImGui::TextDisabled("%s", attachment.scriptPath.c_str());
+            if (!activeWorkspacePath_.empty() && ImGui::Button("Open in Script Editor"))
+            {
+              request_script_editor_open(activeWorkspacePath_ / attachment.scriptPath, attachment.scriptPath);
+            }
           }
 
           if (ImGui::InputText("Class Name", classBuffer.data(), classBuffer.size()))

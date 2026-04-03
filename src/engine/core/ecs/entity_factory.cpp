@@ -10,6 +10,7 @@
 #include "../../components/name_component.hpp"
 #include "../../components/position_component_3d.hpp"
 #include "../../components/primitive_component.hpp"
+#include "../../components/text_component.hpp"
 #include "../../components/transform_hierarchy_component.hpp"
 #include "../../components/world_component.hpp"
 #include "component_manager.hpp"
@@ -63,6 +64,16 @@ namespace hades
   {
     const auto entity = createBaseEntity(entityManager, componentManager, "Cube", parent);
     componentManager.addComponent(entity, PrimitiveComponent());
+    return entity;
+  }
+
+  Entity::EntityId EntityFactory::createText(
+      EntityManager &entityManager,
+      ComponentManager &componentManager,
+      std::optional<Entity::EntityId> parent)
+  {
+    const auto entity = createBaseEntity(entityManager, componentManager, "Text", parent);
+    componentManager.addComponent(entity, TextComponent());
     return entity;
   }
 
