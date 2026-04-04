@@ -9,6 +9,7 @@
 #include <emscripten.h>
 #endif
 
+#include "engine/assets/asset_manager.hpp"
 #include "engine/audio/audio_engine.hpp"
 #include "engine/core/ecs/scene_serializer.hpp"
 #include "engine/core/ecs/world_utils.hpp"

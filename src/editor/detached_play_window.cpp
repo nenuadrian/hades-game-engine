@@ -595,11 +595,11 @@ namespace
           continue;
         }
 
-        const Vec3 minCorner = model.hasBounds
-                                   ? make_vec3(model.minX, model.minY, model.minZ)
+        const Vec3 minCorner = model->hasBounds
+                                   ? make_vec3(model->minX, model->minY, model->minZ)
                                    : make_vec3(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT);
-        const Vec3 maxCorner = model.hasBounds
-                                   ? make_vec3(model.maxX, model.maxY, model.maxZ)
+        const Vec3 maxCorner = model->hasBounds
+                                   ? make_vec3(model->maxX, model->maxY, model->maxZ)
                                    : make_vec3(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT);
         draw_wire_box(
             renderer,
