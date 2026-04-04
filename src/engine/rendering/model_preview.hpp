@@ -9,6 +9,7 @@
 
 #include "../assets/imported_model.hpp"
 #include "../components/position_component_3d.hpp"
+#include "../components/rotation_component_3d.hpp"
 
 namespace hades::preview
 {
@@ -208,7 +209,8 @@ namespace hades::preview
       const PositionComponent3D &position,
       ToCameraSpace toCameraSpace,
       ProjectToScreen projectToScreen,
-      const LightData *lightData = nullptr)
+      const LightData *lightData = nullptr,
+      const RotationComponent3D *rotation = nullptr)
   {
     std::vector<ProjectedTriangle> projectedTriangles;
     projectedTriangles.reserve(model.totalFaceCount);
@@ -225,7 +227,22 @@ namespace hades::preview
       worldVertices.reserve(mesh.vertices.size());
       for (const auto &vertex : mesh.vertices)
       {
-        worldVertices.push_back(add_vec3(translation, make_vec3(vertex.x, vertex.y, vertex.z)));
+        Vec3 local = make_vec3(vertex.x, vertex.y, vertex.z);
+        if (rotation != nullptr)
+        {
+          const float qx = rotation->qx;
+          const float qy = rotation->qy;
+          const float qz = rotation->qz;
+          const float qw = rotation->qw;
+          const float tx = 2.0f * ((qy * local.z) - (qz * local.y));
+          const float ty = 2.0f * ((qz * local.x) - (qx * local.z));
+          const float tz = 2.0f * ((qx * local.y) - (qy * local.x));
+          local = make_vec3(
+              local.x + (qw * tx) + ((qy * tz) - (qz * ty)),
+              local.y + (qw * ty) + ((qz * tx) - (qx * tz)),
+              local.z + (qw * tz) + ((qx * ty) - (qy * tx)));
+        }
+        worldVertices.push_back(add_vec3(translation, local));
       }
 
       std::vector<Vec3> cameraVertices;

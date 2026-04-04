@@ -199,6 +199,22 @@ namespace hades
       return normalize_vec3(make_vec3(value.x, 0.0f, value.z));
     }
 
+    Vec3 rotate_vec3_by_quaternion(const Vec3 &v, float qx, float qy, float qz, float qw)
+    {
+      const float tx = 2.0f * ((qy * v.z) - (qz * v.y));
+      const float ty = 2.0f * ((qz * v.x) - (qx * v.z));
+      const float tz = 2.0f * ((qx * v.y) - (qy * v.x));
+      return make_vec3(
+          v.x + (qw * tx) + ((qy * tz) - (qz * ty)),
+          v.y + (qw * ty) + ((qz * tx) - (qx * tz)),
+          v.z + (qw * tz) + ((qx * ty) - (qy * tx)));
+    }
+
+    Vec3 rotate_vec3_by_quaternion(const Vec3 &v, const RotationComponent3D &rot)
+    {
+      return rotate_vec3_by_quaternion(v, rot.qx, rot.qy, rot.qz, rot.qw);
+    }
+
     Vec3 lerp_vec3(const Vec3 &start, const Vec3 &end, float t)
     {
       return make_vec3(
@@ -454,18 +470,32 @@ namespace hades
     std::array<Vec3, 8> box_corners(
         const Vec3 &minCorner,
         const Vec3 &maxCorner,
-        const PositionComponent3D &position)
+        const PositionComponent3D &position,
+        const RotationComponent3D *rotation = nullptr)
     {
-      return {
-          make_vec3(position.x + minCorner.x, position.y + minCorner.y, position.z + minCorner.z),
-          make_vec3(position.x + maxCorner.x, position.y + minCorner.y, position.z + minCorner.z),
-          make_vec3(position.x + maxCorner.x, position.y + maxCorner.y, position.z + minCorner.z),
-          make_vec3(position.x + minCorner.x, position.y + maxCorner.y, position.z + minCorner.z),
-          make_vec3(position.x + minCorner.x, position.y + minCorner.y, position.z + maxCorner.z),
-          make_vec3(position.x + maxCorner.x, position.y + minCorner.y, position.z + maxCorner.z),
-          make_vec3(position.x + maxCorner.x, position.y + maxCorner.y, position.z + maxCorner.z),
-          make_vec3(position.x + minCorner.x, position.y + maxCorner.y, position.z + maxCorner.z),
+      const Vec3 localCorners[8] = {
+          make_vec3(minCorner.x, minCorner.y, minCorner.z),
+          make_vec3(maxCorner.x, minCorner.y, minCorner.z),
+          make_vec3(maxCorner.x, maxCorner.y, minCorner.z),
+          make_vec3(minCorner.x, maxCorner.y, minCorner.z),
+          make_vec3(minCorner.x, minCorner.y, maxCorner.z),
+          make_vec3(maxCorner.x, minCorner.y, maxCorner.z),
+          make_vec3(maxCorner.x, maxCorner.y, maxCorner.z),
+          make_vec3(minCorner.x, maxCorner.y, maxCorner.z),
       };
+
+      const Vec3 pos = make_vec3(position.x, position.y, position.z);
+      std::array<Vec3, 8> result{};
+      for (int i = 0; i < 8; ++i)
+      {
+        Vec3 corner = localCorners[i];
+        if (rotation != nullptr)
+        {
+          corner = rotate_vec3_by_quaternion(corner, *rotation);
+        }
+        result[i] = add_vec3(pos, corner);
+      }
+      return result;
     }
 
     Vec3 box_center(
@@ -555,6 +585,7 @@ namespace hades
       float cameraDistance, cameraYaw, cameraPitch;
       float canvasW, canvasH;
       float posX, posY, posZ;
+      float rotQx, rotQy, rotQz, rotQw;
       const void *modelPtr;
       std::uint64_t lightGeneration = 0;
 
@@ -564,6 +595,7 @@ namespace hades
                cameraDistance == other.cameraDistance && cameraYaw == other.cameraYaw &&
                cameraPitch == other.cameraPitch && canvasW == other.canvasW && canvasH == other.canvasH &&
                posX == other.posX && posY == other.posY && posZ == other.posZ &&
+               rotQx == other.rotQx && rotQy == other.rotQy && rotQz == other.rotQz && rotQw == other.rotQw &&
                modelPtr == other.modelPtr && lightGeneration == other.lightGeneration;
       }
     };
@@ -589,13 +621,16 @@ namespace hades
         const ImportedModel &model,
         float cameraDistance,
         float cameraYaw,
-        float cameraPitch)
+        float cameraPitch,
+        const RotationComponent3D *rotation = nullptr)
     {
       ModelProjectionCacheKey key{
           sceneCamera.position.x, sceneCamera.position.y, sceneCamera.position.z,
           cameraDistance, cameraYaw, cameraPitch,
           canvasSize.x, canvasSize.y,
           position.x, position.y, position.z,
+          rotation ? rotation->qx : 0.0f, rotation ? rotation->qy : 0.0f,
+          rotation ? rotation->qz : 0.0f, rotation ? rotation->qw : 1.0f,
           static_cast<const void *>(&model),
           sceneLightGeneration_};
 
@@ -631,7 +666,8 @@ namespace hades
             screenPoint.y = projectedPoint.y;
             return true;
           },
-          lightPtr);
+          lightPtr,
+          rotation);
 
       return entry.triangles;
     }
@@ -649,13 +685,14 @@ namespace hades
         Entity::EntityId entity = Entity::INVALID,
         float cameraDistance = 0.0f,
         float cameraYaw = 0.0f,
-        float cameraPitch = 0.0f)
+        float cameraPitch = 0.0f,
+        const RotationComponent3D *rotation = nullptr)
     {
       const auto &projectedTriangles = (entity != Entity::INVALID)
           ? get_or_project_model(entity, sceneCamera, camera, canvasOrigin, canvasSize,
-                                 position, model, cameraDistance, cameraYaw, cameraPitch)
+                                 position, model, cameraDistance, cameraYaw, cameraPitch, rotation)
           : get_or_project_model(Entity::INVALID, sceneCamera, camera, canvasOrigin, canvasSize,
-                                 position, model, cameraDistance, cameraYaw, cameraPitch);
+                                 position, model, cameraDistance, cameraYaw, cameraPitch, rotation);
 
       if (projectedTriangles.empty())
       {
@@ -806,9 +843,10 @@ namespace hades
         ImU32 lineColor,
         float thickness,
         const std::string *label = nullptr,
-        ImU32 labelColor = IM_COL32(205, 210, 218, 255))
+        ImU32 labelColor = IM_COL32(205, 210, 218, 255),
+        const RotationComponent3D *rotation = nullptr)
     {
-      const auto corners = box_corners(minCorner, maxCorner, position);
+      const auto corners = box_corners(minCorner, maxCorner, position, rotation);
       int drawnEdgeCount = 0;
       for (const auto &edge : BOX_EDGES)
       {
@@ -1382,6 +1420,9 @@ namespace hades
         }
 
         const auto &position = componentManager.getComponent<PositionComponent3D>(entity);
+        const RotationComponent3D *pickRotation = componentManager.hasComponent<RotationComponent3D>(entity)
+                                                      ? &componentManager.getComponent<RotationComponent3D>(entity)
+                                                      : nullptr;
         const float entityDepth = projected_entity_depth(position, sceneCamera);
         bool hasPreviewGeometry = false;
 
@@ -1395,7 +1436,8 @@ namespace hades
                     box_corners(
                         make_vec3(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT),
                         make_vec3(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT),
-                        position),
+                        position,
+                        pickRotation),
                     sceneCamera,
                     camera,
                     canvasOrigin,
@@ -1423,7 +1465,7 @@ namespace hades
                                      ? make_vec3(model.maxX, model.maxY, model.maxZ)
                                      : make_vec3(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT);
           if (const auto rect = project_box_screen_rect(
-                  box_corners(minCorner, maxCorner, position),
+                  box_corners(minCorner, maxCorner, position, pickRotation),
                   sceneCamera,
                   camera,
                   canvasOrigin,
@@ -1746,6 +1788,9 @@ namespace hades
         }
 
         const auto &position = componentManager.getComponent<PositionComponent3D>(entity);
+        const RotationComponent3D *rotation = componentManager.hasComponent<RotationComponent3D>(entity)
+                                                  ? &componentManager.getComponent<RotationComponent3D>(entity)
+                                                  : nullptr;
         const std::string label = entity_display_label(entity, componentManager);
         const bool isSelected = selectedEntity.has_value() && *selectedEntity == entity;
         const ImU32 selectedColor = IM_COL32(255, 205, 107, 255);
@@ -1791,7 +1836,8 @@ namespace hades
                   isSelected ? selectedColor : IM_COL32(223, 228, 235, 255),
                   isSelected ? 2.5f : 1.5f,
                   &label,
-                  isSelected ? selectedLabelColor : IM_COL32(205, 210, 218, 255)))
+                  isSelected ? selectedLabelColor : IM_COL32(205, 210, 218, 255),
+                  rotation))
           {
             ++visibleRenderableCount;
             previewDrawn = true;
@@ -1819,7 +1865,8 @@ namespace hades
                                       entity,
                                       cameraDistance,
                                       cameraYaw,
-                                      cameraPitch);
+                                      cameraPitch,
+                                      rotation);
           if (modelDrawn)
           {
             ++visibleRenderableCount;
@@ -1846,7 +1893,8 @@ namespace hades
                   isSelected ? selectedColor : IM_COL32(179, 189, 202, 255),
                   isSelected ? 2.5f : 1.5f,
                   modelDrawn ? nullptr : &label,
-                  isSelected ? selectedLabelColor : IM_COL32(205, 210, 218, 255)))
+                  isSelected ? selectedLabelColor : IM_COL32(205, 210, 218, 255),
+                  rotation))
           {
             if (!modelDrawn)
             {

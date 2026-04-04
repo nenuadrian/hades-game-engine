@@ -556,6 +556,7 @@ namespace hades
       focusScriptEditorWindow_ = false;
       openScriptEditorUnsavedChangesDialog_ = false;
       pendingScriptEditorClosePath_.reset();
+      pendingCloseAllScriptEditorTabs_ = false;
       workspaceScriptListDirty_ = false;
       parsedScriptCache_.clear();
       parsedScriptModTimes_.clear();
@@ -944,6 +945,7 @@ namespace hades
       focusScriptEditorWindow_ = false;
       openScriptEditorUnsavedChangesDialog_ = false;
       pendingScriptEditorClosePath_.reset();
+      pendingCloseAllScriptEditorTabs_ = false;
     }
   }
 
@@ -1081,6 +1083,27 @@ namespace hades
              *pendingScriptEditorTabSelectionIndex_ >= openScriptEditorTabs_.size())
     {
       pendingScriptEditorTabSelectionIndex_.reset();
+    }
+  }
+
+  void Editor::continue_close_all_script_editor_tabs()
+  {
+    while (pendingCloseAllScriptEditorTabs_ && !openScriptEditorTabs_.empty())
+    {
+      const std::size_t closeIndex = openScriptEditorTabs_.size() - 1;
+      if (openScriptEditorTabs_[closeIndex].dirty)
+      {
+        pendingScriptEditorClosePath_ = openScriptEditorTabs_[closeIndex].path;
+        openScriptEditorUnsavedChangesDialog_ = true;
+        return;
+      }
+
+      close_script_editor_tab(closeIndex);
+    }
+
+    if (openScriptEditorTabs_.empty())
+    {
+      pendingCloseAllScriptEditorTabs_ = false;
     }
   }
 
@@ -1320,6 +1343,7 @@ namespace hades
           {
             close_script_editor_tab(*closeIndex);
             pendingScriptEditorClosePath_.reset();
+            continue_close_all_script_editor_tabs();
             ImGui::CloseCurrentPopup();
           }
           else
@@ -1340,6 +1364,7 @@ namespace hades
             close_script_editor_tab(*closeIndex);
           }
           pendingScriptEditorClosePath_.reset();
+          continue_close_all_script_editor_tabs();
           ImGui::CloseCurrentPopup();
         }
       }
@@ -1348,6 +1373,7 @@ namespace hades
       if (ImGui::Button("Cancel"))
       {
         pendingScriptEditorClosePath_.reset();
+        pendingCloseAllScriptEditorTabs_ = false;
         ImGui::CloseCurrentPopup();
       }
 
@@ -1359,6 +1385,8 @@ namespace hades
     bool saveAllRequested = false;
     bool compileRequested = false;
     bool revertRequested = false;
+    bool closeRequested = false;
+    bool closeAllRequested = false;
 
     {
       const bool hasActiveTab = activeScriptEditorTabIndex_.has_value() &&
@@ -1367,12 +1395,15 @@ namespace hades
 
       if (ImGui::BeginMenuBar())
       {
-        if (ImGui::BeginMenu("Script"))
+        if (ImGui::BeginMenu("File"))
         {
           saveRequested = ImGui::MenuItem("Save", nullptr, false, canSaveActive);
           saveAllRequested = ImGui::MenuItem("Save All", nullptr, false, !openScriptEditorTabs_.empty());
           compileRequested = ImGui::MenuItem("Compile Workspace", nullptr, false, !activeWorkspacePath_.empty());
           revertRequested = ImGui::MenuItem("Revert", nullptr, false, canSaveActive);
+          ImGui::Separator();
+          closeRequested = ImGui::MenuItem("Close", nullptr, false, hasActiveTab);
+          closeAllRequested = ImGui::MenuItem("Close All", nullptr, false, !openScriptEditorTabs_.empty());
           ImGui::EndMenu();
         }
         ImGui::EndMenuBar();
@@ -1446,6 +1477,30 @@ namespace hades
           scriptEditorStatusIsError_ = false;
         }
       }
+    }
+
+    if (closeRequested)
+    {
+      pendingCloseAllScriptEditorTabs_ = false;
+      if (activeScriptEditorTabIndex_.has_value() && *activeScriptEditorTabIndex_ < openScriptEditorTabs_.size())
+      {
+        const std::size_t closeIndex = *activeScriptEditorTabIndex_;
+        if (openScriptEditorTabs_[closeIndex].dirty)
+        {
+          pendingScriptEditorClosePath_ = openScriptEditorTabs_[closeIndex].path;
+          openScriptEditorUnsavedChangesDialog_ = true;
+        }
+        else
+        {
+          close_script_editor_tab(closeIndex);
+        }
+      }
+    }
+
+    if (closeAllRequested)
+    {
+      pendingCloseAllScriptEditorTabs_ = true;
+      continue_close_all_script_editor_tabs();
     }
 
     // --- Three-column layout below the menu bar ---
@@ -1575,6 +1630,7 @@ namespace hades
 
         if (closeTabIndex.has_value())
         {
+          pendingCloseAllScriptEditorTabs_ = false;
           if (openScriptEditorTabs_[*closeTabIndex].dirty)
           {
             pendingScriptEditorClosePath_ = openScriptEditorTabs_[*closeTabIndex].path;

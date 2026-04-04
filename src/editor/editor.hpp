@@ -146,6 +146,7 @@ namespace hades
     bool focusScriptEditorWindow_ = false;
     bool openScriptEditorUnsavedChangesDialog_ = false;
     std::optional<std::filesystem::path> pendingScriptEditorClosePath_;
+    bool pendingCloseAllScriptEditorTabs_ = false;
     std::vector<std::string> cachedDiskWorlds_;
     bool workspaceScriptListDirty_ = false;
     bool openWorkspaceCreateDialog_ = false;
@@ -253,6 +254,7 @@ namespace hades
     const ScriptEditorTab *active_script_editor_tab() const;
     void activate_script_editor_tab(std::size_t index);
     void close_script_editor_tab(std::size_t index);
+    void continue_close_all_script_editor_tabs();
     void request_script_editor_open(const std::filesystem::path &scriptPath, const std::string &relativePath);
     bool open_script_document(const std::filesystem::path &scriptPath, const std::string &relativePath, std::string *errorMessage = nullptr);
     bool save_active_script_document(bool triggerCompile, std::string *errorMessage = nullptr);

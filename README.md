@@ -10,7 +10,9 @@ A C++ 3D game engine with a Vulkan renderer, in-process C# scripting, spatial au
 
 The purpose is educational and experimental in nature to explore the intriguing world of game engine development.
 
-![logo](docs/logo.png)
+<p align="center">
+    <img src="https://github.com/nenuadrian/hades-game-engine/raw/main/docs/logo.png" alt="Hades Game Engine Logo">
+</p>
 
 ## Features
 
