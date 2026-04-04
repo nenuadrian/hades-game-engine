@@ -165,13 +165,13 @@ jobs:
           # Copy binaries — location depends on single vs multi-config generators
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
             BIN_DIR="build/${{ env.BUILD_TYPE }}"
-            cp "$BIN_DIR/HadesGameEngine.exe" "$PKG_DIR/" 2>/dev/null || true
+            cp "$BIN_DIR/Hades.exe" "$PKG_DIR/" 2>/dev/null || true
             cp "$BIN_DIR/HadesRuntime.exe"    "$PKG_DIR/" 2>/dev/null || true
             # Copy any runtime DLLs staged next to the executables
             cp "$BIN_DIR"/*.dll "$PKG_DIR/" 2>/dev/null || true
           else
             BIN_DIR="build"
-            cp "$BIN_DIR/HadesGameEngine" "$PKG_DIR/" 2>/dev/null || true
+            cp "$BIN_DIR/Hades" "$PKG_DIR/" 2>/dev/null || true
             cp "$BIN_DIR/HadesRuntime"    "$PKG_DIR/" 2>/dev/null || true
           fi
 

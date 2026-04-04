@@ -109,7 +109,7 @@ cmake --build build
 ### Run
 
 ```bash
-./build/HadesGameEngine
+./build/Hades
 ```
 
 Entity scripts are compiled when Play starts. Install a local `dotnet` SDK if you
@@ -166,7 +166,7 @@ destroy_entities                     avg   314.592 ms  min   299.797 ms  max   3
 ## Scripting
 
 For C# scripting workflow, runtime behavior, and the current limitations, see
-[SCRIPTS.md](SCRIPTS.md).
+[SCRIPTING.md](SCRIPTING.md).
 
 ## Previous Versions
 

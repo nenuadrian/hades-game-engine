@@ -43,6 +43,7 @@ namespace hades
   {
     Translate,
     Rotate,
+    Scale,
   };
 
   enum class SceneGizmoAxis

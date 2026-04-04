@@ -111,7 +111,7 @@ cmake --build build
 ### Run
 
 ```bash
-./build/HadesGameEngine
+./build/Hades
 ```
 
 Entity scripts are compiled when Play starts. Install a local `dotnet` SDK if you

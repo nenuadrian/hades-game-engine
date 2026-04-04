@@ -92,6 +92,8 @@ namespace hades
     state.debugConsoleMessages.clear();
     openDebugConsoleWindow_ = false;
     focusDebugConsoleWindow_ = false;
+    openAboutWindow_ = false;
+    focusAboutWindow_ = false;
     openExportWindow_ = false;
     focusExportWindow_ = false;
     if (exportBuildThread_.joinable())
@@ -222,6 +224,7 @@ namespace hades
       render_plugins(EditorPluginPhase::PostEntityDeletion, pluginContext);
     }
     render_workspace_dialogs(entityManager, componentManager);
+    render_about_window();
   }
 
   void Editor::sync_menu_bar(EntityManager &entityManager, ComponentManager &componentManager)
@@ -262,6 +265,61 @@ namespace hades
     file.children_menu_items.push_back(newWorld);
     file.children_menu_items.push_back(save);
     file.children_menu_items.push_back(exportItem);
+
+    MenuBarItem editorWindow;
+    editorWindow.title = "Editor";
+    editorWindow.selected = is_script_editor_window_open();
+    editorWindow.on_activate = [this]()
+    {
+      if (is_script_editor_window_open())
+      {
+        set_script_editor_window_open(false);
+      }
+      else
+      {
+        show_plugin("script-editor-window");
+      }
+    };
+    file.children_menu_items.push_back(std::move(editorWindow));
+
+    MenuBarItem settingsWindow;
+    settingsWindow.title = "Settings";
+    settingsWindow.selected = is_plugin_visible("settings");
+    settingsWindow.on_activate = [this]()
+    {
+      if (is_plugin_visible("settings"))
+      {
+        if (EditorPlugin *plugin = find_plugin("settings"))
+        {
+          plugin->set_visible(*this, false);
+        }
+      }
+      else
+      {
+        show_plugin("settings");
+      }
+    };
+    file.children_menu_items.push_back(std::move(settingsWindow));
+
+    MenuBarItem debugConsoleWindow;
+    debugConsoleWindow.title = "Debug Console";
+    debugConsoleWindow.selected = is_plugin_visible("debug-console");
+    debugConsoleWindow.on_activate = [this]()
+    {
+      if (is_plugin_visible("debug-console"))
+      {
+        if (EditorPlugin *plugin = find_plugin("debug-console"))
+        {
+          plugin->set_visible(*this, false);
+        }
+      }
+      else
+      {
+        show_plugin("debug-console");
+      }
+    };
+    file.children_menu_items.push_back(std::move(debugConsoleWindow));
+
     file.children_menu_items.push_back(exit);
     gui->menu_bar_items.push_back(file);
 
@@ -332,7 +390,7 @@ namespace hades
         // "Load" action
         MenuBarItem loadItem;
         loadItem.title = "Load";
-        loadItem.selected = isLoaded;
+        loadItem.selected = false;
         if (onDisk)
         {
           loadItem.on_activate = [this, worldName, &entityManager, &componentManager]()
@@ -364,12 +422,13 @@ namespace hades
           worldItem.children_menu_items.push_back(std::move(setDefaultItem));
         }
 
-        // "Delete" action
+        // "Delete" action (disabled for the default/startup world)
         if (inMemory)
         {
           Entity::EntityId worldId = memIt->second;
           MenuBarItem deleteItem;
           deleteItem.title = "Delete";
+          deleteItem.enabled = !isDefault;
           deleteItem.on_activate = [this, worldId]()
           {
             request_entity_deletion(worldId);
@@ -401,66 +460,34 @@ namespace hades
     };
 
     game.children_menu_items.push_back(play);
-    game.children_menu_items.push_back(stop);
+    if (state.isPlaying)
+    {
+      game.children_menu_items.push_back(stop);
+    }
     gui->menu_bar_items.push_back(game);
 
-    MenuBarItem windowsMenu;
-    windowsMenu.title = "Windows";
+    MenuBarItem help;
+    help.title = "Help";
 
-    MenuBarItem editorWindow;
-    editorWindow.title = "Editor";
-    editorWindow.selected = is_script_editor_window_open();
-    editorWindow.on_activate = [this]()
+    MenuBarItem about;
+    about.title = "About";
+    about.on_activate = [this]()
     {
-      if (is_script_editor_window_open())
-      {
-        set_script_editor_window_open(false);
-      }
-      else
-      {
-        show_plugin("script-editor-window");
-      }
+      openAboutWindow_ = true;
+      focusAboutWindow_ = true;
     };
-    windowsMenu.children_menu_items.push_back(std::move(editorWindow));
+    help.children_menu_items.push_back(std::move(about));
 
-    MenuBarItem settingsWindow;
-    settingsWindow.title = "Settings";
-    settingsWindow.selected = is_plugin_visible("settings");
-    settingsWindow.on_activate = [this]()
+    MenuBarItem statsForNerds;
+    statsForNerds.title = "Stats for Nerds";
+    statsForNerds.selected = state.showDebugInfo;
+    statsForNerds.on_activate = [this]()
     {
-      if (is_plugin_visible("settings"))
-      {
-        if (EditorPlugin *plugin = find_plugin("settings"))
-        {
-          plugin->set_visible(*this, false);
-        }
-      }
-      else
-      {
-        show_plugin("settings");
-      }
+      state.showDebugInfo = !state.showDebugInfo;
     };
-    windowsMenu.children_menu_items.push_back(std::move(settingsWindow));
+    help.children_menu_items.push_back(std::move(statsForNerds));
 
-    MenuBarItem debugConsoleWindow;
-    debugConsoleWindow.title = "Debug Console";
-    debugConsoleWindow.selected = is_plugin_visible("debug-console");
-    debugConsoleWindow.on_activate = [this]()
-    {
-      if (is_plugin_visible("debug-console"))
-      {
-        if (EditorPlugin *plugin = find_plugin("debug-console"))
-        {
-          plugin->set_visible(*this, false);
-        }
-      }
-      else
-      {
-        show_plugin("debug-console");
-      }
-    };
-    windowsMenu.children_menu_items.push_back(std::move(debugConsoleWindow));
-    gui->menu_bar_items.push_back(std::move(windowsMenu));
+    gui->menu_bar_items.push_back(std::move(help));
   }
 
   void Editor::configure_default_dock_layout(std::uint32_t dockspaceId)

@@ -278,7 +278,7 @@ namespace hades
 
     register_plugin(std::make_unique<CallbackEditorPlugin>(
         "debug",
-        "Debug",
+        "Stats for Nerds",
         EditorPluginPhase::PostEntityDeletion,
         80,
         [this](EditorPluginContext &context)

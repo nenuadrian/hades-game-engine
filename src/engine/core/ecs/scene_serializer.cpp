@@ -24,6 +24,7 @@
 #include "../../components/render_component.hpp"
 #include "../../components/rigid_body_component.hpp"
 #include "../../components/rotation_component_3d.hpp"
+#include "../../components/scale_component_3d.hpp"
 #include "../../components/script_component.hpp"
 #include "../../components/text_component.hpp"
 #include "../../components/transform_hierarchy_component.hpp"
@@ -200,6 +201,12 @@ namespace hades
       {
         const auto &c = componentManager.getComponent<RotationComponent3D>(entity);
         components["rotation3d"] = {{"qx", c.qx}, {"qy", c.qy}, {"qz", c.qz}, {"qw", c.qw}};
+      }
+
+      if (componentManager.hasComponent<ScaleComponent3D>(entity))
+      {
+        const auto &c = componentManager.getComponent<ScaleComponent3D>(entity);
+        components["scale3d"] = {{"x", c.x}, {"y", c.y}, {"z", c.z}};
       }
 
       if (componentManager.hasComponent<RigidBodyComponent>(entity))
@@ -416,6 +423,16 @@ namespace hades
         c.qy = r["qy"].get<float>();
         c.qz = r["qz"].get<float>();
         c.qw = r["qw"].get<float>();
+        componentManager.addComponent(newEntity, c);
+      }
+
+      if (components.contains("scale3d"))
+      {
+        const auto &s = components["scale3d"];
+        ScaleComponent3D c;
+        c.x = s["x"].get<float>();
+        c.y = s["y"].get<float>();
+        c.z = s["z"].get<float>();
         componentManager.addComponent(newEntity, c);
       }
 

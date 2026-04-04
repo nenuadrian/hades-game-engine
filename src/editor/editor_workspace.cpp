@@ -15,6 +15,7 @@
 #include <utility>
 
 #include "imgui.h"
+#include "imgui_internal.h"
 #include "TextEditor.h"
 #include "../engine/components/script_component.hpp"
 #include "../engine/core/ecs/component_manager.hpp"
@@ -1678,13 +1679,53 @@ namespace hades
             activeTab->textEditor = create_script_text_editor(activeTab->contents);
           }
           ImGui::PushID(activeTab->path.string().c_str());
-          // If autocomplete popup is open, intercept keyboard before TextEditor processes it.
-          if (autocompleteOpen_)
+
+          // ── Autocomplete: handle accept/dismiss keys BEFORE TextEditor ──
+          bool autocompleteConsumedKey = false;
+          if (autocompleteOpen_ && !autocompleteCandidates_.empty())
           {
-            activeTab->textEditor->SetHandleKeyboardInputs(false);
+            auto &editor = *activeTab->textEditor;
+            if (ImGui::IsKeyPressed(ImGuiKey_Tab) || ImGui::IsKeyPressed(ImGuiKey_Enter))
+            {
+              if (autocompleteSelectedIndex_ < static_cast<int>(autocompleteCandidates_.size()))
+              {
+                const auto pos = editor.GetCursorPosition();
+                const auto start = TextEditor::Coordinates(pos.mLine, autocompleteWordStartColumn_);
+                editor.SetSelection(start, pos);
+                editor.Delete();
+                editor.InsertText(autocompleteCandidates_[autocompleteSelectedIndex_]);
+              }
+              autocompleteOpen_ = false;
+              autocompleteSelectedIndex_ = 0;
+              autocompleteConsumedKey = true;
+            }
+            else if (ImGui::IsKeyPressed(ImGuiKey_Escape))
+            {
+              autocompleteOpen_ = false;
+              autocompleteConsumedKey = true;
+            }
+            else if (ImGui::IsKeyPressed(ImGuiKey_UpArrow))
+            {
+              autocompleteSelectedIndex_ = std::max(autocompleteSelectedIndex_ - 1, 0);
+              autocompleteConsumedKey = true;
+            }
+            else if (ImGui::IsKeyPressed(ImGuiKey_DownArrow))
+            {
+              autocompleteSelectedIndex_ = std::min(
+                  autocompleteSelectedIndex_ + 1,
+                  static_cast<int>(autocompleteCandidates_.size()) - 1);
+              autocompleteConsumedKey = true;
+            }
           }
 
+          // Only disable TextEditor keyboard for the specific frame where we consumed a key.
+          if (autocompleteConsumedKey)
+            activeTab->textEditor->SetHandleKeyboardInputs(false);
+
           activeTab->textEditor->Render("##ScriptEditorContents", editorSize, true);
+
+          // Always re-enable keyboard handling after render.
+          activeTab->textEditor->SetHandleKeyboardInputs(true);
 
           if (activeTab->textEditor->IsTextChanged())
           {
@@ -1696,7 +1737,7 @@ namespace hades
             }
           }
 
-          // ── Autocomplete logic ──────────────────────────────────────
+          // ── Autocomplete: update candidates and render popup ────────
           {
             auto &editor = *activeTab->textEditor;
             const auto cursorPos = editor.GetCursorPosition();
@@ -1731,83 +1772,107 @@ namespace hades
 
             if (autocompleteOpen_)
             {
-              // Estimate cursor screen position.
-              // The editor child window was just rendered, so we can get its rect.
-              const ImVec2 editorPos = ImGui::GetItemRectMin();
-              const float charWidth = ImGui::GetFontSize() * 0.5f;
+              // Compute cursor screen position using the child window's scroll state.
+              const ImVec2 editorWidgetMin = ImGui::GetItemRectMin();
+              const ImVec2 editorWidgetMax = ImGui::GetItemRectMax();
+
+              const float fontSize = ImGui::GetFontSize();
+              const float charWidth = ImGui::GetFont()->CalcTextSizeA(fontSize, FLT_MAX, -1.0f, " ").x;
               const float lineHeight = ImGui::GetTextLineHeightWithSpacing();
-              // Approximate left margin (line numbers + gutter). ~48px works for typical setups.
-              constexpr float kLeftMarginEstimate = 48.0f;
 
-              const float popupX = editorPos.x + kLeftMarginEstimate + cursorPos.mColumn * charWidth;
-              const float popupY = editorPos.y + (cursorPos.mLine + 1) * lineHeight;
+              // Compute the left margin (line numbers gutter) the same way TextEditor does.
+              char lineCountBuf[16];
+              snprintf(lineCountBuf, sizeof(lineCountBuf), " %d ", editor.GetTotalLines());
+              const float textStart = ImGui::GetFont()->CalcTextSizeA(fontSize, FLT_MAX, -1.0f, lineCountBuf).x + 10.0f;
 
-              ImGui::SetNextWindowPos(ImVec2(popupX, popupY));
-              ImGui::SetNextWindowSizeConstraints(ImVec2(150.0f, 0.0f), ImVec2(350.0f, 200.0f));
-
-              ImGuiWindowFlags popupFlags =
-                  ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-                  ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
-                  ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoFocusOnAppearing;
-
-              ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(4.0f, 4.0f));
-              ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 4.0f);
-
-              if (ImGui::Begin("##ScriptAutocomplete", nullptr, popupFlags))
+              // Read scroll offset from the editor's child window.
+              float scrollX = 0.0f;
+              float scrollY = 0.0f;
+              const ImGuiID childId = ImGui::GetID("##ScriptEditorContents");
+              ImGuiWindow *childWindow = ImGui::FindWindowByID(childId);
+              if (childWindow)
               {
-                for (int i = 0; i < static_cast<int>(autocompleteCandidates_.size()); ++i)
-                {
-                  const bool isSelected = (i == autocompleteSelectedIndex_);
-                  if (ImGui::Selectable(autocompleteCandidates_[i].c_str(), isSelected))
-                  {
-                    // Clicked a candidate — accept it.
-                    const auto start = TextEditor::Coordinates(cursorPos.mLine, autocompleteWordStartColumn_);
-                    const auto end = cursorPos;
-                    editor.SetSelection(start, end);
-                    editor.Delete();
-                    editor.InsertText(autocompleteCandidates_[i]);
-                    autocompleteOpen_ = false;
-                  }
-                  if (isSelected)
-                    ImGui::SetItemDefaultFocus();
-                }
+                scrollX = childWindow->Scroll.x;
+                scrollY = childWindow->Scroll.y;
               }
-              ImGui::End();
-              ImGui::PopStyleVar(2);
 
-              // Handle keyboard while popup is open.
-              if (ImGui::IsKeyPressed(ImGuiKey_DownArrow))
+              const float cursorScreenX = editorWidgetMin.x + textStart + cursorPos.mColumn * charWidth - scrollX;
+              const float cursorScreenY = editorWidgetMin.y + cursorPos.mLine * lineHeight - scrollY + lineHeight;
+
+              // Clamp popup position within the editor bounds.
+              const float popupWidth = 250.0f;
+              const float popupMaxHeight = 200.0f;
+              float popupX = std::max(editorWidgetMin.x, std::min(cursorScreenX, editorWidgetMax.x - popupWidth));
+              float popupY = cursorScreenY;
+
+              // If popup would go below the editor, show it above the cursor instead.
+              if (popupY + popupMaxHeight > editorWidgetMax.y)
+                popupY = cursorScreenY - lineHeight - popupMaxHeight;
+
+              // Draw the popup using the foreground draw list (always on top).
+              ImDrawList *drawList = ImGui::GetForegroundDrawList();
+              const ImU32 bgColor = ImGui::ColorConvertFloat4ToU32(ImVec4(0.18f, 0.18f, 0.20f, 0.96f));
+              const ImU32 borderColor = ImGui::ColorConvertFloat4ToU32(ImVec4(0.45f, 0.45f, 0.50f, 0.80f));
+              const ImU32 selectedBgColor = ImGui::ColorConvertFloat4ToU32(ImVec4(0.26f, 0.42f, 0.65f, 0.80f));
+              const ImU32 textColor = ImGui::ColorConvertFloat4ToU32(ImVec4(0.90f, 0.90f, 0.90f, 1.0f));
+
+              constexpr float kPadX = 6.0f;
+              constexpr float kPadY = 4.0f;
+              const float itemHeight = lineHeight;
+              const int candidateCount = static_cast<int>(autocompleteCandidates_.size());
+              const float contentHeight = candidateCount * itemHeight + kPadY * 2.0f;
+              const float boxHeight = std::min(contentHeight, popupMaxHeight);
+
+              const ImVec2 boxMin(popupX, popupY);
+              const ImVec2 boxMax(popupX + popupWidth, popupY + boxHeight);
+
+              // Background and border.
+              drawList->AddRectFilled(boxMin, boxMax, bgColor, 4.0f);
+              drawList->AddRect(boxMin, boxMax, borderColor, 4.0f);
+
+              // Draw each candidate.
+              const ImVec2 mousePos = ImGui::GetMousePos();
+              int clickedIndex = -1;
+
+              for (int i = 0; i < candidateCount; ++i)
               {
-                autocompleteSelectedIndex_ = std::min(
-                    autocompleteSelectedIndex_ + 1,
-                    static_cast<int>(autocompleteCandidates_.size()) - 1);
+                const float itemY = popupY + kPadY + i * itemHeight;
+                if (itemY + itemHeight < boxMin.y || itemY > boxMax.y)
+                  continue;
+
+                const ImVec2 itemMin(popupX, itemY);
+                const ImVec2 itemMax(popupX + popupWidth, itemY + itemHeight);
+
+                // Hover detection.
+                const bool hovered = mousePos.x >= itemMin.x && mousePos.x < itemMax.x &&
+                                     mousePos.y >= itemMin.y && mousePos.y < itemMax.y;
+                if (hovered)
+                  autocompleteSelectedIndex_ = i;
+
+                if (i == autocompleteSelectedIndex_)
+                  drawList->AddRectFilled(itemMin, itemMax, selectedBgColor, 2.0f);
+
+                drawList->AddText(ImVec2(popupX + kPadX, itemY + 1.0f), textColor,
+                                  autocompleteCandidates_[i].c_str());
+
+                if (hovered && ImGui::IsMouseClicked(0))
+                  clickedIndex = i;
               }
-              else if (ImGui::IsKeyPressed(ImGuiKey_UpArrow))
+
+              // Handle click to accept.
+              if (clickedIndex >= 0 && clickedIndex < candidateCount)
               {
-                autocompleteSelectedIndex_ = std::max(autocompleteSelectedIndex_ - 1, 0);
-              }
-              else if (ImGui::IsKeyPressed(ImGuiKey_Tab) || ImGui::IsKeyPressed(ImGuiKey_Enter))
-              {
-                if (autocompleteSelectedIndex_ < static_cast<int>(autocompleteCandidates_.size()))
-                {
-                  const auto start = TextEditor::Coordinates(cursorPos.mLine, autocompleteWordStartColumn_);
-                  const auto end = cursorPos;
-                  editor.SetSelection(start, end);
-                  editor.Delete();
-                  editor.InsertText(autocompleteCandidates_[autocompleteSelectedIndex_]);
-                }
+                const auto pos = editor.GetCursorPosition();
+                const auto start = TextEditor::Coordinates(pos.mLine, autocompleteWordStartColumn_);
+                editor.SetSelection(start, pos);
+                editor.Delete();
+                editor.InsertText(autocompleteCandidates_[clickedIndex]);
                 autocompleteOpen_ = false;
-              }
-              else if (ImGui::IsKeyPressed(ImGuiKey_Escape))
-              {
-                autocompleteOpen_ = false;
+                autocompleteSelectedIndex_ = 0;
               }
             }
-
-            // Restore keyboard handling if we disabled it.
-            editor.SetHandleKeyboardInputs(true);
           }
-          // ── End autocomplete logic ──────────────────────────────────
+          // ── End autocomplete ────────────────────────────────────────
 
           ImGui::PopID();
         }

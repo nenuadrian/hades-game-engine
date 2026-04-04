@@ -10,6 +10,8 @@
 #include "../engine/components/model_component.hpp"
 #include "../engine/components/position_component_3d.hpp"
 #include "../engine/components/primitive_component.hpp"
+#include "../engine/components/rotation_component_3d.hpp"
+#include "../engine/components/scale_component_3d.hpp"
 #include "../engine/components/text_component.hpp"
 #include "../engine/core/ecs/component_manager.hpp"
 #include "../engine/core/ecs/entity_manager.hpp"
@@ -60,6 +62,17 @@ namespace
   Vec3 subtract_vec3(const Vec3 &lhs, const Vec3 &rhs)
   {
     return make_vec3(lhs.x - rhs.x, lhs.y - rhs.y, lhs.z - rhs.z);
+  }
+
+  Vec3 rotate_vec3_by_quaternion(const Vec3 &v, const hades::RotationComponent3D &rot)
+  {
+    const float tx = 2.0f * ((rot.qy * v.z) - (rot.qz * v.y));
+    const float ty = 2.0f * ((rot.qz * v.x) - (rot.qx * v.z));
+    const float tz = 2.0f * ((rot.qx * v.y) - (rot.qy * v.x));
+    return make_vec3(
+        v.x + (rot.qw * tx) + ((rot.qy * tz) - (rot.qz * ty)),
+        v.y + (rot.qw * ty) + ((rot.qz * tx) - (rot.qx * tz)),
+        v.z + (rot.qw * tz) + ((rot.qx * ty) - (rot.qy * tx)));
   }
 
   Vec3 lerp_vec3(const Vec3 &start, const Vec3 &end, float t)
@@ -194,18 +207,31 @@ namespace
       const hades::PositionComponent3D &position,
       const Vec3 &minCorner,
       const Vec3 &maxCorner,
-      const SDL_Color &color)
+      const SDL_Color &color,
+      const hades::RotationComponent3D *rotation = nullptr)
   {
-    Vec3 corners[8] = {
-        add_vec3(make_vec3(position), make_vec3(minCorner.x, minCorner.y, minCorner.z)),
-        add_vec3(make_vec3(position), make_vec3(maxCorner.x, minCorner.y, minCorner.z)),
-        add_vec3(make_vec3(position), make_vec3(maxCorner.x, maxCorner.y, minCorner.z)),
-        add_vec3(make_vec3(position), make_vec3(minCorner.x, maxCorner.y, minCorner.z)),
-        add_vec3(make_vec3(position), make_vec3(minCorner.x, minCorner.y, maxCorner.z)),
-        add_vec3(make_vec3(position), make_vec3(maxCorner.x, minCorner.y, maxCorner.z)),
-        add_vec3(make_vec3(position), make_vec3(maxCorner.x, maxCorner.y, maxCorner.z)),
-        add_vec3(make_vec3(position), make_vec3(minCorner.x, maxCorner.y, maxCorner.z)),
+    const Vec3 localCorners[8] = {
+        make_vec3(minCorner.x, minCorner.y, minCorner.z),
+        make_vec3(maxCorner.x, minCorner.y, minCorner.z),
+        make_vec3(maxCorner.x, maxCorner.y, minCorner.z),
+        make_vec3(minCorner.x, maxCorner.y, minCorner.z),
+        make_vec3(minCorner.x, minCorner.y, maxCorner.z),
+        make_vec3(maxCorner.x, minCorner.y, maxCorner.z),
+        make_vec3(maxCorner.x, maxCorner.y, maxCorner.z),
+        make_vec3(minCorner.x, maxCorner.y, maxCorner.z),
     };
+
+    const Vec3 pos = make_vec3(position);
+    Vec3 corners[8];
+    for (int i = 0; i < 8; ++i)
+    {
+      Vec3 corner = localCorners[i];
+      if (rotation != nullptr)
+      {
+        corner = rotate_vec3_by_quaternion(corner, *rotation);
+      }
+      corners[i] = add_vec3(pos, corner);
+    }
 
     SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
 
@@ -246,14 +272,27 @@ namespace
       int width,
       int height,
       const hades::PositionComponent3D &position,
-      const SDL_Color &color)
+      const SDL_Color &color,
+      const hades::RotationComponent3D *rotation = nullptr)
   {
-    Vec3 corners[4] = {
-        add_vec3(make_vec3(position), make_vec3(-PLANE_HALF_EXTENT, 0.0f, -PLANE_HALF_EXTENT)),
-        add_vec3(make_vec3(position), make_vec3(PLANE_HALF_EXTENT, 0.0f, -PLANE_HALF_EXTENT)),
-        add_vec3(make_vec3(position), make_vec3(PLANE_HALF_EXTENT, 0.0f, PLANE_HALF_EXTENT)),
-        add_vec3(make_vec3(position), make_vec3(-PLANE_HALF_EXTENT, 0.0f, PLANE_HALF_EXTENT)),
+    const Vec3 localCorners[4] = {
+        make_vec3(-PLANE_HALF_EXTENT, 0.0f, -PLANE_HALF_EXTENT),
+        make_vec3(PLANE_HALF_EXTENT, 0.0f, -PLANE_HALF_EXTENT),
+        make_vec3(PLANE_HALF_EXTENT, 0.0f, PLANE_HALF_EXTENT),
+        make_vec3(-PLANE_HALF_EXTENT, 0.0f, PLANE_HALF_EXTENT),
     };
+
+    const Vec3 pos = make_vec3(position);
+    Vec3 corners[4];
+    for (int i = 0; i < 4; ++i)
+    {
+      Vec3 corner = localCorners[i];
+      if (rotation != nullptr)
+      {
+        corner = rotate_vec3_by_quaternion(corner, *rotation);
+      }
+      corners[i] = add_vec3(pos, corner);
+    }
 
     SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
 
@@ -308,7 +347,8 @@ namespace
       int width,
       int height,
       const hades::PositionComponent3D &position,
-      const hades::ImportedModel &model)
+      const hades::ImportedModel &model,
+      const hades::RotationComponent3D *rotation = nullptr)
   {
     const auto projectedTriangles = hades::preview::project_model_triangles(
         model,
@@ -336,7 +376,9 @@ namespace
           screenPoint.x = projectedPoint.x;
           screenPoint.y = projectedPoint.y;
           return true;
-        });
+        },
+        nullptr,
+        rotation);
 
     if (projectedTriangles.empty())
     {
@@ -483,6 +525,9 @@ namespace
       }
 
       const auto &position = componentManager.getComponent<hades::PositionComponent3D>(entity);
+      const hades::RotationComponent3D *rotation = componentManager.hasComponent<hades::RotationComponent3D>(entity)
+                                                       ? &componentManager.getComponent<hades::RotationComponent3D>(entity)
+                                                       : nullptr;
       if (componentManager.hasComponent<hades::PrimitiveComponent>(entity))
       {
         const auto &primitive = componentManager.getComponent<hades::PrimitiveComponent>(entity);
@@ -497,7 +542,8 @@ namespace
               position,
               make_vec3(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT),
               make_vec3(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT),
-              primitiveColor);
+              primitiveColor,
+              rotation);
         }
         else if (primitive.type == hades::PrimitiveType::Plane)
         {
@@ -508,7 +554,8 @@ namespace
               width,
               height,
               position,
-              primitiveColor);
+              primitiveColor,
+              rotation);
         }
       }
 
@@ -523,7 +570,8 @@ namespace
                 width,
                 height,
                 position,
-                model))
+                model,
+                rotation))
         {
           continue;
         }
@@ -543,7 +591,8 @@ namespace
             position,
             minCorner,
             maxCorner,
-            modelColor);
+            modelColor,
+            rotation);
       }
 
       if (componentManager.hasComponent<hades::TextComponent>(entity))

@@ -20,6 +20,7 @@
 #include "../engine/components/render_component.hpp"
 #include "../engine/components/rigid_body_component.hpp"
 #include "../engine/components/rotation_component_3d.hpp"
+#include "../engine/components/scale_component_3d.hpp"
 #include "../engine/components/script_component.hpp"
 #include "../engine/components/text_component.hpp"
 #include "../engine/components/transform_hierarchy_component.hpp"
@@ -157,6 +158,12 @@ namespace hades
     {
       auto &rot = componentManager.getComponent<RotationComponent3D>(entity);
       ImGui::DragFloat4("Quaternion (x,y,z,w)", &rot.qx, 0.01f);
+    }
+
+    if (componentManager.hasComponent<ScaleComponent3D>(entity) && ImGui::CollapsingHeader("Scale"))
+    {
+      auto &scale = componentManager.getComponent<ScaleComponent3D>(entity);
+      ImGui::DragFloat3("Scale", &scale.x, 0.01f, 0.01f, 100.0f);
     }
 
     if (componentManager.hasComponent<RigidBodyComponent>(entity) && ImGui::CollapsingHeader("Rigid Body"))

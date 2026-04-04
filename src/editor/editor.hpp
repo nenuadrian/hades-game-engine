@@ -164,6 +164,8 @@ namespace hades
     SettingsCategory selectedSettingsCategory_ = SettingsCategory::Editor;
     bool openDebugConsoleWindow_ = false;
     bool focusDebugConsoleWindow_ = false;
+    bool openAboutWindow_ = false;
+    bool focusAboutWindow_ = false;
 
     // Export window state.
     bool openExportWindow_ = false;
@@ -210,6 +212,9 @@ namespace hades
     float sceneGizmoDragStartRotationQy_ = 0.0f;
     float sceneGizmoDragStartRotationQz_ = 0.0f;
     float sceneGizmoDragStartRotationQw_ = 1.0f;
+    float sceneGizmoDragStartScaleX_ = 1.0f;
+    float sceneGizmoDragStartScaleY_ = 1.0f;
+    float sceneGizmoDragStartScaleZ_ = 1.0f;
     bool pendingSavedWorldRestore_ = false;
 
     // Background compile state.
@@ -246,6 +251,7 @@ namespace hades
     void render_workspace_dialogs(EntityManager &entityManager, ComponentManager &componentManager);
     void render_settings_window();
     void render_debug_console_window();
+    void render_about_window();
     void render_export_window(EntityManager &entityManager, ComponentManager &componentManager);
     void render_workspace_tree_node(const WorkspaceTreeNode &node);
     void render_script_editor(EntityManager &entityManager, ComponentManager &componentManager);

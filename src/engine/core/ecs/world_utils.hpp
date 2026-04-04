@@ -59,10 +59,22 @@ namespace hades
     std::vector<Entity::EntityId> worlds;
     for (Entity::EntityId entity : entityManager.getAllEntities())
     {
-      if (componentManager.hasComponent<WorldComponent>(entity))
+      if (!componentManager.hasComponent<WorldComponent>(entity))
       {
-        worlds.push_back(entity);
+        continue;
       }
+
+      // Only include root-level world entities (no parent).
+      if (componentManager.hasComponent<TransformHierarchyComponent>(entity))
+      {
+        const auto &hierarchy = componentManager.getComponent<TransformHierarchyComponent>(entity);
+        if (hierarchy.parent.has_value())
+        {
+          continue;
+        }
+      }
+
+      worlds.push_back(entity);
     }
 
     return worlds;

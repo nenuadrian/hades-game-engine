@@ -10,6 +10,7 @@
 #include "../assets/imported_model.hpp"
 #include "../components/position_component_3d.hpp"
 #include "../components/rotation_component_3d.hpp"
+#include "../components/scale_component_3d.hpp"
 
 namespace hades::preview
 {
@@ -210,7 +211,8 @@ namespace hades::preview
       ToCameraSpace toCameraSpace,
       ProjectToScreen projectToScreen,
       const LightData *lightData = nullptr,
-      const RotationComponent3D *rotation = nullptr)
+      const RotationComponent3D *rotation = nullptr,
+      const ScaleComponent3D *scale = nullptr)
   {
     std::vector<ProjectedTriangle> projectedTriangles;
     projectedTriangles.reserve(model.totalFaceCount);
@@ -228,6 +230,10 @@ namespace hades::preview
       for (const auto &vertex : mesh.vertices)
       {
         Vec3 local = make_vec3(vertex.x, vertex.y, vertex.z);
+        if (scale != nullptr)
+        {
+          local = make_vec3(local.x * scale->x, local.y * scale->y, local.z * scale->z);
+        }
         if (rotation != nullptr)
         {
           const float qx = rotation->qx;

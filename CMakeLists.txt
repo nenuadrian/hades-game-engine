@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(HadesGameEngine LANGUAGES CXX)
+project(Hades LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -118,7 +118,7 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
-# HadesGameEngine editor executable
+# Hades editor executable
 # ---------------------------------------------------------------------------
 add_executable(${PROJECT_NAME} ${EDITOR_SOURCE_FILES} ${EDITOR_HEADER_FILES})
 target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_BINARY_DIR}/generated")
