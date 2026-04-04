@@ -771,9 +771,12 @@ namespace hades
         return false;
       }
 
+      const float frustumPreviewMaxDepth = std::max(
+          CAMERA_FRUSTUM_PREVIEW_MAX_DEPTH,
+          camera.farClip * 0.05f);
       const float farDepth = std::min(
           camera.farClip,
-          std::max(CAMERA_FRUSTUM_PREVIEW_MAX_DEPTH, camera.nearClip + 0.001f));
+          std::max(frustumPreviewMaxDepth, camera.nearClip + 0.001f));
       const float aspectRatio = canvasSize.x / canvasSize.y;
       const float halfFovRadians = degrees_to_radians(camera.fovY * 0.5f);
       const float tanHalfFov = std::tan(halfFovRadians);
