@@ -208,7 +208,8 @@ namespace
       const Vec3 &minCorner,
       const Vec3 &maxCorner,
       const SDL_Color &color,
-      const hades::RotationComponent3D *rotation = nullptr)
+      const hades::RotationComponent3D *rotation = nullptr,
+      const hades::ScaleComponent3D *scale = nullptr)
   {
     const Vec3 localCorners[8] = {
         make_vec3(minCorner.x, minCorner.y, minCorner.z),
@@ -226,6 +227,10 @@ namespace
     for (int i = 0; i < 8; ++i)
     {
       Vec3 corner = localCorners[i];
+      if (scale != nullptr)
+      {
+        corner = make_vec3(corner.x * scale->x, corner.y * scale->y, corner.z * scale->z);
+      }
       if (rotation != nullptr)
       {
         corner = rotate_vec3_by_quaternion(corner, *rotation);
@@ -273,7 +278,8 @@ namespace
       int height,
       const hades::PositionComponent3D &position,
       const SDL_Color &color,
-      const hades::RotationComponent3D *rotation = nullptr)
+      const hades::RotationComponent3D *rotation = nullptr,
+      const hades::ScaleComponent3D *scale = nullptr)
   {
     const Vec3 localCorners[4] = {
         make_vec3(-PLANE_HALF_EXTENT, 0.0f, -PLANE_HALF_EXTENT),
@@ -287,6 +293,10 @@ namespace
     for (int i = 0; i < 4; ++i)
     {
       Vec3 corner = localCorners[i];
+      if (scale != nullptr)
+      {
+        corner = make_vec3(corner.x * scale->x, corner.y * scale->y, corner.z * scale->z);
+      }
       if (rotation != nullptr)
       {
         corner = rotate_vec3_by_quaternion(corner, *rotation);
@@ -348,7 +358,8 @@ namespace
       int height,
       const hades::PositionComponent3D &position,
       const hades::ImportedModel &model,
-      const hades::RotationComponent3D *rotation = nullptr)
+      const hades::RotationComponent3D *rotation = nullptr,
+      const hades::ScaleComponent3D *scale = nullptr)
   {
     const auto projectedTriangles = hades::preview::project_model_triangles(
         model,
@@ -378,7 +389,8 @@ namespace
           return true;
         },
         nullptr,
-        rotation);
+        rotation,
+        scale);
 
     if (projectedTriangles.empty())
     {
@@ -528,6 +540,9 @@ namespace
       const hades::RotationComponent3D *rotation = componentManager.hasComponent<hades::RotationComponent3D>(entity)
                                                        ? &componentManager.getComponent<hades::RotationComponent3D>(entity)
                                                        : nullptr;
+      const hades::ScaleComponent3D *scale = componentManager.hasComponent<hades::ScaleComponent3D>(entity)
+                                                 ? &componentManager.getComponent<hades::ScaleComponent3D>(entity)
+                                                 : nullptr;
       if (componentManager.hasComponent<hades::PrimitiveComponent>(entity))
       {
         const auto &primitive = componentManager.getComponent<hades::PrimitiveComponent>(entity);
@@ -543,7 +558,8 @@ namespace
               make_vec3(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT),
               make_vec3(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT),
               primitiveColor,
-              rotation);
+              rotation,
+              scale);
         }
         else if (primitive.type == hades::PrimitiveType::Plane)
         {
@@ -555,7 +571,8 @@ namespace
               height,
               position,
               primitiveColor,
-              rotation);
+              rotation,
+              scale);
         }
       }
 
@@ -571,7 +588,8 @@ namespace
                 height,
                 position,
                 model,
-                rotation))
+                rotation,
+                scale))
         {
           continue;
         }
@@ -592,7 +610,8 @@ namespace
             minCorner,
             maxCorner,
             modelColor,
-            rotation);
+            rotation,
+            scale);
       }
 
       if (componentManager.hasComponent<hades::TextComponent>(entity))

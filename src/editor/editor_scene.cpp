@@ -2295,10 +2295,8 @@ namespace hades
           rot.qw /= qlen;
         }
       }
-      else if (sceneGizmoMode_ == SceneGizmoMode::Scale &&
-               componentManager.hasComponent<ScaleComponent3D>(activeSceneGizmoEntity_))
+      else if (sceneGizmoMode_ == SceneGizmoMode::Scale)
       {
-        auto &scale = componentManager.getComponent<ScaleComponent3D>(activeSceneGizmoEntity_);
         const float mouseDeltaAlongAxis =
             ((io.MousePos.x - sceneGizmoDragStartMouseX_) * sceneGizmoAxisScreenDirectionX_) +
             ((io.MousePos.y - sceneGizmoDragStartMouseY_) * sceneGizmoAxisScreenDirectionY_);
@@ -2306,23 +2304,45 @@ namespace hades
                                      ? (mouseDeltaAlongAxis / sceneGizmoPixelsPerWorldUnit_)
                                      : 0.0f;
 
-        scale.x = sceneGizmoDragStartScaleX_;
-        scale.y = sceneGizmoDragStartScaleY_;
-        scale.z = sceneGizmoDragStartScaleZ_;
-
-        switch (activeSceneGizmoAxis_)
+        if (componentManager.hasComponent<CameraComponent>(activeSceneGizmoEntity_))
         {
-        case SceneGizmoAxis::X:
-          scale.x = std::max(0.01f, sceneGizmoDragStartScaleX_ + scaleDelta);
-          break;
-        case SceneGizmoAxis::Y:
-          scale.y = std::max(0.01f, sceneGizmoDragStartScaleY_ + scaleDelta);
-          break;
-        case SceneGizmoAxis::Z:
-          scale.z = std::max(0.01f, sceneGizmoDragStartScaleZ_ + scaleDelta);
-          break;
-        case SceneGizmoAxis::None:
-          break;
+          auto &cam = componentManager.getComponent<CameraComponent>(activeSceneGizmoEntity_);
+          switch (activeSceneGizmoAxis_)
+          {
+          case SceneGizmoAxis::X:
+            cam.nearClip = std::max(0.001f, sceneGizmoDragStartScaleX_ + scaleDelta * 0.1f);
+            break;
+          case SceneGizmoAxis::Y:
+            cam.fovY = std::clamp(sceneGizmoDragStartScaleY_ + scaleDelta * 5.0f, 1.0f, 179.0f);
+            break;
+          case SceneGizmoAxis::Z:
+            cam.farClip = std::max(1.0f, sceneGizmoDragStartScaleZ_ + scaleDelta * 50.0f);
+            break;
+          case SceneGizmoAxis::None:
+            break;
+          }
+        }
+        else if (componentManager.hasComponent<ScaleComponent3D>(activeSceneGizmoEntity_))
+        {
+          auto &scale = componentManager.getComponent<ScaleComponent3D>(activeSceneGizmoEntity_);
+          scale.x = sceneGizmoDragStartScaleX_;
+          scale.y = sceneGizmoDragStartScaleY_;
+          scale.z = sceneGizmoDragStartScaleZ_;
+
+          switch (activeSceneGizmoAxis_)
+          {
+          case SceneGizmoAxis::X:
+            scale.x = std::max(0.01f, sceneGizmoDragStartScaleX_ + scaleDelta);
+            break;
+          case SceneGizmoAxis::Y:
+            scale.y = std::max(0.01f, sceneGizmoDragStartScaleY_ + scaleDelta);
+            break;
+          case SceneGizmoAxis::Z:
+            scale.z = std::max(0.01f, sceneGizmoDragStartScaleZ_ + scaleDelta);
+            break;
+          case SceneGizmoAxis::None:
+            break;
+          }
         }
       }
     }
@@ -2416,21 +2436,32 @@ namespace hades
             const float axisScreenLength = std::sqrt(squared_distance(projection->originScreen, projection->endScreen));
             if (axisScreenLength > 1e-5f)
             {
-              if (!componentManager.hasComponent<ScaleComponent3D>(*state.selectedEntity))
-              {
-                componentManager.addComponent(*state.selectedEntity, ScaleComponent3D{});
-              }
-              const auto &scale = componentManager.getComponent<ScaleComponent3D>(*state.selectedEntity);
               activeSceneGizmoAxis_ = hoveredGizmoAxis;
               activeSceneGizmoEntity_ = *state.selectedEntity;
               sceneGizmoDragStartMouseX_ = io.MousePos.x;
               sceneGizmoDragStartMouseY_ = io.MousePos.y;
-              sceneGizmoDragStartScaleX_ = scale.x;
-              sceneGizmoDragStartScaleY_ = scale.y;
-              sceneGizmoDragStartScaleZ_ = scale.z;
               sceneGizmoAxisScreenDirectionX_ = (projection->endScreen.x - projection->originScreen.x) / axisScreenLength;
               sceneGizmoAxisScreenDirectionY_ = (projection->endScreen.y - projection->originScreen.y) / axisScreenLength;
               sceneGizmoPixelsPerWorldUnit_ = projection->pixelsPerWorldUnit;
+
+              if (componentManager.hasComponent<CameraComponent>(*state.selectedEntity))
+              {
+                const auto &cam = componentManager.getComponent<CameraComponent>(*state.selectedEntity);
+                sceneGizmoDragStartScaleX_ = cam.nearClip;
+                sceneGizmoDragStartScaleY_ = cam.fovY;
+                sceneGizmoDragStartScaleZ_ = cam.farClip;
+              }
+              else
+              {
+                if (!componentManager.hasComponent<ScaleComponent3D>(*state.selectedEntity))
+                {
+                  componentManager.addComponent(*state.selectedEntity, ScaleComponent3D{});
+                }
+                const auto &scale = componentManager.getComponent<ScaleComponent3D>(*state.selectedEntity);
+                sceneGizmoDragStartScaleX_ = scale.x;
+                sceneGizmoDragStartScaleY_ = scale.y;
+                sceneGizmoDragStartScaleZ_ = scale.z;
+              }
               handledClick = true;
             }
           }
