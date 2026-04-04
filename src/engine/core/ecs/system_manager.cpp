@@ -4,9 +4,9 @@ namespace hades
 {
   void SystemManager::updateSystems(float deltaTime, ComponentManager &componentManager, EntityManager &entityManager)
   {
-    for (auto &system : systems)
+    for (auto &entry : systems_)
     {
-      system.second->update(deltaTime, componentManager, entityManager);
+      entry.system->update(deltaTime, componentManager, entityManager);
     }
   }
 }

@@ -1,10 +1,11 @@
 #ifndef COMPONENT_MANAGER_H
 #define COMPONENT_MANAGER_H
 
-#include "entity.hpp"
 #include "component_array.hpp"
+#include "entity.hpp"
+#include "entity_manager.hpp"
+#include "type_id.hpp"
 #include <memory>
-#include <typeinfo>
 #include <unordered_map>
 
 namespace hades
@@ -12,32 +13,46 @@ namespace hades
   class ComponentManager
   {
   private:
-    std::unordered_map<const char *, std::shared_ptr<void>> componentArrays;
+    std::unordered_map<ComponentId, std::shared_ptr<void>> componentArrays;
+    EntityManager *entityManager_ = nullptr;
 
   public:
+    void setEntityManager(EntityManager *entityManager)
+    {
+      entityManager_ = entityManager;
+    }
+
     template <typename T>
     std::shared_ptr<ComponentArray<T>> getComponentArray()
     {
-      const char *typeName = typeid(T).name();
+      ComponentId typeId = ComponentTypeId::get<T>();
 
-      if (componentArrays.find(typeName) == componentArrays.end())
+      if (componentArrays.find(typeId) == componentArrays.end())
       {
-        componentArrays[typeName] = std::make_shared<ComponentArray<T>>();
+        componentArrays[typeId] = std::make_shared<ComponentArray<T>>();
       }
 
-      return std::static_pointer_cast<ComponentArray<T>>(componentArrays[typeName]);
+      return std::static_pointer_cast<ComponentArray<T>>(componentArrays[typeId]);
     }
 
     template <typename T>
     void addComponent(Entity::EntityId entity, T component)
     {
       getComponentArray<T>()->insert(entity, component);
+      if (entityManager_ != nullptr)
+      {
+        entityManager_->setComponentBit(entity, ComponentTypeId::get<T>(), true);
+      }
     }
 
     template <typename T>
     void removeComponent(Entity::EntityId entity)
     {
       getComponentArray<T>()->remove(entity);
+      if (entityManager_ != nullptr)
+      {
+        entityManager_->setComponentBit(entity, ComponentTypeId::get<T>(), false);
+      }
     }
 
     template <typename T>

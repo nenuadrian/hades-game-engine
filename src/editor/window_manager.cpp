@@ -1112,6 +1112,7 @@ namespace hades
     scriptEditorWindow.close();
     entityManager = EntityManager();
     componentManager = ComponentManager();
+    componentManager.setEntityManager(&entityManager);
     editor.reset_workspace_session();
     wasPlayingLastFrame = false;
 
@@ -1294,11 +1295,13 @@ namespace hades
       physics_world.reset();
     }
 
-    physicsSystem = systemManager.registerSystem<PhysicsSystem>();
+    componentManager.setEntityManager(&entityManager);
+
+    physicsSystem = systemManager.registerSystem<PhysicsSystem>(SystemPhase::Physics);
     physicsSystem->setPhysicsWorld(physics_world.get());
-    systemManager.registerSystem<MovementSystem>();
-    systemManager.registerSystem<RenderSystem>();
-    audioSystem = systemManager.registerSystem<AudioSystem>();
+    systemManager.registerSystem<MovementSystem>(SystemPhase::Logic);
+    systemManager.registerSystem<RenderSystem>(SystemPhase::Render);
+    audioSystem = systemManager.registerSystem<AudioSystem>(SystemPhase::Audio);
     audioSystem->setAudioEngine(audio_engine.get());
     update_window_title();
     SDL_ShowWindow(window.get());

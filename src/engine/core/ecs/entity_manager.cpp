@@ -17,6 +17,7 @@ namespace hades
       id = activeEntities.size();
     }
     activeEntities.push_back(id);
+    entityComponentSignatures[id] = {};
 
     return id;
   }
@@ -47,5 +48,19 @@ namespace hades
   std::vector<Entity::EntityId> EntityManager::getAllEntities()
   {
     return activeEntities;
+  }
+
+  const std::vector<Entity::EntityId> &EntityManager::getActiveEntities() const
+  {
+    return activeEntities;
+  }
+
+  void EntityManager::setComponentBit(Entity::EntityId entity, uint32_t bit, bool value)
+  {
+    auto it = entityComponentSignatures.find(entity);
+    if (it != entityComponentSignatures.end())
+    {
+      it->second.set(bit, value);
+    }
   }
 }

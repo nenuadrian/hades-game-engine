@@ -180,11 +180,13 @@ namespace hades
       physicsWorld_.reset();
     }
 
-    physicsSystem_ = systemManager_.registerSystem<PhysicsSystem>();
+    componentManager_.setEntityManager(&entityManager_);
+
+    physicsSystem_ = systemManager_.registerSystem<PhysicsSystem>(SystemPhase::Physics);
     physicsSystem_->setPhysicsWorld(physicsWorld_.get());
-    systemManager_.registerSystem<MovementSystem>();
-    systemManager_.registerSystem<RenderSystem>();
-    audioSystem_ = systemManager_.registerSystem<AudioSystem>();
+    systemManager_.registerSystem<MovementSystem>(SystemPhase::Logic);
+    systemManager_.registerSystem<RenderSystem>(SystemPhase::Render);
+    audioSystem_ = systemManager_.registerSystem<AudioSystem>(SystemPhase::Audio);
     audioSystem_->setAudioEngine(audioEngine_.get());
 
     // Load all worlds from the project.
