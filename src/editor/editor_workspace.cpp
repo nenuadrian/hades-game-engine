@@ -741,7 +741,9 @@ namespace hades
       flags |= ImGuiTreeNodeFlags_Selected;
     }
 
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 6.0f));
     const bool open = ImGui::TreeNodeEx(treeNodeId.c_str(), flags);
+    ImGui::PopStyleVar();
     if (!node.directory &&
         node.path.extension() == ".cs" &&
         ImGui::IsItemClicked(ImGuiMouseButton_Left))
@@ -1508,9 +1510,8 @@ namespace hades
         }
       }
 
-      // --- Right column: entities using script ---
       ImGui::TableNextColumn();
-      ImGui::TextUnformatted("Entities Using Script");
+      ImGui::TextUnformatted("Entities");
       ImGui::Separator();
 
       ScriptEditorTab *activeTab = active_script_editor_tab();

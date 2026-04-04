@@ -104,33 +104,42 @@ namespace hades
     {
       ImGui::BeginDisabled();
     }
-    if (ImGui::Button("Add Script Component"))
     {
-      if (!componentManager.hasComponent<ScriptComponent>(entity))
+      static int selectedComponentType = 0;
+      const char *componentTypes[] = {"Script Component", "Rigid Body"};
+      ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.65f);
+      ImGui::Combo("##AddComponentType", &selectedComponentType, componentTypes, IM_ARRAYSIZE(componentTypes));
+      ImGui::SameLine();
+      if (ImGui::Button("Add Component"))
       {
-        ScriptComponent scriptComponent;
-        scriptComponent.attachments.push_back(ScriptAttachment());
-        componentManager.addComponent(entity, scriptComponent);
-      }
-      else
-      {
-        componentManager.getComponent<ScriptComponent>(entity).attachments.push_back(ScriptAttachment());
-      }
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Add Rigid Body"))
-    {
-      if (!componentManager.hasComponent<RigidBodyComponent>(entity))
-      {
-        componentManager.addComponent(entity, RigidBodyComponent{});
-      }
-      if (!componentManager.hasComponent<RotationComponent3D>(entity))
-      {
-        componentManager.addComponent(entity, RotationComponent3D{});
-      }
-      if (!componentManager.hasComponent<ColliderComponent>(entity))
-      {
-        componentManager.addComponent(entity, ColliderComponent{});
+        if (selectedComponentType == 0)
+        {
+          if (!componentManager.hasComponent<ScriptComponent>(entity))
+          {
+            ScriptComponent scriptComponent;
+            scriptComponent.attachments.push_back(ScriptAttachment());
+            componentManager.addComponent(entity, scriptComponent);
+          }
+          else
+          {
+            componentManager.getComponent<ScriptComponent>(entity).attachments.push_back(ScriptAttachment());
+          }
+        }
+        else if (selectedComponentType == 1)
+        {
+          if (!componentManager.hasComponent<RigidBodyComponent>(entity))
+          {
+            componentManager.addComponent(entity, RigidBodyComponent{});
+          }
+          if (!componentManager.hasComponent<RotationComponent3D>(entity))
+          {
+            componentManager.addComponent(entity, RotationComponent3D{});
+          }
+          if (!componentManager.hasComponent<ColliderComponent>(entity))
+          {
+            componentManager.addComponent(entity, ColliderComponent{});
+          }
+        }
       }
     }
     if (isWorld)
@@ -139,16 +148,6 @@ namespace hades
     }
 
     ImGui::Separator();
-
-    if (componentManager.hasComponent<WorldComponent>(entity) && ImGui::CollapsingHeader("World", ImGuiTreeNodeFlags_DefaultOpen))
-    {
-      const auto &world = componentManager.getComponent<WorldComponent>(entity);
-      ImGui::Text("Startup World: %s", world.isDefault ? "Yes" : "No");
-      if (!world.isDefault && ImGui::Button("Set As Default World"))
-      {
-        set_default_world(entity, entityManager, componentManager);
-      }
-    }
 
     if (componentManager.hasComponent<PositionComponent3D>(entity) && ImGui::CollapsingHeader("Transform"))
     {
@@ -262,12 +261,6 @@ namespace hades
       ImGui::Checkbox("Listener Enabled", &listener.enabled);
       ImGui::DragFloat3("Listener Forward", &listener.forwardX, 0.01f, -1.0f, 1.0f);
       ImGui::DragFloat3("Listener Up", &listener.upX, 0.01f, -1.0f, 1.0f);
-    }
-
-    if (componentManager.hasComponent<PrimitiveComponent>(entity) && ImGui::CollapsingHeader("Primitive"))
-    {
-      const auto &primitive = componentManager.getComponent<PrimitiveComponent>(entity);
-      ImGui::Text("Type: %s", primitive_type_label(primitive.type));
     }
 
     if (componentManager.hasComponent<TextComponent>(entity) && ImGui::CollapsingHeader("Text", ImGuiTreeNodeFlags_DefaultOpen))

@@ -373,21 +373,33 @@ namespace hades
         const EditorSceneViewCamera &sceneCamera,
         const CameraComponent &camera,
         const ImVec2 &canvasOrigin,
-        const ImVec2 &canvasSize)
+        const ImVec2 &canvasSize,
+        float cameraDistance)
     {
-      constexpr int GRID_HALF_EXTENT = 12;
+      constexpr int GRID_MIN_HALF_EXTENT = 12;
+      constexpr int GRID_MAX_HALF_EXTENT = 200;
       constexpr float GRID_HEIGHT = 0.0f;
       constexpr ImU32 GRID_MINOR_COLOR = IM_COL32(128, 128, 128, 96);
       constexpr ImU32 GRID_AXIS_X_COLOR = IM_COL32(172, 172, 172, 168);
       constexpr ImU32 GRID_AXIS_Z_COLOR = IM_COL32(172, 172, 172, 168);
 
-      for (int x = -GRID_HALF_EXTENT; x <= GRID_HALF_EXTENT; ++x)
+      // Compute a grid extent that covers the camera frustum at the grid plane.
+      // Use the camera distance and FOV to estimate visible radius on the ground.
+      const float halfFovRadians = degrees_to_radians(camera.fovY * 0.5f);
+      const float tanHalfFov = std::tan(halfFovRadians);
+      const float visibleRadius = cameraDistance * tanHalfFov * 2.0f;
+      const int gridHalfExtent = std::clamp(
+          static_cast<int>(std::ceil(visibleRadius)) + 2,
+          GRID_MIN_HALF_EXTENT,
+          GRID_MAX_HALF_EXTENT);
+
+      for (int x = -gridHalfExtent; x <= gridHalfExtent; ++x)
       {
         ImVec2 screenStart;
         ImVec2 screenEnd;
         if (!project_line_segment(
-                make_vec3(static_cast<float>(x), GRID_HEIGHT, -static_cast<float>(GRID_HALF_EXTENT)),
-                make_vec3(static_cast<float>(x), GRID_HEIGHT, static_cast<float>(GRID_HALF_EXTENT)),
+                make_vec3(static_cast<float>(x), GRID_HEIGHT, -static_cast<float>(gridHalfExtent)),
+                make_vec3(static_cast<float>(x), GRID_HEIGHT, static_cast<float>(gridHalfExtent)),
                 sceneCamera,
                 camera,
                 canvasOrigin,
@@ -405,13 +417,13 @@ namespace hades
             x == 0 ? 1.5f : 1.0f);
       }
 
-      for (int z = -GRID_HALF_EXTENT; z <= GRID_HALF_EXTENT; ++z)
+      for (int z = -gridHalfExtent; z <= gridHalfExtent; ++z)
       {
         ImVec2 screenStart;
         ImVec2 screenEnd;
         if (!project_line_segment(
-                make_vec3(-static_cast<float>(GRID_HALF_EXTENT), GRID_HEIGHT, static_cast<float>(z)),
-                make_vec3(static_cast<float>(GRID_HALF_EXTENT), GRID_HEIGHT, static_cast<float>(z)),
+                make_vec3(-static_cast<float>(gridHalfExtent), GRID_HEIGHT, static_cast<float>(z)),
+                make_vec3(static_cast<float>(gridHalfExtent), GRID_HEIGHT, static_cast<float>(z)),
                 sceneCamera,
                 camera,
                 canvasOrigin,
@@ -1856,36 +1868,48 @@ namespace hades
     drawList->AddRectFilled(canvasOrigin, canvasMax, IM_COL32(17, 20, 24, 255));
     drawList->AddRect(canvasOrigin, canvasMax, IM_COL32(70, 76, 86, 255));
     drawList->PushClipRect(canvasOrigin, canvasMax, true);
-    if (!state.isPlaying)
+
+    if (state.isPlaying)
     {
-      draw_editor_grid(drawList, sceneCamera, camera, canvasOrigin, canvasSize);
+      // During play mode, skip all 3D editor rendering and show a message.
+      const char *playingMsg = "Game is playing...";
+      const ImVec2 textSize = ImGui::CalcTextSize(playingMsg);
+      drawList->AddText(
+          ImVec2(canvasOrigin.x + (canvasSize.x - textSize.x) * 0.5f,
+                 canvasOrigin.y + (canvasSize.y - textSize.y) * 0.5f),
+          IM_COL32(139, 143, 163, 200),
+          playingMsg);
     }
-
-    draw_world_preview(
-        drawList,
-        sceneCamera,
-        camera,
-        canvasOrigin,
-        canvasSize,
-        entityManager,
-        componentManager,
-        sceneWorld,
-        std::nullopt,
-        state.selectedEntity,
-        sceneCameraDistance_,
-        sceneCameraYawDegrees_,
-        sceneCameraPitchDegrees_);
-
-    if (selectedEntityIsEditableInScene)
+    else
     {
-      const SceneGizmoAxis highlightedAxis =
-          activeSceneGizmoAxis_ != SceneGizmoAxis::None
-              ? activeSceneGizmoAxis_
-              : hoveredGizmoAxis;
-      draw_translation_gizmo(drawList, gizmoAxes, highlightedAxis);
-      if (highlightedAxis != SceneGizmoAxis::None)
+      draw_editor_grid(drawList, sceneCamera, camera, canvasOrigin, canvasSize, sceneCameraDistance_);
+
+      draw_world_preview(
+          drawList,
+          sceneCamera,
+          camera,
+          canvasOrigin,
+          canvasSize,
+          entityManager,
+          componentManager,
+          sceneWorld,
+          std::nullopt,
+          state.selectedEntity,
+          sceneCameraDistance_,
+          sceneCameraYawDegrees_,
+          sceneCameraPitchDegrees_);
+
+      if (selectedEntityIsEditableInScene)
       {
-        ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+        const SceneGizmoAxis highlightedAxis =
+            activeSceneGizmoAxis_ != SceneGizmoAxis::None
+                ? activeSceneGizmoAxis_
+                : hoveredGizmoAxis;
+        draw_translation_gizmo(drawList, gizmoAxes, highlightedAxis);
+        if (highlightedAxis != SceneGizmoAxis::None)
+        {
+          ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+        }
       }
     }
 

@@ -401,6 +401,15 @@ namespace hades
     }
     apply_editor_theme();
 
+    // Load a more readable proportional font (bundled with ImGui).
+    {
+      const std::string fontPath = asset_path("_deps/imgui-src/misc/fonts/DroidSans.ttf");
+      if (std::filesystem::exists(fontPath))
+      {
+        io.Fonts->AddFontFromFileTTF(fontPath.c_str(), 16.0f);
+      }
+    }
+
     if (!ImGui_ImplSDL2_InitForVulkan(window))
     {
       std::fprintf(stderr, "Error: ImGui_ImplSDL2_InitForVulkan() failed.\n");

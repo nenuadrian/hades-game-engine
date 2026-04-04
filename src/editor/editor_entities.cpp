@@ -548,7 +548,9 @@ namespace hades
     {
       ImGui::SetNextItemOpen(true, ImGuiCond_Once);
     }
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 6.0f));
     const bool open = ImGui::TreeNodeEx("entity", flags, "%s", label.c_str());
+    ImGui::PopStyleVar();
     if (ImGui::IsItemClicked())
     {
       state.selectedEntity = entity;
