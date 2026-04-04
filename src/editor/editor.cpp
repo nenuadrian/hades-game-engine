@@ -268,12 +268,17 @@ namespace hades
     MenuBarItem worlds;
     worlds.title = "Worlds";
 
-    // Collect in-memory world names so we can mark them as loaded.
+    // Collect in-memory world entities keyed by their plain name.
     const auto memoryWorlds = find_world_entities(entityManager, componentManager);
     std::unordered_map<std::string, Entity::EntityId> memoryWorldsByName;
     for (Entity::EntityId world : memoryWorlds)
     {
-      memoryWorldsByName[entity_label(world, componentManager)] = world;
+      std::string name = "World";
+      if (componentManager.hasComponent<NameComponent>(world))
+      {
+        name = componentManager.getComponent<NameComponent>(world).value;
+      }
+      memoryWorldsByName[name] = world;
     }
 
     const auto &diskWorlds = cachedDiskWorlds_;
@@ -292,6 +297,7 @@ namespace hades
     {
       MenuBarItem emptyWorlds;
       emptyWorlds.title = "No Worlds Available";
+      emptyWorlds.enabled = false;
       worlds.children_menu_items.push_back(emptyWorlds);
     }
     else
@@ -299,35 +305,76 @@ namespace hades
       const bool hasDiskWorlds = !diskWorlds.empty();
       for (const auto &worldName : allWorldNames)
       {
-        MenuBarItem worldItem;
-        worldItem.title = worldName;
-
         auto memIt = memoryWorldsByName.find(worldName);
         const bool inMemory = memIt != memoryWorldsByName.end();
         const bool onDisk = hasDiskWorlds &&
                             std::find(diskWorlds.begin(), diskWorlds.end(), worldName) != diskWorlds.end();
 
-        if (inMemory)
-        {
-          worldItem.selected = state.loadedWorld.has_value() && *state.loadedWorld == memIt->second;
-        }
+        const bool isLoaded = inMemory && state.loadedWorld.has_value() &&
+                              *state.loadedWorld == memIt->second;
+        const bool isDefault = inMemory &&
+                               componentManager.hasComponent<WorldComponent>(memIt->second) &&
+                               componentManager.getComponent<WorldComponent>(memIt->second).isDefault;
 
+        // Build a submenu for each world.
+        MenuBarItem worldItem;
+        std::string displayName = worldName;
+        if (isLoaded)
+        {
+          displayName += " (loaded)";
+        }
+        if (isDefault)
+        {
+          displayName += " [Default]";
+        }
+        worldItem.title = displayName;
+
+        // "Load" action
+        MenuBarItem loadItem;
+        loadItem.title = "Load";
+        loadItem.selected = isLoaded;
         if (onDisk)
         {
-          // Always load from disk when selected.
-          worldItem.on_activate = [this, worldName, &entityManager, &componentManager]()
+          loadItem.on_activate = [this, worldName, &entityManager, &componentManager]()
           {
             open_world_from_disk(worldName, entityManager, componentManager);
           };
         }
         else if (inMemory)
         {
-          // Unsaved world: just switch to it.
           Entity::EntityId worldId = memIt->second;
-          worldItem.on_activate = [this, &componentManager, worldId]()
+          loadItem.on_activate = [this, &componentManager, worldId]()
           {
             load_world(worldId, componentManager);
           };
+        }
+        worldItem.children_menu_items.push_back(std::move(loadItem));
+
+        // "Set as Default" action (only for in-memory worlds)
+        if (inMemory)
+        {
+          MenuBarItem setDefaultItem;
+          setDefaultItem.title = "Set as Default";
+          setDefaultItem.selected = isDefault;
+          Entity::EntityId worldId = memIt->second;
+          setDefaultItem.on_activate = [this, worldId, &entityManager, &componentManager]()
+          {
+            set_default_world(worldId, entityManager, componentManager);
+          };
+          worldItem.children_menu_items.push_back(std::move(setDefaultItem));
+        }
+
+        // "Delete" action
+        if (inMemory)
+        {
+          Entity::EntityId worldId = memIt->second;
+          MenuBarItem deleteItem;
+          deleteItem.title = "Delete";
+          deleteItem.on_activate = [this, worldId]()
+          {
+            request_entity_deletion(worldId);
+          };
+          worldItem.children_menu_items.push_back(std::move(deleteItem));
         }
 
         worlds.children_menu_items.push_back(std::move(worldItem));
