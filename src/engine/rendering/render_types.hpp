@@ -1,0 +1,127 @@
+#ifndef HADES_ENGINE_RENDERING_RENDER_TYPES_HPP
+#define HADES_ENGINE_RENDERING_RENDER_TYPES_HPP
+
+#include <cstddef>
+#include <vector>
+
+#include "../components/primitive_component.hpp"
+#include "../core/ecs/entity.hpp"
+#include "math3d.hpp"
+
+namespace hades
+{
+  struct ImportedModel;
+
+  // -------------------------------------------------------------------------
+  // RenderCamera — fully resolved camera for rendering
+  // -------------------------------------------------------------------------
+  struct RenderCamera
+  {
+    math::Vec3 position;
+    math::Vec3 forward;
+    math::Vec3 right;
+    math::Vec3 up;
+    math::Mat4 view;
+    math::Mat4 projection;
+    math::Mat4 viewProjection;
+    math::Frustum frustum;
+    float fovY = 60.0f;
+    float nearClip = 0.1f;
+    float farClip = 1000.0f;
+    float aspectRatio = 1.0f;
+  };
+
+  // -------------------------------------------------------------------------
+  // RenderLight — flat light data for rendering
+  // -------------------------------------------------------------------------
+  struct RenderLight
+  {
+    int type = 0; // 0=Directional, 1=Point, 2=Spot
+
+    math::Vec3 position;
+    math::Vec3 direction{0.0f, -1.0f, 0.0f};
+
+    float colorR = 1.0f, colorG = 1.0f, colorB = 1.0f;
+    float intensity = 1.0f;
+    float range = 10.0f;
+    float innerConeAngle = 25.0f;
+    float outerConeAngle = 35.0f;
+    float ambientContribution = 0.05f;
+  };
+
+  // -------------------------------------------------------------------------
+  // Material — surface properties for rendering
+  // -------------------------------------------------------------------------
+  struct Material
+  {
+    float baseColorR = 0.72f;
+    float baseColorG = 0.76f;
+    float baseColorB = 0.82f;
+    float metallic = 0.0f;
+    float roughness = 0.5f;
+    float opacity = 1.0f;
+    bool wireframe = false;
+  };
+
+  // -------------------------------------------------------------------------
+  // RenderItem — one renderable entity in the scene
+  // -------------------------------------------------------------------------
+  struct RenderItem
+  {
+    Entity::EntityId entity = Entity::INVALID;
+    math::Mat4 worldTransform;
+    math::Vec3 worldPosition;
+
+    /// Pointer to model data (null for primitives). Not owned.
+    const ImportedModel *model = nullptr;
+
+    /// Primitive type (used when model is null).
+    PrimitiveType primitiveType = PrimitiveType::Cube;
+    bool isPrimitive = false;
+
+    /// Material for this item.
+    Material material;
+
+    /// Distance to camera (for sorting).
+    float distanceToCamera = 0.0f;
+
+    /// Bounding sphere radius in world space.
+    float boundsRadius = 0.0f;
+
+    /// Whether this item is transparent (opacity < 1).
+    bool isTransparent() const { return material.opacity < 1.0f; }
+  };
+
+  // -------------------------------------------------------------------------
+  // RenderList — complete output of the render pipeline
+  // -------------------------------------------------------------------------
+  struct RenderList
+  {
+    RenderCamera camera;
+    std::vector<RenderLight> lights;
+    float globalAmbient = 0.15f;
+
+    /// Opaque items sorted front-to-back (for early-Z efficiency).
+    std::vector<RenderItem> opaqueItems;
+
+    /// Transparent items sorted back-to-front (for alpha blending).
+    std::vector<RenderItem> transparentItems;
+
+    /// Stats.
+    std::size_t totalVisibleEntities = 0;
+    std::size_t totalCulledEntities = 0;
+    std::size_t totalTriangles = 0;
+
+    void clear()
+    {
+      lights.clear();
+      opaqueItems.clear();
+      transparentItems.clear();
+      totalVisibleEntities = 0;
+      totalCulledEntities = 0;
+      totalTriangles = 0;
+    }
+  };
+}
+
+#endif

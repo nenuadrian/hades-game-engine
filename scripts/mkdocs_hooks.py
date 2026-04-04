@@ -25,6 +25,7 @@ CLASS_DIAGRAM_SCRIPT = REPO_ROOT / "scripts" / "generate_class_diagram.py"
 
 ROOT_DOC_TARGETS = {
     "README.md": "index.md",
+    "SCRIPTING.md": "scripting.md",
     "SCRIPTS.md": "scripting.md",
 }
 
@@ -158,4 +159,4 @@ def on_pre_build(config, **kwargs):  # noqa: ANN001
         HOME_FRONT_MATTER,
         strip_heading="## table of contents",
     )
-    _generate_doc("SCRIPTS.md", "scripting.md")
+    _generate_doc("SCRIPTING.md", "scripting.md")

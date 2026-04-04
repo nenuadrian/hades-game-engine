@@ -13,6 +13,7 @@
 #include "../../components/camera_component.hpp"
 #include "../../components/collider_component.hpp"
 #include "../../components/light_component.hpp"
+#include "../../components/mesh_renderer_component.hpp"
 #include "../../components/model_component.hpp"
 #include "../../components/name_component.hpp"
 #include "../../components/position_component_3d.hpp"
@@ -511,6 +512,38 @@ namespace hades
               c.ambientContribution = in["ambientContribution"].get<float>();
               c.castShadows = in["castShadows"].get<bool>();
               c.enabled = in["enabled"].get<bool>();
+              cm.addComponent(entity, c);
+              return true;
+            });
+
+        // MeshRendererComponent
+        registry.registerComponent<MeshRendererComponent>(
+            "meshRenderer",
+            [](Entity::EntityId entity, ComponentManager &cm, json &out) -> bool
+            {
+              if (!cm.hasComponent<MeshRendererComponent>(entity))
+                return false;
+              const auto &c = cm.getComponent<MeshRendererComponent>(entity);
+              out = {
+                  {"baseColorR", c.material.baseColorR},
+                  {"baseColorG", c.material.baseColorG},
+                  {"baseColorB", c.material.baseColorB},
+                  {"metallic", c.material.metallic},
+                  {"roughness", c.material.roughness},
+                  {"opacity", c.material.opacity},
+                  {"wireframe", c.material.wireframe}};
+              return true;
+            },
+            [](Entity::EntityId entity, ComponentManager &cm, const json &in, const auto &) -> bool
+            {
+              MeshRendererComponent c;
+              c.material.baseColorR = in.value("baseColorR", 0.72f);
+              c.material.baseColorG = in.value("baseColorG", 0.76f);
+              c.material.baseColorB = in.value("baseColorB", 0.82f);
+              c.material.metallic = in.value("metallic", 0.0f);
+              c.material.roughness = in.value("roughness", 0.5f);
+              c.material.opacity = in.value("opacity", 1.0f);
+              c.material.wireframe = in.value("wireframe", false);
               cm.addComponent(entity, c);
               return true;
             });

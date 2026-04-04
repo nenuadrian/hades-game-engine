@@ -1303,7 +1303,7 @@ namespace hades
     physicsSystem = systemManager.registerSystem<PhysicsSystem>(SystemPhase::Physics);
     physicsSystem->setPhysicsWorld(physics_world.get());
     systemManager.registerSystem<MovementSystem>(SystemPhase::Logic);
-    systemManager.registerSystem<RenderSystem>(SystemPhase::Render);
+    renderSystem = systemManager.registerSystem<RenderSystem>(SystemPhase::Render);
     audioSystem = systemManager.registerSystem<AudioSystem>(SystemPhase::Audio);
     audioSystem->setAudioEngine(audio_engine.get());
     update_window_title();

@@ -23,6 +23,7 @@ namespace hades
   class PhysicsSystem;
   class PhysicsWorld;
   class Renderer;
+  class RenderSystem;
 
   class GameRuntime
   {
@@ -68,6 +69,7 @@ namespace hades
     std::shared_ptr<AudioSystem> audioSystem_;
     std::unique_ptr<PhysicsWorld> physicsWorld_;
     std::shared_ptr<PhysicsSystem> physicsSystem_;
+    std::shared_ptr<RenderSystem> renderSystem_;
     bool headless_ = false;
     bool initialized_ = false;
     bool running_ = false;

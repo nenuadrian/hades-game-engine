@@ -187,7 +187,7 @@ namespace hades
     physicsSystem_ = systemManager_.registerSystem<PhysicsSystem>(SystemPhase::Physics);
     physicsSystem_->setPhysicsWorld(physicsWorld_.get());
     systemManager_.registerSystem<MovementSystem>(SystemPhase::Logic);
-    systemManager_.registerSystem<RenderSystem>(SystemPhase::Render);
+    renderSystem_ = systemManager_.registerSystem<RenderSystem>(SystemPhase::Render);
     audioSystem_ = systemManager_.registerSystem<AudioSystem>(SystemPhase::Audio);
     audioSystem_->setAudioEngine(audioEngine_.get());
 

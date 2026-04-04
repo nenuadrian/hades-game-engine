@@ -49,7 +49,7 @@ The purpose is educational and experimental in nature to explore the intriguing 
 - Zero-IPC overhead: managed code runs in-engine via native function pointers
 - Blittable struct data exchange (no serialization)
 - Background workspace script compilation with error reporting
-- See [SCRIPTS.md](SCRIPTS.md) for details
+- See [SCRIPTING.md](SCRIPTING.md) for details
 
 **Audio**
 
