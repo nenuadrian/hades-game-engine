@@ -20,7 +20,7 @@ The purpose is educational and experimental in nature to explore the intriguing 
 
 ![scripts](assets/scripts.png)
 
-![exports](assets/exports.png)
+![export](assets/export.png)
 
 ![game](assets/game.png)
 
