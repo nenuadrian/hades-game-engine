@@ -6,17 +6,10 @@
 #include <unordered_map>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 #include "entity.hpp"
 #include "type_id.hpp"
-
-namespace nlohmann
-{
-  template <typename, typename>
-  class basic_json;
-  using json = basic_json<std::map, std::vector, std::string,
-                          bool, std::int64_t, std::uint64_t, double,
-                          std::allocator, void, void>;
-}
 
 namespace hades
 {
