@@ -17,6 +17,7 @@
 #include "../engine/core/ecs/entity_manager.hpp"
 #include "../engine/core/ecs/world_utils.hpp"
 #include "../engine/rendering/model_preview.hpp"
+#include "../engine/rendering/scene_renderer.hpp"
 #include "../engine/rendering/vector_text.hpp"
 
 namespace
@@ -519,7 +520,91 @@ namespace
     const SDL_Color modelColor{179, 189, 202, 255};
     const SDL_Color textColor{227, 233, 240, 255};
 
-    for (hades::Entity::EntityId entity : entityManager.getAllEntities())
+    // Build a RenderList using the SceneRenderer for frustum culling.
+    static hades::SceneRenderer sceneRenderer;
+    const float aspect = (height > 0) ? static_cast<float>(width) / static_cast<float>(height) : 1.0f;
+    const hades::math::Vec3 camPos = {cameraPosition.x, cameraPosition.y, cameraPosition.z};
+
+    // Compute camera forward from rotation if available.
+    hades::math::Vec3 camForward = {0.0f, 0.0f, 1.0f};
+    if (componentManager.hasComponent<hades::RotationComponent3D>(activeCamera))
+    {
+      const auto &camRot = componentManager.getComponent<hades::RotationComponent3D>(activeCamera);
+      hades::math::Quat q{camRot.qx, camRot.qy, camRot.qz, camRot.qw};
+      camForward = q.rotate({0.0f, 0.0f, 1.0f});
+    }
+
+    const hades::math::Vec3 camTarget = camPos + camForward;
+    const hades::RenderCamera renderCamera = sceneRenderer.buildCamera(
+        camPos, camTarget, camera.fovY, aspect, camera.nearClip, camera.farClip);
+    const hades::RenderList renderList = sceneRenderer.buildRenderList(
+        renderCamera, componentManager, entityManager, world);
+
+    // Render all pre-culled items from the RenderList.
+    auto renderItems = [&](const std::vector<hades::RenderItem> &items)
+    {
+      for (const auto &item : items)
+      {
+        if (item.entity == activeCamera)
+        {
+          continue;
+        }
+
+        hades::PositionComponent3D position(item.worldPosition.x, item.worldPosition.y, item.worldPosition.z);
+
+        const hades::RotationComponent3D *rotation = componentManager.hasComponent<hades::RotationComponent3D>(item.entity)
+                                                         ? &componentManager.getComponent<hades::RotationComponent3D>(item.entity)
+                                                         : nullptr;
+        const hades::ScaleComponent3D *scale = componentManager.hasComponent<hades::ScaleComponent3D>(item.entity)
+                                                   ? &componentManager.getComponent<hades::ScaleComponent3D>(item.entity)
+                                                   : nullptr;
+
+        if (item.isPrimitive)
+        {
+          if (item.primitiveType == hades::PrimitiveType::Cube)
+          {
+            draw_wire_box(
+                renderer, cameraPosition, camera, width, height, position,
+                make_vec3(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT),
+                make_vec3(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT),
+                primitiveColor, rotation, scale);
+          }
+          else if (item.primitiveType == hades::PrimitiveType::Plane)
+          {
+            draw_wire_plane(
+                renderer, cameraPosition, camera, width, height, position,
+                primitiveColor, rotation, scale);
+          }
+        }
+        else if (item.model != nullptr)
+        {
+          if (hades::preview::has_renderable_geometry(*item.model) &&
+              draw_model_mesh(
+                  renderer, cameraPosition, camera, width, height, position,
+                  *item.model, rotation, scale))
+          {
+            continue;
+          }
+
+          const Vec3 minCorner = item.model->hasBounds
+                                     ? make_vec3(item.model->minX, item.model->minY, item.model->minZ)
+                                     : make_vec3(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT);
+          const Vec3 maxCorner = item.model->hasBounds
+                                     ? make_vec3(item.model->maxX, item.model->maxY, item.model->maxZ)
+                                     : make_vec3(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT);
+          draw_wire_box(
+              renderer, cameraPosition, camera, width, height, position,
+              minCorner, maxCorner, modelColor, rotation, scale);
+        }
+      }
+    };
+
+    renderItems(renderList.opaqueItems);
+    renderItems(renderList.transparentItems);
+
+    // Text entities are not in the RenderList (they have no Model/Primitive),
+    // so iterate them separately.
+    for (hades::Entity::EntityId entity : entityManager.getActiveEntities())
     {
       if (entity == activeCamera)
       {
@@ -531,102 +616,17 @@ namespace
         continue;
       }
 
-      if (!componentManager.hasComponent<hades::PositionComponent3D>(entity))
+      if (!componentManager.hasComponent<hades::TextComponent>(entity) ||
+          !componentManager.hasComponent<hades::PositionComponent3D>(entity))
       {
         continue;
       }
 
       const auto &position = componentManager.getComponent<hades::PositionComponent3D>(entity);
-      const hades::RotationComponent3D *rotation = componentManager.hasComponent<hades::RotationComponent3D>(entity)
-                                                       ? &componentManager.getComponent<hades::RotationComponent3D>(entity)
-                                                       : nullptr;
-      const hades::ScaleComponent3D *scale = componentManager.hasComponent<hades::ScaleComponent3D>(entity)
-                                                 ? &componentManager.getComponent<hades::ScaleComponent3D>(entity)
-                                                 : nullptr;
-      if (componentManager.hasComponent<hades::PrimitiveComponent>(entity))
-      {
-        const auto &primitive = componentManager.getComponent<hades::PrimitiveComponent>(entity);
-        if (primitive.type == hades::PrimitiveType::Cube)
-        {
-          draw_wire_box(
-              renderer,
-              cameraPosition,
-              camera,
-              width,
-              height,
-              position,
-              make_vec3(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT),
-              make_vec3(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT),
-              primitiveColor,
-              rotation,
-              scale);
-        }
-        else if (primitive.type == hades::PrimitiveType::Plane)
-        {
-          draw_wire_plane(
-              renderer,
-              cameraPosition,
-              camera,
-              width,
-              height,
-              position,
-              primitiveColor,
-              rotation,
-              scale);
-        }
-      }
-
-      if (componentManager.hasComponent<hades::ModelComponent>(entity))
-      {
-        const auto *model = componentManager.getComponent<hades::ModelComponent>(entity).modelAsset.get();
-        if (model != nullptr &&
-            hades::preview::has_renderable_geometry(*model) &&
-            draw_model_mesh(
-                renderer,
-                cameraPosition,
-                camera,
-                width,
-                height,
-                position,
-                *model,
-                rotation,
-                scale))
-        {
-          continue;
-        }
-
-        const Vec3 minCorner = model->hasBounds
-                                   ? make_vec3(model->minX, model->minY, model->minZ)
-                                   : make_vec3(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT);
-        const Vec3 maxCorner = model->hasBounds
-                                   ? make_vec3(model->maxX, model->maxY, model->maxZ)
-                                   : make_vec3(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT);
-        draw_wire_box(
-            renderer,
-            cameraPosition,
-            camera,
-            width,
-            height,
-            position,
-            minCorner,
-            maxCorner,
-            modelColor,
-            rotation,
-            scale);
-      }
-
-      if (componentManager.hasComponent<hades::TextComponent>(entity))
-      {
-        draw_vector_text(
-            renderer,
-            cameraPosition,
-            camera,
-            width,
-            height,
-            position,
-            componentManager.getComponent<hades::TextComponent>(entity),
-            textColor);
-      }
+      draw_vector_text(
+          renderer, cameraPosition, camera, width, height, position,
+          componentManager.getComponent<hades::TextComponent>(entity),
+          textColor);
     }
   }
 }

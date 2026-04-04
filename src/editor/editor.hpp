@@ -21,6 +21,8 @@
 #include "script_analysis.hpp"
 #include "plugins/editor_plugin.hpp"
 #include "../engine/core/ecs/entity.hpp"
+#include "../engine/rendering/render_types.hpp"
+#include "../engine/rendering/scene_renderer.hpp"
 #include "TextEditor.h"
 
 namespace hades
@@ -217,6 +219,10 @@ namespace hades
     float sceneGizmoDragStartScaleY_ = 1.0f;
     float sceneGizmoDragStartScaleZ_ = 1.0f;
     bool pendingSavedWorldRestore_ = false;
+
+    // Render pipeline integration.
+    SceneRenderer sceneRenderer_;
+    RenderList sceneRenderList_;
 
     // Background compile state.
     std::future<BackgroundCompileTaskResult> backgroundCompileResult_;

@@ -23,6 +23,7 @@
 #include "../engine/core/ecs/world_utils.hpp"
 #include "../engine/profiling/frame_metrics.hpp"
 #include "../engine/rendering/model_preview.hpp"
+#include "../engine/rendering/scene_renderer.hpp"
 #include "../engine/rendering/vector_text.hpp"
 
 namespace hades
@@ -1736,51 +1737,31 @@ namespace hades
       }
     }
 
-    void collect_scene_lights(
-        EntityManager &entityManager,
-        ComponentManager &componentManager,
-        std::optional<Entity::EntityId> world,
+    void build_light_data_from_render_list(
+        const RenderList &renderList,
         hades::preview::LightData &outLightData)
     {
       outLightData.lights.clear();
-      outLightData.globalAmbient = 0.15f;
+      outLightData.globalAmbient = renderList.globalAmbient;
 
-      for (Entity::EntityId entity : entityManager.getAllEntities())
+      for (const auto &rl : renderList.lights)
       {
-        if (world.has_value() && !entity_belongs_to_world(entity, *world, componentManager))
-        {
-          continue;
-        }
-
-        if (!componentManager.hasComponent<LightComponent>(entity) ||
-            !componentManager.hasComponent<PositionComponent3D>(entity))
-        {
-          continue;
-        }
-
-        const auto &light = componentManager.getComponent<LightComponent>(entity);
-        if (!light.enabled)
-        {
-          continue;
-        }
-
-        const auto &pos = componentManager.getComponent<PositionComponent3D>(entity);
         hades::preview::LightData::Light l;
-        l.type = static_cast<int>(light.type);
-        l.posX = pos.x;
-        l.posY = pos.y;
-        l.posZ = pos.z;
-        l.dirX = light.directionX;
-        l.dirY = light.directionY;
-        l.dirZ = light.directionZ;
-        l.colorR = light.colorR;
-        l.colorG = light.colorG;
-        l.colorB = light.colorB;
-        l.intensity = light.intensity;
-        l.range = light.range;
-        l.innerConeAngle = light.innerConeAngle;
-        l.outerConeAngle = light.outerConeAngle;
-        l.ambientContribution = light.ambientContribution;
+        l.type = rl.type;
+        l.posX = rl.position.x;
+        l.posY = rl.position.y;
+        l.posZ = rl.position.z;
+        l.dirX = rl.direction.x;
+        l.dirY = rl.direction.y;
+        l.dirZ = rl.direction.z;
+        l.colorR = rl.colorR;
+        l.colorG = rl.colorG;
+        l.colorB = rl.colorB;
+        l.intensity = rl.intensity;
+        l.range = rl.range;
+        l.innerConeAngle = rl.innerConeAngle;
+        l.outerConeAngle = rl.outerConeAngle;
+        l.ambientContribution = rl.ambientContribution;
         outLightData.lights.push_back(l);
       }
     }
@@ -1793,6 +1774,7 @@ namespace hades
         const ImVec2 &canvasSize,
         EntityManager &entityManager,
         ComponentManager &componentManager,
+        const RenderList &renderList,
         std::optional<Entity::EntityId> world,
         std::optional<Entity::EntityId> excludedEntity,
         std::optional<Entity::EntityId> selectedEntity,
@@ -1801,7 +1783,7 @@ namespace hades
         float cameraPitch = 0.0f)
     {
       hades::preview::LightData previousLightData = sceneLightData_;
-      collect_scene_lights(entityManager, componentManager, world, sceneLightData_);
+      build_light_data_from_render_list(renderList, sceneLightData_);
       if (sceneLightData_.lights.size() != previousLightData.lights.size())
       {
         ++sceneLightGeneration_;
@@ -1910,8 +1892,10 @@ namespace hades
           const auto *model = componentManager.getComponent<ModelComponent>(entity).modelAsset.get();
           if (model != nullptr)
           {
-          const bool modelInFrustum = is_entity_potentially_visible(
-              position, sceneCamera, camera, entity_bounds_radius(*model));
+          // Frustum culling is handled by the RenderList — use the pre-computed
+          // camera frustum for a fast sphere check.
+          const bool modelInFrustum = renderList.camera.frustum.containsSphere(
+              {position.x, position.y, position.z}, entity_bounds_radius(*model));
           const bool modelDrawn = modelInFrustum &&
                                   hades::preview::has_renderable_geometry(*model) &&
                                   draw_model_mesh(
@@ -2189,6 +2173,21 @@ namespace hades
     }
 
     const CameraComponent camera = editor_scene_camera();
+
+    // Build the render list using the engine's SceneRenderer.
+    {
+      const float editorAspect = (canvasSize.y > 0.0f) ? (canvasSize.x / canvasSize.y) : 1.0f;
+      const math::Vec3 camPos = {sceneCamera.position.x, sceneCamera.position.y, sceneCamera.position.z};
+      const math::Vec3 camTarget = {
+          sceneCamera.position.x + sceneCamera.forward.x,
+          sceneCamera.position.y + sceneCamera.forward.y,
+          sceneCamera.position.z + sceneCamera.forward.z};
+      const RenderCamera renderCamera = sceneRenderer_.buildCamera(
+          camPos, camTarget, camera.fovY, editorAspect, camera.nearClip, camera.farClip);
+      sceneRenderList_ = sceneRenderer_.buildRenderList(
+          renderCamera, componentManager, entityManager, sceneWorld);
+    }
+
     const bool selectedEntityIsEditableInScene =
         !state.isPlaying &&
         state.selectedEntity.has_value() &&
@@ -2526,6 +2525,7 @@ namespace hades
           canvasSize,
           entityManager,
           componentManager,
+          sceneRenderList_,
           sceneWorld,
           std::nullopt,
           state.selectedEntity,
