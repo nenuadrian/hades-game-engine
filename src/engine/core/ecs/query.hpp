@@ -9,10 +9,10 @@
 #include "entity.hpp"
 #include "entity_manager.hpp"
 #include "type_id.hpp"
+#include "world_utils.hpp"
 
 namespace hades
 {
-  class ComponentManager;
 
   /// Build a bitset mask representing a set of component types.
   template <typename... Ts>
@@ -42,9 +42,6 @@ namespace hades
     return result;
   }
 
-  // Forward declaration for world filtering - implemented in query_world.hpp
-  // to avoid circular dependency with world_utils.hpp.
-  bool entity_belongs_to_world(Entity::EntityId entity, Entity::EntityId world, ComponentManager &componentManager);
 
   /// Return all entity IDs whose component signature includes all of Ts...,
   /// optionally filtered to a specific world.
