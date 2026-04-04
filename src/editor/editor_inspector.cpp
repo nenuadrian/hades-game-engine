@@ -405,34 +405,47 @@ namespace hades
     if (componentManager.hasComponent<ModelComponent>(entity) && ImGui::CollapsingHeader("Imported Model"))
     {
       const auto &modelComponent = componentManager.getComponent<ModelComponent>(entity);
-      const auto &model = modelComponent.model;
-
-      ImGui::TextWrapped("%s", model.sourcePath.c_str());
-      ImGui::Text("Format: %s", model.formatHint.empty() ? "Unknown" : model.formatHint.c_str());
-      ImGui::Text("Meshes: %zu", model.meshes.size());
-      ImGui::Text("Materials: %zu", model.materials.size());
-      ImGui::Text("Vertices: %zu", model.totalVertexCount);
-      ImGui::Text("Faces: %zu", model.totalFaceCount);
-
-      if (ImGui::CollapsingHeader("Mesh Details"))
+      const auto *model = modelComponent.modelAsset.get();
+      if (model == nullptr)
       {
-        for (std::size_t meshIndex = 0; meshIndex < model.meshes.size(); ++meshIndex)
+        if (modelComponent.modelAsset.is_loading())
         {
-          const auto &mesh = model.meshes[meshIndex];
-          ImGui::PushID(static_cast<int>(meshIndex));
-          ImGui::SeparatorText(mesh.name.c_str());
-          ImGui::Text("Vertices: %zu", mesh.vertexCount);
-          ImGui::Text("Faces: %zu", mesh.faceCount);
-          ImGui::Text("Material Slot: %zu", mesh.materialIndex);
-          ImGui::PopID();
+          ImGui::Text("Loading...");
+        }
+        else if (modelComponent.modelAsset.has_failed())
+        {
+          ImGui::TextWrapped("Failed: %s", modelComponent.modelAsset.error().c_str());
         }
       }
-
-      if (ImGui::CollapsingHeader("Materials"))
+      else
       {
-        for (const auto &material : model.materials)
+        ImGui::TextWrapped("%s", model->sourcePath.c_str());
+        ImGui::Text("Format: %s", model->formatHint.empty() ? "Unknown" : model->formatHint.c_str());
+        ImGui::Text("Meshes: %zu", model->meshes.size());
+        ImGui::Text("Materials: %zu", model->materials.size());
+        ImGui::Text("Vertices: %zu", model->totalVertexCount);
+        ImGui::Text("Faces: %zu", model->totalFaceCount);
+
+        if (ImGui::CollapsingHeader("Mesh Details"))
         {
-          ImGui::BulletText("%s", material.name.c_str());
+          for (std::size_t meshIndex = 0; meshIndex < model->meshes.size(); ++meshIndex)
+          {
+            const auto &mesh = model->meshes[meshIndex];
+            ImGui::PushID(static_cast<int>(meshIndex));
+            ImGui::SeparatorText(mesh.name.c_str());
+            ImGui::Text("Vertices: %zu", mesh.vertexCount);
+            ImGui::Text("Faces: %zu", mesh.faceCount);
+            ImGui::Text("Material Slot: %zu", mesh.materialIndex);
+            ImGui::PopID();
+          }
+        }
+
+        if (ImGui::CollapsingHeader("Materials"))
+        {
+          for (const auto &material : model->materials)
+          {
+            ImGui::BulletText("%s", material.name.c_str());
+          }
         }
       }
     }

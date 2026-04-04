@@ -1509,13 +1509,15 @@ namespace hades
 
         if (componentManager.hasComponent<ModelComponent>(entity))
         {
+          const auto *model = componentManager.getComponent<ModelComponent>(entity).modelAsset.get();
+          if (model != nullptr)
+          {
           hasPreviewGeometry = true;
-          const auto &model = componentManager.getComponent<ModelComponent>(entity).model;
-          const Vec3 minCorner = model.hasBounds
-                                     ? make_vec3(model.minX, model.minY, model.minZ)
+          const Vec3 minCorner = model->hasBounds
+                                     ? make_vec3(model->minX, model->minY, model->minZ)
                                      : make_vec3(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT);
-          const Vec3 maxCorner = model.hasBounds
-                                     ? make_vec3(model.maxX, model.maxY, model.maxZ)
+          const Vec3 maxCorner = model->hasBounds
+                                     ? make_vec3(model->maxX, model->maxY, model->maxZ)
                                      : make_vec3(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT);
           if (const auto rect = project_box_screen_rect(
                   box_corners(minCorner, maxCorner, position, pickRotation),
@@ -1531,6 +1533,7 @@ namespace hades
                 point_to_rect_distance_squared(mousePosition, *rect),
                 entityDepth,
                 SCENE_PICK_THRESHOLD_PIXELS * SCENE_PICK_THRESHOLD_PIXELS);
+          }
           }
         }
 
@@ -1904,11 +1907,13 @@ namespace hades
 
         if (componentManager.hasComponent<ModelComponent>(entity))
         {
-          const auto &model = componentManager.getComponent<ModelComponent>(entity).model;
+          const auto *model = componentManager.getComponent<ModelComponent>(entity).modelAsset.get();
+          if (model != nullptr)
+          {
           const bool modelInFrustum = is_entity_potentially_visible(
-              position, sceneCamera, camera, entity_bounds_radius(model));
+              position, sceneCamera, camera, entity_bounds_radius(*model));
           const bool modelDrawn = modelInFrustum &&
-                                  hades::preview::has_renderable_geometry(model) &&
+                                  hades::preview::has_renderable_geometry(*model) &&
                                   draw_model_mesh(
                                       drawList,
                                       sceneCamera,
@@ -1916,7 +1921,7 @@ namespace hades
                                       canvasOrigin,
                                       canvasSize,
                                       position,
-                                      model,
+                                      *model,
                                       &label,
                                       isSelected ? selectedLabelColor : IM_COL32(205, 210, 218, 255),
                                       entity,
@@ -1931,11 +1936,11 @@ namespace hades
             previewDrawn = true;
           }
 
-          const Vec3 minCorner = model.hasBounds
-                                     ? make_vec3(model.minX, model.minY, model.minZ)
+          const Vec3 minCorner = model->hasBounds
+                                     ? make_vec3(model->minX, model->minY, model->minZ)
                                      : make_vec3(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT);
-          const Vec3 maxCorner = model.hasBounds
-                                     ? make_vec3(model.maxX, model.maxY, model.maxZ)
+          const Vec3 maxCorner = model->hasBounds
+                                     ? make_vec3(model->maxX, model->maxY, model->maxZ)
                                      : make_vec3(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT);
 
           if ((!modelDrawn || isSelected) &&
@@ -1960,6 +1965,7 @@ namespace hades
               ++visibleRenderableCount;
             }
             previewDrawn = true;
+          }
           }
         }
 

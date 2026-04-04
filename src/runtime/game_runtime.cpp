@@ -103,6 +103,7 @@ namespace hades
 #ifndef HADES_PLATFORM_WEB
     scriptRuntime_.stop();
 #endif
+    AssetManager::instance().shutdown();
   }
 
   std::string GameRuntime::project_name() const

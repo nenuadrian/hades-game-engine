@@ -17,6 +17,7 @@
 #include "native_dialogs.hpp"
 #include "imgui.h"
 #include "imgui_impl_sdl2.h"
+#include "../engine/assets/asset_manager.hpp"
 #include "../engine/core/ecs/scene_serializer.hpp"
 #include "../engine/audio/audio_engine.hpp"
 #include "../engine/rendering/renderer.hpp"
@@ -666,6 +667,7 @@ namespace hades
   WindowManager::~WindowManager()
   {
     scriptRuntime.stop();
+    AssetManager::instance().shutdown();
   }
 
   void WindowManager::request_quit()

@@ -6,6 +6,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "../../assets/asset_manager.hpp"
 #include "../../assets/model_importer.hpp"
 #include "../../components/audio_listener_component.hpp"
 #include "../../components/audio_source_component.hpp"
@@ -336,19 +337,22 @@ namespace hades
               if (!cm.hasComponent<ModelComponent>(entity))
                 return false;
               const auto &c = cm.getComponent<ModelComponent>(entity);
+              const auto *model = c.modelAsset.get();
+              if (model == nullptr)
+                return false;
               out = {
-                  {"sourcePath", c.model.sourcePath},
-                  {"formatHint", c.model.formatHint}};
+                  {"sourcePath", model->sourcePath},
+                  {"formatHint", model->formatHint}};
               return true;
             },
             [](Entity::EntityId entity, ComponentManager &cm, const json &in, const auto &) -> bool
             {
               const std::string sourcePath = in["sourcePath"].get<std::string>();
-              auto imported = ModelImporter::importFromFile(sourcePath);
-              if (imported.has_value())
+              auto handle = AssetManager::instance().load_model_sync(sourcePath);
+              if (handle.is_ready())
               {
                 ModelComponent c;
-                c.model = std::move(*imported);
+                c.modelAsset = std::move(handle);
                 cm.addComponent(entity, c);
               }
               else

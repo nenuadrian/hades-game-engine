@@ -2,6 +2,7 @@
 
 #include <filesystem>
 
+#include "../../assets/asset_manager.hpp"
 #include "../../assets/model_importer.hpp"
 #include "../../components/audio_listener_component.hpp"
 #include "../../components/light_component.hpp"
@@ -160,15 +161,21 @@ namespace hades
       std::optional<Entity::EntityId> parent,
       std::string *errorMessage)
   {
-    const auto importedModel = ModelImporter::importFromFile(sourcePath, errorMessage);
-    if (!importedModel.has_value())
+    auto handle = AssetManager::instance().load_model_sync(sourcePath);
+    if (!handle.is_ready())
     {
+      if (errorMessage != nullptr)
+      {
+        *errorMessage = handle.has_failed() ? handle.error() : "Failed to import model.";
+      }
       return std::nullopt;
     }
 
     const std::string entityName = sourcePath.stem().string().empty() ? "Imported Model" : sourcePath.stem().string();
     const auto entity = createBaseEntity(entityManager, componentManager, entityName, parent);
-    componentManager.addComponent(entity, ModelComponent{*importedModel});
+    ModelComponent mc;
+    mc.modelAsset = std::move(handle);
+    componentManager.addComponent(entity, mc);
     return entity;
   }
 

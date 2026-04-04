@@ -191,8 +191,11 @@ namespace hades
     EXPECT_TRUE(componentManager.hasComponent<ModelComponent>(*entity));
     EXPECT_FALSE(componentManager.getComponent<TransformHierarchyComponent>(*entity).hasParent());
 
-    const auto &model = componentManager.getComponent<ModelComponent>(*entity).model;
-    EXPECT_FALSE(model.meshes.empty());
-    EXPECT_FALSE(model.materials.empty());
+    const auto &modelComponent = componentManager.getComponent<ModelComponent>(*entity);
+    ASSERT_TRUE(modelComponent.modelAsset.is_ready());
+    const auto *model = modelComponent.modelAsset.get();
+    ASSERT_NE(model, nullptr);
+    EXPECT_FALSE(model->meshes.empty());
+    EXPECT_FALSE(model->materials.empty());
   }
 }

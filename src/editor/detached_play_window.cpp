@@ -578,8 +578,9 @@ namespace
 
       if (componentManager.hasComponent<hades::ModelComponent>(entity))
       {
-        const auto &model = componentManager.getComponent<hades::ModelComponent>(entity).model;
-        if (hades::preview::has_renderable_geometry(model) &&
+        const auto *model = componentManager.getComponent<hades::ModelComponent>(entity).modelAsset.get();
+        if (model != nullptr &&
+            hades::preview::has_renderable_geometry(*model) &&
             draw_model_mesh(
                 renderer,
                 cameraPosition,
@@ -587,7 +588,7 @@ namespace
                 width,
                 height,
                 position,
-                model,
+                *model,
                 rotation,
                 scale))
         {
