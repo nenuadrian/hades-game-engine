@@ -24,10 +24,15 @@ namespace
   constexpr int PLAY_WINDOW_HEIGHT = 720;
   constexpr float PI = 3.14159265358979323846f;
   constexpr float CUBE_HALF_EXTENT = 0.5f;
+  constexpr float PLANE_HALF_EXTENT = 0.5f;
   constexpr int BOX_EDGES[12][2] = {
       {0, 1}, {1, 2}, {2, 3}, {3, 0},
       {4, 5}, {5, 6}, {6, 7}, {7, 4},
       {0, 4}, {1, 5}, {2, 6}, {3, 7},
+  };
+  constexpr int PLANE_EDGES[6][2] = {
+      {0, 1}, {1, 2}, {2, 3}, {3, 0},
+      {0, 2}, {1, 3},
   };
 
   struct Vec3
@@ -206,6 +211,54 @@ namespace
 
     bool visible = false;
     for (const auto &edge : BOX_EDGES)
+    {
+      SDL_FPoint screenStart{};
+      SDL_FPoint screenEnd{};
+      if (!project_segment(
+              corners[edge[0]],
+              corners[edge[1]],
+              cameraPosition,
+              camera,
+              width,
+              height,
+              screenStart,
+              screenEnd))
+      {
+        continue;
+      }
+
+      visible = true;
+      SDL_RenderDrawLine(
+          renderer,
+          static_cast<int>(std::lround(screenStart.x)),
+          static_cast<int>(std::lround(screenStart.y)),
+          static_cast<int>(std::lround(screenEnd.x)),
+          static_cast<int>(std::lround(screenEnd.y)));
+    }
+
+    return visible;
+  }
+
+  bool draw_wire_plane(
+      SDL_Renderer *renderer,
+      const hades::PositionComponent3D &cameraPosition,
+      const hades::CameraComponent &camera,
+      int width,
+      int height,
+      const hades::PositionComponent3D &position,
+      const SDL_Color &color)
+  {
+    Vec3 corners[4] = {
+        add_vec3(make_vec3(position), make_vec3(-PLANE_HALF_EXTENT, 0.0f, -PLANE_HALF_EXTENT)),
+        add_vec3(make_vec3(position), make_vec3(PLANE_HALF_EXTENT, 0.0f, -PLANE_HALF_EXTENT)),
+        add_vec3(make_vec3(position), make_vec3(PLANE_HALF_EXTENT, 0.0f, PLANE_HALF_EXTENT)),
+        add_vec3(make_vec3(position), make_vec3(-PLANE_HALF_EXTENT, 0.0f, PLANE_HALF_EXTENT)),
+    };
+
+    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+
+    bool visible = false;
+    for (const auto &edge : PLANE_EDGES)
     {
       SDL_FPoint screenStart{};
       SDL_FPoint screenEnd{};
@@ -444,6 +497,17 @@ namespace
               position,
               make_vec3(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT),
               make_vec3(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT),
+              primitiveColor);
+        }
+        else if (primitive.type == hades::PrimitiveType::Plane)
+        {
+          draw_wire_plane(
+              renderer,
+              cameraPosition,
+              camera,
+              width,
+              height,
+              position,
               primitiveColor);
         }
       }

@@ -1,9 +1,6 @@
 #include "editor.hpp"
 
-#include <algorithm>
-#include <array>
 #include <cmath>
-#include <cstddef>
 #include <cstdio>
 #include <filesystem>
 #include <set>
@@ -14,6 +11,7 @@
 #include "../engine/components/audio_listener_component.hpp"
 #include "../engine/components/audio_source_component.hpp"
 #include "../engine/components/camera_component.hpp"
+#include "../engine/components/light_component.hpp"
 #include "../engine/components/model_component.hpp"
 #include "../engine/components/name_component.hpp"
 #include "../engine/components/position_component_3d.hpp"
@@ -252,6 +250,54 @@ namespace hades
       if (camera.farClip <= camera.nearClip)
       {
         camera.farClip = camera.nearClip + 0.001f;
+      }
+    }
+
+    if (componentManager.hasComponent<LightComponent>(entity) && ImGui::CollapsingHeader("Light"))
+    {
+      auto &light = componentManager.getComponent<LightComponent>(entity);
+
+      int lightType = static_cast<int>(light.type);
+      const char *lightTypeLabels[] = {"Directional", "Point", "Spot"};
+      if (ImGui::Combo("Light Type", &lightType, lightTypeLabels, IM_ARRAYSIZE(lightTypeLabels)))
+      {
+        light.type = static_cast<LightType>(lightType);
+      }
+
+      ImGui::Checkbox("Enabled", &light.enabled);
+      ImGui::ColorEdit3("Color", &light.colorR);
+      ImGui::DragFloat("Intensity", &light.intensity, 0.05f, 0.0f, 10.0f);
+
+      if (light.type == LightType::Directional || light.type == LightType::Spot)
+      {
+        ImGui::DragFloat3("Direction", &light.directionX, 0.01f, -1.0f, 1.0f);
+        float len = std::sqrt(light.directionX * light.directionX +
+                              light.directionY * light.directionY +
+                              light.directionZ * light.directionZ);
+        if (len > 1e-5f)
+        {
+          light.directionX /= len;
+          light.directionY /= len;
+          light.directionZ /= len;
+        }
+      }
+
+      if (light.type == LightType::Point || light.type == LightType::Spot)
+      {
+        ImGui::DragFloat("Range", &light.range, 0.5f, 0.1f, 1000.0f);
+      }
+
+      if (light.type == LightType::Spot)
+      {
+        ImGui::DragFloat("Inner Cone Angle", &light.innerConeAngle, 0.5f, 0.0f, light.outerConeAngle);
+        ImGui::DragFloat("Outer Cone Angle", &light.outerConeAngle, 0.5f, light.innerConeAngle, 89.0f);
+      }
+
+      ImGui::DragFloat("Ambient Contribution", &light.ambientContribution, 0.01f, 0.0f, 1.0f);
+      ImGui::Checkbox("Cast Shadows", &light.castShadows);
+      if (light.castShadows)
+      {
+        ImGui::TextDisabled("Shadow casting is not yet implemented.");
       }
     }
 

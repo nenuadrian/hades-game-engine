@@ -4,6 +4,7 @@
 
 #include "../../assets/model_importer.hpp"
 #include "../../components/audio_listener_component.hpp"
+#include "../../components/light_component.hpp"
 #include "../../components/audio_source_component.hpp"
 #include "../../components/camera_component.hpp"
 #include "../../components/collider_component.hpp"
@@ -90,6 +91,16 @@ namespace hades
     return entity;
   }
 
+  Entity::EntityId EntityFactory::createPlane(
+      EntityManager &entityManager,
+      ComponentManager &componentManager,
+      std::optional<Entity::EntityId> parent)
+  {
+    const auto entity = createBaseEntity(entityManager, componentManager, "Plane", parent);
+    componentManager.addComponent(entity, PrimitiveComponent{PrimitiveType::Plane});
+    return entity;
+  }
+
   Entity::EntityId EntityFactory::createPhysicsCube(
       EntityManager &entityManager,
       ComponentManager &componentManager,
@@ -111,6 +122,46 @@ namespace hades
   {
     const auto entity = createBaseEntity(entityManager, componentManager, name, std::nullopt, false);
     componentManager.addComponent(entity, WorldComponent{isDefault});
+    return entity;
+  }
+
+  Entity::EntityId EntityFactory::createDirectionalLight(
+      EntityManager &entityManager,
+      ComponentManager &componentManager,
+      std::optional<Entity::EntityId> parent)
+  {
+    const auto entity = createBaseEntity(entityManager, componentManager, "Directional Light", parent);
+    LightComponent light;
+    light.type = LightType::Directional;
+    componentManager.addComponent(entity, light);
+    return entity;
+  }
+
+  Entity::EntityId EntityFactory::createPointLight(
+      EntityManager &entityManager,
+      ComponentManager &componentManager,
+      std::optional<Entity::EntityId> parent)
+  {
+    const auto entity = createBaseEntity(entityManager, componentManager, "Point Light", parent);
+    LightComponent light;
+    light.type = LightType::Point;
+    light.range = 10.0f;
+    componentManager.addComponent(entity, light);
+    return entity;
+  }
+
+  Entity::EntityId EntityFactory::createSpotLight(
+      EntityManager &entityManager,
+      ComponentManager &componentManager,
+      std::optional<Entity::EntityId> parent)
+  {
+    const auto entity = createBaseEntity(entityManager, componentManager, "Spot Light", parent);
+    LightComponent light;
+    light.type = LightType::Spot;
+    light.range = 10.0f;
+    light.innerConeAngle = 25.0f;
+    light.outerConeAngle = 35.0f;
+    componentManager.addComponent(entity, light);
     return entity;
   }
 

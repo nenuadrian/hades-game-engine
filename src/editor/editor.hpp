@@ -122,6 +122,13 @@ namespace hades
       bool dirty = false;
     };
 
+    // Script editor autocomplete state.
+    bool autocompleteOpen_ = false;
+    int autocompleteSelectedIndex_ = 0;
+    std::string autocompletePrefix_;
+    std::vector<std::string> autocompleteCandidates_;
+    int autocompleteWordStartColumn_ = 0;
+
     bool dockLayoutInitialized = false;
     bool openImportModelDialog = false;
     std::array<char, 512> importModelPathBuffer{};
@@ -169,6 +176,7 @@ namespace hades
 #endif
     std::array<char, 512> exportOutputPathBuffer_{};
     std::array<char, 256> exportProjectNameBuffer_{};
+    bool exportEnableHeadless_ = false;
     bool exportBuildInProgress_ = false;
     std::shared_ptr<ExportBuildState> exportBuildState_;
     std::thread exportBuildThread_;
@@ -186,6 +194,7 @@ namespace hades
     float sceneCameraDistance_ = 1.0f;
     float sceneCameraYawDegrees_ = 0.0f;
     float sceneCameraPitchDegrees_ = 0.0f;
+    SceneGizmoMode sceneGizmoMode_ = SceneGizmoMode::Translate;
     SceneGizmoAxis activeSceneGizmoAxis_ = SceneGizmoAxis::None;
     Entity::EntityId activeSceneGizmoEntity_ = Entity::INVALID;
     float sceneGizmoDragStartMouseX_ = 0.0f;
@@ -196,6 +205,10 @@ namespace hades
     float sceneGizmoAxisScreenDirectionX_ = 0.0f;
     float sceneGizmoAxisScreenDirectionY_ = 0.0f;
     float sceneGizmoPixelsPerWorldUnit_ = 1.0f;
+    float sceneGizmoDragStartRotationQx_ = 0.0f;
+    float sceneGizmoDragStartRotationQy_ = 0.0f;
+    float sceneGizmoDragStartRotationQz_ = 0.0f;
+    float sceneGizmoDragStartRotationQw_ = 1.0f;
     bool pendingSavedWorldRestore_ = false;
 
     // Background compile state.

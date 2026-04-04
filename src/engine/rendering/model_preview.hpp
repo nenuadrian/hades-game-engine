@@ -30,6 +30,27 @@ namespace hades::preview
     std::array<Vec2, 3> points{};
     float averageDepth = 0.0f;
     float shade = 0.65f;
+    float shadeR = 0.65f;
+    float shadeG = 0.65f;
+    float shadeB = 0.65f;
+  };
+
+  struct LightData
+  {
+    struct Light
+    {
+      int type = 0;
+      float posX = 0.0f, posY = 0.0f, posZ = 0.0f;
+      float dirX = 0.0f, dirY = -1.0f, dirZ = 0.0f;
+      float colorR = 1.0f, colorG = 1.0f, colorB = 1.0f;
+      float intensity = 1.0f;
+      float range = 10.0f;
+      float innerConeAngle = 25.0f, outerConeAngle = 35.0f;
+      float ambientContribution = 0.05f;
+    };
+
+    std::vector<Light> lights;
+    float globalAmbient = 0.15f;
   };
 
   inline Vec3 make_vec3(float x, float y, float z)
@@ -100,12 +121,94 @@ namespace hades::preview
     return static_cast<std::uint8_t>(std::lround(scaled));
   }
 
+  inline void compute_lit_shade(
+      const Vec3 &triangleCenter,
+      const Vec3 &triangleNormal,
+      const LightData &lightData,
+      float &outR, float &outG, float &outB)
+  {
+    float ambientR = lightData.globalAmbient;
+    float ambientG = lightData.globalAmbient;
+    float ambientB = lightData.globalAmbient;
+    float diffuseR = 0.0f;
+    float diffuseG = 0.0f;
+    float diffuseB = 0.0f;
+
+    for (const auto &light : lightData.lights)
+    {
+      float contribution = 0.0f;
+      float attenuation = 1.0f;
+
+      if (light.type == 0) // Directional
+      {
+        Vec3 lightDir = normalize_vec3(make_vec3(-light.dirX, -light.dirY, -light.dirZ));
+        contribution = std::max(0.0f, dot_vec3(triangleNormal, lightDir));
+      }
+      else if (light.type == 1) // Point
+      {
+        Vec3 lightPos = make_vec3(light.posX, light.posY, light.posZ);
+        Vec3 toLight = subtract_vec3(lightPos, triangleCenter);
+        float dist = length_vec3(toLight);
+        if (dist > light.range || dist < 1e-5f)
+        {
+          ambientR += light.ambientContribution * light.colorR;
+          ambientG += light.ambientContribution * light.colorG;
+          ambientB += light.ambientContribution * light.colorB;
+          continue;
+        }
+        Vec3 lightDir = scale_vec3(toLight, 1.0f / dist);
+        contribution = std::max(0.0f, dot_vec3(triangleNormal, lightDir));
+        float ratio = dist / light.range;
+        attenuation = 1.0f / (1.0f + ratio * ratio);
+      }
+      else if (light.type == 2) // Spot
+      {
+        Vec3 lightPos = make_vec3(light.posX, light.posY, light.posZ);
+        Vec3 toLight = subtract_vec3(lightPos, triangleCenter);
+        float dist = length_vec3(toLight);
+        if (dist > light.range || dist < 1e-5f)
+        {
+          ambientR += light.ambientContribution * light.colorR;
+          ambientG += light.ambientContribution * light.colorG;
+          ambientB += light.ambientContribution * light.colorB;
+          continue;
+        }
+        Vec3 lightDir = scale_vec3(toLight, 1.0f / dist);
+        contribution = std::max(0.0f, dot_vec3(triangleNormal, lightDir));
+        float ratio = dist / light.range;
+        attenuation = 1.0f / (1.0f + ratio * ratio);
+
+        Vec3 spotDir = normalize_vec3(make_vec3(light.dirX, light.dirY, light.dirZ));
+        Vec3 negLightDir = scale_vec3(lightDir, -1.0f);
+        float cosAngle = dot_vec3(negLightDir, spotDir);
+        float cosInner = std::cos(light.innerConeAngle * 3.14159265f / 180.0f);
+        float cosOuter = std::cos(light.outerConeAngle * 3.14159265f / 180.0f);
+        float spotFactor = std::clamp((cosAngle - cosOuter) / (cosInner - cosOuter + 1e-5f), 0.0f, 1.0f);
+        attenuation *= spotFactor;
+      }
+
+      float scaled = contribution * light.intensity * attenuation;
+      diffuseR += scaled * light.colorR;
+      diffuseG += scaled * light.colorG;
+      diffuseB += scaled * light.colorB;
+
+      ambientR += light.ambientContribution * light.colorR;
+      ambientG += light.ambientContribution * light.colorG;
+      ambientB += light.ambientContribution * light.colorB;
+    }
+
+    outR = std::clamp(ambientR + diffuseR, 0.0f, 1.0f);
+    outG = std::clamp(ambientG + diffuseG, 0.0f, 1.0f);
+    outB = std::clamp(ambientB + diffuseB, 0.0f, 1.0f);
+  }
+
   template <typename ToCameraSpace, typename ProjectToScreen>
   std::vector<ProjectedTriangle> project_model_triangles(
       const ImportedModel &model,
       const PositionComponent3D &position,
       ToCameraSpace toCameraSpace,
-      ProjectToScreen projectToScreen)
+      ProjectToScreen projectToScreen,
+      const LightData *lightData = nullptr)
   {
     std::vector<ProjectedTriangle> projectedTriangles;
     projectedTriangles.reserve(model.totalFaceCount);
@@ -118,11 +221,18 @@ namespace hades::preview
         continue;
       }
 
-      std::vector<Vec3> cameraVertices;
-      cameraVertices.reserve(mesh.vertices.size());
+      std::vector<Vec3> worldVertices;
+      worldVertices.reserve(mesh.vertices.size());
       for (const auto &vertex : mesh.vertices)
       {
-        cameraVertices.push_back(toCameraSpace(add_vec3(translation, make_vec3(vertex.x, vertex.y, vertex.z))));
+        worldVertices.push_back(add_vec3(translation, make_vec3(vertex.x, vertex.y, vertex.z)));
+      }
+
+      std::vector<Vec3> cameraVertices;
+      cameraVertices.reserve(mesh.vertices.size());
+      for (const auto &worldVertex : worldVertices)
+      {
+        cameraVertices.push_back(toCameraSpace(worldVertex));
       }
 
       for (const auto &triangle : mesh.triangles)
@@ -156,12 +266,14 @@ namespace hades::preview
                 cameraPoints[2]),
             1.0f / 3.0f);
 
+        bool flipped = false;
         if (dot_vec3(normal, center) > 0.0f)
         {
           std::swap(indices[1], indices[2]);
           cameraPoints[1] = cameraVertices[indices[1]];
           cameraPoints[2] = cameraVertices[indices[2]];
           normal = scale_vec3(normal, -1.0f);
+          flipped = true;
         }
 
         ProjectedTriangle projectedTriangle;
@@ -185,9 +297,38 @@ namespace hades::preview
           continue;
         }
 
-        const Vec3 normalizedNormal = normalize_vec3(normal);
         projectedTriangle.averageDepth = depthSum / 3.0f;
-        projectedTriangle.shade = std::clamp(0.25f + ((-normalizedNormal.z) * 0.75f), 0.18f, 1.0f);
+
+        if (lightData != nullptr && !lightData->lights.empty())
+        {
+          Vec3 worldNormal = cross_vec3(
+              subtract_vec3(worldVertices[indices[1]], worldVertices[indices[0]]),
+              subtract_vec3(worldVertices[indices[2]], worldVertices[indices[0]]));
+          if (flipped)
+          {
+            worldNormal = scale_vec3(worldNormal, -1.0f);
+          }
+          worldNormal = normalize_vec3(worldNormal);
+
+          Vec3 worldCenter = scale_vec3(
+              add_vec3(
+                  add_vec3(worldVertices[indices[0]], worldVertices[indices[1]]),
+                  worldVertices[indices[2]]),
+              1.0f / 3.0f);
+
+          compute_lit_shade(worldCenter, worldNormal, *lightData,
+                            projectedTriangle.shadeR, projectedTriangle.shadeG, projectedTriangle.shadeB);
+          projectedTriangle.shade = (projectedTriangle.shadeR + projectedTriangle.shadeG + projectedTriangle.shadeB) / 3.0f;
+        }
+        else
+        {
+          const Vec3 normalizedNormal = normalize_vec3(normal);
+          projectedTriangle.shade = std::clamp(0.25f + ((-normalizedNormal.z) * 0.75f), 0.18f, 1.0f);
+          projectedTriangle.shadeR = projectedTriangle.shade;
+          projectedTriangle.shadeG = projectedTriangle.shade;
+          projectedTriangle.shadeB = projectedTriangle.shade;
+        }
+
         projectedTriangles.push_back(projectedTriangle);
       }
     }

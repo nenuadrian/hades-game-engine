@@ -128,7 +128,8 @@ namespace
       const std::filesystem::path &outputDir,
       const std::filesystem::path &workspacePath,
       const std::string &projectName,
-      hades::Editor::ExportPlatform platform)
+      hades::Editor::ExportPlatform platform,
+      bool enableHeadless)
   {
     const std::string sourceDir = hades::build_config::cmake_source_dir;
     const std::string cmakeCommand = hades::build_config::cmake_command;
@@ -307,6 +308,27 @@ namespace
         }
       }
 
+      // Create a headless launcher script if enabled.
+      if (enableHeadless)
+      {
+        const std::filesystem::path headlessPath = stageDir / ("Run " + projectName + " Headless.command");
+        FILE *headless = std::fopen(headlessPath.string().c_str(), "w");
+        if (headless != nullptr)
+        {
+          std::fprintf(headless,
+                       "#!/bin/bash\n"
+                       "cd \"$(dirname \"$0\")/%s.app/Contents/MacOS\"\n"
+                       "./%s --project . --headless\n",
+                       projectName.c_str(), binaryName.c_str());
+          std::fclose(headless);
+          std::filesystem::permissions(headlessPath,
+                                       std::filesystem::perms::owner_exec |
+                                           std::filesystem::perms::group_exec,
+                                       std::filesystem::perm_options::add, ec);
+        }
+        append_log(*state, "Created headless launcher script.\n");
+      }
+
       append_log(*state, "Created macOS app bundle: " + appBundle.string() + "\n");
     }
     else
@@ -380,6 +402,21 @@ namespace
           std::fclose(launcher);
         }
       }
+      if (enableHeadless)
+      {
+        const std::filesystem::path headlessPath = stageDir / (projectName + "_headless.bat");
+        FILE *headless = std::fopen(headlessPath.string().c_str(), "w");
+        if (headless != nullptr)
+        {
+          std::fprintf(headless,
+                       "@echo off\r\n"
+                       "cd /d \"%%~dp0\"\r\n"
+                       "%s --project . --headless\r\n",
+                       binaryName.c_str());
+          std::fclose(headless);
+        }
+        append_log(*state, "Created headless launcher script.\n");
+      }
 #else
       {
         const std::filesystem::path launcherPath = stageDir / ("run_" + projectName + ".sh");
@@ -397,6 +434,25 @@ namespace
                                            std::filesystem::perms::group_exec,
                                        std::filesystem::perm_options::add, ec);
         }
+      }
+      if (enableHeadless)
+      {
+        const std::filesystem::path headlessPath = stageDir / ("run_" + projectName + "_headless.sh");
+        FILE *headless = std::fopen(headlessPath.string().c_str(), "w");
+        if (headless != nullptr)
+        {
+          std::fprintf(headless,
+                       "#!/bin/bash\n"
+                       "cd \"$(dirname \"$0\")\"\n"
+                       "./%s --project . --headless\n",
+                       binaryName.c_str());
+          std::fclose(headless);
+          std::filesystem::permissions(headlessPath,
+                                       std::filesystem::perms::owner_exec |
+                                           std::filesystem::perms::group_exec,
+                                       std::filesystem::perm_options::add, ec);
+        }
+        append_log(*state, "Created headless launcher script.\n");
       }
 #endif
 
@@ -524,6 +580,18 @@ namespace hades
     ImGui::Separator();
     ImGui::Spacing();
 
+    // --- Headless mode ---
+    ImGui::Checkbox("Enable headless mode (--headless)", &exportEnableHeadless_);
+    if (ImGui::IsItemHovered())
+    {
+      ImGui::SetTooltip("When enabled, the exported game accepts --headless to run\n"
+                         "without a window or rendering (e.g. for ML training).");
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
     // --- Build & Export button ---
     const bool hasProjectName = exportProjectNameBuffer_[0] != '\0';
     const bool hasOutputPath = exportOutputPathBuffer_[0] != '\0';
@@ -550,6 +618,7 @@ namespace hades
       const std::filesystem::path workspacePath = activeWorkspacePath_;
       const std::string projectName = exportProjectNameBuffer_.data();
       const ExportPlatform platform = selectedExportPlatform_;
+      const bool enableHeadless = exportEnableHeadless_;
 
       auto buildState = exportBuildState_;
       if (exportBuildThread_.joinable())
@@ -557,9 +626,9 @@ namespace hades
         exportBuildThread_.join();
       }
       exportBuildThread_ = std::thread(
-          [buildState, outputDir, workspacePath, projectName, platform]()
+          [buildState, outputDir, workspacePath, projectName, platform, enableHeadless]()
           {
-            run_export_build(buildState, outputDir, workspacePath, projectName, platform);
+            run_export_build(buildState, outputDir, workspacePath, projectName, platform, enableHeadless);
           });
     }
     if (!canBuild)

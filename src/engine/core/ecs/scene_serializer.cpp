@@ -16,6 +16,7 @@
 #include "../../components/audio_source_component.hpp"
 #include "../../components/camera_component.hpp"
 #include "../../components/collider_component.hpp"
+#include "../../components/light_component.hpp"
 #include "../../components/model_component.hpp"
 #include "../../components/name_component.hpp"
 #include "../../components/position_component_3d.hpp"
@@ -227,6 +228,26 @@ namespace hades
             {"capsuleRadius", c.capsuleRadius}};
       }
 
+      if (componentManager.hasComponent<LightComponent>(entity))
+      {
+        const auto &c = componentManager.getComponent<LightComponent>(entity);
+        components["light"] = {
+            {"type", static_cast<int>(c.type)},
+            {"colorR", c.colorR},
+            {"colorG", c.colorG},
+            {"colorB", c.colorB},
+            {"intensity", c.intensity},
+            {"range", c.range},
+            {"directionX", c.directionX},
+            {"directionY", c.directionY},
+            {"directionZ", c.directionZ},
+            {"innerConeAngle", c.innerConeAngle},
+            {"outerConeAngle", c.outerConeAngle},
+            {"ambientContribution", c.ambientContribution},
+            {"castShadows", c.castShadows},
+            {"enabled", c.enabled}};
+      }
+
       j["components"] = components;
       return j;
     }
@@ -423,6 +444,27 @@ namespace hades
         c.radius = col["radius"].get<float>();
         c.capsuleHalfHeight = col["capsuleHalfHeight"].get<float>();
         c.capsuleRadius = col["capsuleRadius"].get<float>();
+        componentManager.addComponent(newEntity, c);
+      }
+
+      if (components.contains("light"))
+      {
+        const auto &l = components["light"];
+        LightComponent c;
+        c.type = static_cast<LightType>(l["type"].get<int>());
+        c.colorR = l["colorR"].get<float>();
+        c.colorG = l["colorG"].get<float>();
+        c.colorB = l["colorB"].get<float>();
+        c.intensity = l["intensity"].get<float>();
+        c.range = l["range"].get<float>();
+        c.directionX = l["directionX"].get<float>();
+        c.directionY = l["directionY"].get<float>();
+        c.directionZ = l["directionZ"].get<float>();
+        c.innerConeAngle = l["innerConeAngle"].get<float>();
+        c.outerConeAngle = l["outerConeAngle"].get<float>();
+        c.ambientContribution = l["ambientContribution"].get<float>();
+        c.castShadows = l["castShadows"].get<bool>();
+        c.enabled = l["enabled"].get<bool>();
         componentManager.addComponent(newEntity, c);
       }
     }

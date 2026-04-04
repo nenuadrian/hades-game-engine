@@ -26,6 +26,10 @@ namespace hades
     Text,
     AudioEmitter,
     PhysicsCube,
+    Plane,
+    DirectionalLight,
+    PointLight,
+    SpotLight,
   };
 
   enum class EditorPlayAction
@@ -33,6 +37,12 @@ namespace hades
     None,
     Start,
     Stop,
+  };
+
+  enum class SceneGizmoMode
+  {
+    Translate,
+    Rotate,
   };
 
   enum class SceneGizmoAxis

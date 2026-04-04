@@ -9,9 +9,11 @@
 
 #include "imgui.h"
 #include "../engine/components/camera_component.hpp"
+#include "../engine/components/light_component.hpp"
 #include "../engine/components/model_component.hpp"
 #include "../engine/components/name_component.hpp"
 #include "../engine/components/position_component_3d.hpp"
+#include "../engine/components/rotation_component_3d.hpp"
 #include "../engine/components/primitive_component.hpp"
 #include "../engine/components/text_component.hpp"
 #include "../engine/components/world_component.hpp"
@@ -53,6 +55,8 @@ namespace hades
     constexpr float SCENE_GIZMO_HIT_THRESHOLD_PIXELS = 10.0f;
     constexpr float SCENE_GIZMO_MIN_SCREEN_LENGTH_PIXELS = 18.0f;
     constexpr float SCENE_GIZMO_ARROW_SIZE = 8.0f;
+    constexpr int SCENE_GIZMO_RING_SEGMENTS = 64;
+    constexpr float SCENE_GIZMO_RING_HIT_THRESHOLD_PIXELS = 8.0f;
     constexpr int BOX_EDGES[12][2] = {
         {0, 1}, {1, 2}, {2, 3}, {3, 0},
         {4, 5}, {5, 6}, {6, 7}, {7, 4},
@@ -109,6 +113,11 @@ namespace hades
           componentManager.getComponent<CameraComponent>(entity).isMainCamera)
       {
         name += " [Main]";
+      }
+
+      if (componentManager.hasComponent<LightComponent>(entity))
+      {
+        name += " [Light]";
       }
 
       if (componentManager.hasComponent<WorldComponent>(entity))
@@ -547,6 +556,7 @@ namespace hades
       float canvasW, canvasH;
       float posX, posY, posZ;
       const void *modelPtr;
+      std::uint64_t lightGeneration = 0;
 
       bool operator==(const ModelProjectionCacheKey &other) const
       {
@@ -554,7 +564,7 @@ namespace hades
                cameraDistance == other.cameraDistance && cameraYaw == other.cameraYaw &&
                cameraPitch == other.cameraPitch && canvasW == other.canvasW && canvasH == other.canvasH &&
                posX == other.posX && posY == other.posY && posZ == other.posZ &&
-               modelPtr == other.modelPtr;
+               modelPtr == other.modelPtr && lightGeneration == other.lightGeneration;
       }
     };
 
@@ -565,6 +575,9 @@ namespace hades
     };
 
     std::unordered_map<Entity::EntityId, ModelProjectionCacheEntry> modelProjectionCache_;
+
+    std::uint64_t sceneLightGeneration_ = 0;
+    hades::preview::LightData sceneLightData_;
 
     const std::vector<hades::preview::ProjectedTriangle> &get_or_project_model(
         Entity::EntityId entity,
@@ -583,7 +596,8 @@ namespace hades
           cameraDistance, cameraYaw, cameraPitch,
           canvasSize.x, canvasSize.y,
           position.x, position.y, position.z,
-          static_cast<const void *>(&model)};
+          static_cast<const void *>(&model),
+          sceneLightGeneration_};
 
       auto &entry = modelProjectionCache_[entity];
       if (entry.key == key)
@@ -592,6 +606,7 @@ namespace hades
       }
 
       entry.key = key;
+      const hades::preview::LightData *lightPtr = sceneLightData_.lights.empty() ? nullptr : &sceneLightData_;
       entry.triangles = hades::preview::project_model_triangles(
           model,
           position,
@@ -615,7 +630,8 @@ namespace hades
             screenPoint.x = projectedPoint.x;
             screenPoint.y = projectedPoint.y;
             return true;
-          });
+          },
+          lightPtr);
 
       return entry.triangles;
     }
@@ -652,16 +668,18 @@ namespace hades
             ImVec2(triangle.points[0].x, triangle.points[0].y),
             ImVec2(triangle.points[1].x, triangle.points[1].y),
             ImVec2(triangle.points[2].x, triangle.points[2].y)};
-        drawList->AddConvexPolyFilled(
-            points,
-            3,
-            shaded_preview_color(182, 194, 208, triangle.shade, 230));
-        drawList->AddPolyline(
-            points,
-            3,
-            shaded_preview_color(227, 232, 238, std::min(triangle.shade + 0.1f, 1.0f), 255),
-            ImDrawFlags_Closed,
-            1.0f);
+        const ImU32 fillColor = IM_COL32(
+            hades::preview::scale_color_channel(182, triangle.shadeR),
+            hades::preview::scale_color_channel(194, triangle.shadeG),
+            hades::preview::scale_color_channel(208, triangle.shadeB),
+            230);
+        drawList->AddConvexPolyFilled(points, 3, fillColor);
+        const ImU32 wireColor = IM_COL32(
+            hades::preview::scale_color_channel(227, std::min(triangle.shadeR + 0.1f, 1.0f)),
+            hades::preview::scale_color_channel(232, std::min(triangle.shadeG + 0.1f, 1.0f)),
+            hades::preview::scale_color_channel(238, std::min(triangle.shadeB + 0.1f, 1.0f)),
+            255);
+        drawList->AddPolyline(points, 3, wireColor, ImDrawFlags_Closed, 1.0f);
       }
 
       if (label != nullptr)
@@ -1201,6 +1219,144 @@ namespace hades
       }
     }
 
+    void draw_rotation_gizmo(
+        ImDrawList *drawList,
+        const PositionComponent3D &position,
+        const EditorSceneViewCamera &sceneCamera,
+        const CameraComponent &camera,
+        const ImVec2 &canvasOrigin,
+        const ImVec2 &canvasSize,
+        SceneGizmoAxis highlightedAxis)
+    {
+      const float ringRadius = scene_gizmo_axis_length(position, sceneCamera);
+      const Vec3 origin = make_vec3(position);
+
+      struct RingDef
+      {
+        SceneGizmoAxis axis;
+        Vec3 basisA;
+        Vec3 basisB;
+      };
+
+      const RingDef rings[3] = {
+          {SceneGizmoAxis::X, make_vec3(0, 1, 0), make_vec3(0, 0, 1)},
+          {SceneGizmoAxis::Y, make_vec3(1, 0, 0), make_vec3(0, 0, 1)},
+          {SceneGizmoAxis::Z, make_vec3(1, 0, 0), make_vec3(0, 1, 0)},
+      };
+
+      for (const RingDef &ring : rings)
+      {
+        const bool highlighted = ring.axis == highlightedAxis;
+        const ImU32 color = gizmo_axis_color(ring.axis, highlighted);
+        const float thickness = highlighted ? 3.0f : 2.0f;
+
+        ImVec2 prevScreen{};
+        bool prevValid = false;
+
+        for (int i = 0; i <= SCENE_GIZMO_RING_SEGMENTS; ++i)
+        {
+          const float angle = (static_cast<float>(i) / static_cast<float>(SCENE_GIZMO_RING_SEGMENTS)) * 2.0f * PI;
+          const float cosA = std::cos(angle);
+          const float sinA = std::sin(angle);
+          const Vec3 point = add_vec3(
+              origin,
+              add_vec3(
+                  scale_vec3(ring.basisA, cosA * ringRadius),
+                  scale_vec3(ring.basisB, sinA * ringRadius)));
+
+          ImVec2 screenPoint;
+          if (!project_point(point, sceneCamera, camera, canvasOrigin, canvasSize, screenPoint))
+          {
+            prevValid = false;
+            continue;
+          }
+
+          if (prevValid)
+          {
+            drawList->AddLine(prevScreen, screenPoint, color, thickness);
+          }
+
+          prevScreen = screenPoint;
+          prevValid = true;
+        }
+      }
+
+      ImVec2 originScreen;
+      if (project_point(origin, sceneCamera, camera, canvasOrigin, canvasSize, originScreen))
+      {
+        drawList->AddCircleFilled(originScreen, 4.5f, IM_COL32(246, 247, 250, 255), 16);
+        drawList->AddCircle(originScreen, 4.5f, IM_COL32(36, 39, 45, 255), 16, 1.5f);
+      }
+    }
+
+    SceneGizmoAxis hit_test_rotation_gizmo(
+        const PositionComponent3D &position,
+        const EditorSceneViewCamera &sceneCamera,
+        const CameraComponent &camera,
+        const ImVec2 &canvasOrigin,
+        const ImVec2 &canvasSize,
+        const ImVec2 &mousePosition)
+    {
+      const float ringRadius = scene_gizmo_axis_length(position, sceneCamera);
+      const Vec3 origin = make_vec3(position);
+
+      struct RingDef
+      {
+        SceneGizmoAxis axis;
+        Vec3 basisA;
+        Vec3 basisB;
+      };
+
+      const RingDef rings[3] = {
+          {SceneGizmoAxis::X, make_vec3(0, 1, 0), make_vec3(0, 0, 1)},
+          {SceneGizmoAxis::Y, make_vec3(1, 0, 0), make_vec3(0, 0, 1)},
+          {SceneGizmoAxis::Z, make_vec3(1, 0, 0), make_vec3(0, 1, 0)},
+      };
+
+      SceneGizmoAxis bestAxis = SceneGizmoAxis::None;
+      float bestDistSq = SCENE_GIZMO_RING_HIT_THRESHOLD_PIXELS * SCENE_GIZMO_RING_HIT_THRESHOLD_PIXELS;
+
+      for (const RingDef &ring : rings)
+      {
+        ImVec2 prevScreen{};
+        bool prevValid = false;
+
+        for (int i = 0; i <= SCENE_GIZMO_RING_SEGMENTS; ++i)
+        {
+          const float angle = (static_cast<float>(i) / static_cast<float>(SCENE_GIZMO_RING_SEGMENTS)) * 2.0f * PI;
+          const float cosA = std::cos(angle);
+          const float sinA = std::sin(angle);
+          const Vec3 point = add_vec3(
+              origin,
+              add_vec3(
+                  scale_vec3(ring.basisA, cosA * ringRadius),
+                  scale_vec3(ring.basisB, sinA * ringRadius)));
+
+          ImVec2 screenPoint;
+          if (!project_point(point, sceneCamera, camera, canvasOrigin, canvasSize, screenPoint))
+          {
+            prevValid = false;
+            continue;
+          }
+
+          if (prevValid)
+          {
+            const float distSq = point_to_segment_distance_squared(mousePosition, prevScreen, screenPoint);
+            if (distSq < bestDistSq)
+            {
+              bestDistSq = distSq;
+              bestAxis = ring.axis;
+            }
+          }
+
+          prevScreen = screenPoint;
+          prevValid = true;
+        }
+      }
+
+      return bestAxis;
+    }
+
     SceneHitCandidate pick_entity_in_scene(
         const EditorSceneViewCamera &sceneCamera,
         const CameraComponent &camera,
@@ -1434,6 +1590,103 @@ namespace hades
       return hitCandidate;
     }
 
+    void draw_light_gizmo(
+        ImDrawList *drawList,
+        const EditorSceneViewCamera &sceneCamera,
+        const CameraComponent &camera,
+        const ImVec2 &canvasOrigin,
+        const ImVec2 &canvasSize,
+        const PositionComponent3D &position,
+        const LightComponent &light,
+        bool isSelected)
+    {
+      ImVec2 centerPoint;
+      if (!project_point(make_vec3(position), sceneCamera, camera, canvasOrigin, canvasSize, centerPoint))
+      {
+        return;
+      }
+
+      const ImU32 lightColor = isSelected
+                                   ? IM_COL32(255, 235, 120, 255)
+                                   : IM_COL32(255, 210, 80, 240);
+      const float outerRadius = isSelected ? 10.0f : 7.0f;
+
+      drawList->AddCircleFilled(centerPoint, outerRadius * 0.6f, lightColor, 16);
+      drawList->AddCircle(centerPoint, outerRadius, lightColor, 16, 1.5f);
+
+      if (light.type == LightType::Directional || light.type == LightType::Spot)
+      {
+        constexpr float rayLength = 14.0f;
+        constexpr int rayCount = 8;
+        for (int i = 0; i < rayCount; ++i)
+        {
+          float angle = static_cast<float>(i) * (2.0f * PI / static_cast<float>(rayCount));
+          float cosA = std::cos(angle);
+          float sinA = std::sin(angle);
+          ImVec2 rayStart(centerPoint.x + cosA * (outerRadius + 2.0f),
+                          centerPoint.y + sinA * (outerRadius + 2.0f));
+          ImVec2 rayEnd(centerPoint.x + cosA * rayLength,
+                        centerPoint.y + sinA * rayLength);
+          drawList->AddLine(rayStart, rayEnd, lightColor, 1.0f);
+        }
+      }
+
+      if (light.type == LightType::Point)
+      {
+        const float rangeRadius = outerRadius + 4.0f;
+        drawList->AddCircle(centerPoint, rangeRadius, IM_COL32(255, 210, 80, 100), 24, 1.0f);
+      }
+    }
+
+    void collect_scene_lights(
+        EntityManager &entityManager,
+        ComponentManager &componentManager,
+        std::optional<Entity::EntityId> world,
+        hades::preview::LightData &outLightData)
+    {
+      outLightData.lights.clear();
+      outLightData.globalAmbient = 0.15f;
+
+      for (Entity::EntityId entity : entityManager.getAllEntities())
+      {
+        if (world.has_value() && !entity_belongs_to_world(entity, *world, componentManager))
+        {
+          continue;
+        }
+
+        if (!componentManager.hasComponent<LightComponent>(entity) ||
+            !componentManager.hasComponent<PositionComponent3D>(entity))
+        {
+          continue;
+        }
+
+        const auto &light = componentManager.getComponent<LightComponent>(entity);
+        if (!light.enabled)
+        {
+          continue;
+        }
+
+        const auto &pos = componentManager.getComponent<PositionComponent3D>(entity);
+        hades::preview::LightData::Light l;
+        l.type = static_cast<int>(light.type);
+        l.posX = pos.x;
+        l.posY = pos.y;
+        l.posZ = pos.z;
+        l.dirX = light.directionX;
+        l.dirY = light.directionY;
+        l.dirZ = light.directionZ;
+        l.colorR = light.colorR;
+        l.colorG = light.colorG;
+        l.colorB = light.colorB;
+        l.intensity = light.intensity;
+        l.range = light.range;
+        l.innerConeAngle = light.innerConeAngle;
+        l.outerConeAngle = light.outerConeAngle;
+        l.ambientContribution = light.ambientContribution;
+        outLightData.lights.push_back(l);
+      }
+    }
+
     int draw_world_preview(
         ImDrawList *drawList,
         const EditorSceneViewCamera &sceneCamera,
@@ -1449,6 +1702,31 @@ namespace hades
         float cameraYaw = 0.0f,
         float cameraPitch = 0.0f)
     {
+      hades::preview::LightData previousLightData = sceneLightData_;
+      collect_scene_lights(entityManager, componentManager, world, sceneLightData_);
+      if (sceneLightData_.lights.size() != previousLightData.lights.size())
+      {
+        ++sceneLightGeneration_;
+      }
+      else
+      {
+        for (std::size_t i = 0; i < sceneLightData_.lights.size(); ++i)
+        {
+          const auto &a = sceneLightData_.lights[i];
+          const auto &b = previousLightData.lights[i];
+          if (a.posX != b.posX || a.posY != b.posY || a.posZ != b.posZ ||
+              a.dirX != b.dirX || a.dirY != b.dirY || a.dirZ != b.dirZ ||
+              a.colorR != b.colorR || a.colorG != b.colorG || a.colorB != b.colorB ||
+              a.intensity != b.intensity || a.range != b.range ||
+              a.type != b.type || a.innerConeAngle != b.innerConeAngle ||
+              a.outerConeAngle != b.outerConeAngle || a.ambientContribution != b.ambientContribution)
+          {
+            ++sceneLightGeneration_;
+            break;
+          }
+        }
+      }
+
       int visibleRenderableCount = 0;
       for (Entity::EntityId entity : entityManager.getAllEntities())
       {
@@ -1597,6 +1875,14 @@ namespace hades
           }
         }
 
+        if (componentManager.hasComponent<LightComponent>(entity))
+        {
+          const auto &light = componentManager.getComponent<LightComponent>(entity);
+          draw_light_gizmo(drawList, sceneCamera, camera, canvasOrigin, canvasSize, position, light, isSelected);
+          ++visibleRenderableCount;
+          previewDrawn = true;
+        }
+
         ImVec2 screenPoint;
         if (project_point(make_vec3(position), sceneCamera, camera, canvasOrigin, canvasSize, screenPoint) &&
             (!previewDrawn || isSelected || componentManager.hasComponent<CameraComponent>(entity)))
@@ -1653,6 +1939,41 @@ namespace hades
     {
       ImGui::End();
       return;
+    }
+
+    {
+      const bool translateActive = sceneGizmoMode_ == SceneGizmoMode::Translate;
+      const bool rotateActive = sceneGizmoMode_ == SceneGizmoMode::Rotate;
+
+      if (translateActive)
+      {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.26f, 0.59f, 0.98f, 0.60f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.26f, 0.59f, 0.98f, 0.80f));
+      }
+      if (ImGui::SmallButton("Move"))
+      {
+        sceneGizmoMode_ = SceneGizmoMode::Translate;
+      }
+      if (translateActive)
+      {
+        ImGui::PopStyleColor(2);
+      }
+
+      ImGui::SameLine();
+
+      if (rotateActive)
+      {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.26f, 0.59f, 0.98f, 0.60f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.26f, 0.59f, 0.98f, 0.80f));
+      }
+      if (ImGui::SmallButton("Rotate"))
+      {
+        sceneGizmoMode_ = SceneGizmoMode::Rotate;
+      }
+      if (rotateActive)
+      {
+        ImGui::PopStyleColor(2);
+      }
     }
 
     ImGui::Spacing();
@@ -1769,7 +2090,8 @@ namespace hades
         activeSceneGizmoAxis_ = SceneGizmoAxis::None;
         activeSceneGizmoEntity_ = Entity::INVALID;
       }
-      else if (componentManager.hasComponent<PositionComponent3D>(activeSceneGizmoEntity_))
+      else if (sceneGizmoMode_ == SceneGizmoMode::Translate &&
+               componentManager.hasComponent<PositionComponent3D>(activeSceneGizmoEntity_))
       {
         auto &position = componentManager.getComponent<PositionComponent3D>(activeSceneGizmoEntity_);
         const float mouseDeltaAlongAxis =
@@ -1798,6 +2120,60 @@ namespace hades
           break;
         }
       }
+      else if (sceneGizmoMode_ == SceneGizmoMode::Rotate &&
+               componentManager.hasComponent<RotationComponent3D>(activeSceneGizmoEntity_))
+      {
+        const float mouseDeltaX = io.MousePos.x - sceneGizmoDragStartMouseX_;
+        const float mouseDeltaY = io.MousePos.y - sceneGizmoDragStartMouseY_;
+        const float dragPixels = mouseDeltaX + mouseDeltaY;
+        const float rotationAngle = dragPixels * 0.01f;
+
+        float ax = 0.0f;
+        float ay = 0.0f;
+        float az = 0.0f;
+        switch (activeSceneGizmoAxis_)
+        {
+        case SceneGizmoAxis::X:
+          ax = 1.0f;
+          break;
+        case SceneGizmoAxis::Y:
+          ay = 1.0f;
+          break;
+        case SceneGizmoAxis::Z:
+          az = 1.0f;
+          break;
+        case SceneGizmoAxis::None:
+          break;
+        }
+
+        const float halfAngle = rotationAngle * 0.5f;
+        const float sinHalf = std::sin(halfAngle);
+        const float cosHalf = std::cos(halfAngle);
+        const float dqx = ax * sinHalf;
+        const float dqy = ay * sinHalf;
+        const float dqz = az * sinHalf;
+        const float dqw = cosHalf;
+
+        auto &rot = componentManager.getComponent<RotationComponent3D>(activeSceneGizmoEntity_);
+        const float sq = sceneGizmoDragStartRotationQx_;
+        const float sy = sceneGizmoDragStartRotationQy_;
+        const float sz = sceneGizmoDragStartRotationQz_;
+        const float sw = sceneGizmoDragStartRotationQw_;
+        rot.qx = (dqw * sq) + (dqx * sw) + (dqy * sz) - (dqz * sy);
+        rot.qy = (dqw * sy) - (dqx * sz) + (dqy * sw) + (dqz * sq);
+        rot.qz = (dqw * sz) + (dqx * sy) - (dqy * sq) + (dqz * sw);
+        rot.qw = (dqw * sw) - (dqx * sq) - (dqy * sy) - (dqz * sz);
+
+        const float qlen = std::sqrt(
+            (rot.qx * rot.qx) + (rot.qy * rot.qy) + (rot.qz * rot.qz) + (rot.qw * rot.qw));
+        if (qlen > 1e-5f)
+        {
+          rot.qx /= qlen;
+          rot.qy /= qlen;
+          rot.qz /= qlen;
+          rot.qw /= qlen;
+        }
+      }
     }
 
     std::array<SceneGizmoAxisProjection, 3> gizmoAxes{};
@@ -1811,36 +2187,71 @@ namespace hades
           canvasSize);
     }
 
-    const SceneGizmoAxis hoveredGizmoAxis =
-        selectedEntityIsEditableInScene && sceneCanvasHovered && !rotateModifierDown
-            ? hit_test_gizmo_axes(gizmoAxes, io.MousePos)
-            : SceneGizmoAxis::None;
+    SceneGizmoAxis hoveredGizmoAxis = SceneGizmoAxis::None;
+    if (selectedEntityIsEditableInScene && sceneCanvasHovered && !rotateModifierDown)
+    {
+      if (sceneGizmoMode_ == SceneGizmoMode::Translate)
+      {
+        hoveredGizmoAxis = hit_test_gizmo_axes(gizmoAxes, io.MousePos);
+      }
+      else if (sceneGizmoMode_ == SceneGizmoMode::Rotate)
+      {
+        hoveredGizmoAxis = hit_test_rotation_gizmo(
+            componentManager.getComponent<PositionComponent3D>(*state.selectedEntity),
+            sceneCamera,
+            camera,
+            canvasOrigin,
+            canvasSize,
+            io.MousePos);
+      }
+    }
 
     if (sceneCanvasHovered && !rotateModifierDown && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
     {
       bool handledClick = false;
 
-      if (selectedEntityIsEditableInScene && hoveredGizmoAxis != SceneGizmoAxis::None)
+      if (selectedEntityIsEditableInScene && hoveredGizmoAxis != SceneGizmoAxis::None &&
+          state.selectedEntity.has_value())
       {
-        const SceneGizmoAxisProjection *projection = find_gizmo_axis_projection(gizmoAxes, hoveredGizmoAxis);
-        if (projection != nullptr && projection->visible && state.selectedEntity.has_value())
+        if (sceneGizmoMode_ == SceneGizmoMode::Translate)
         {
-          const float axisScreenLength = std::sqrt(squared_distance(projection->originScreen, projection->endScreen));
-          if (axisScreenLength > 1e-5f)
+          const SceneGizmoAxisProjection *projection = find_gizmo_axis_projection(gizmoAxes, hoveredGizmoAxis);
+          if (projection != nullptr && projection->visible)
           {
-            const auto &position = componentManager.getComponent<PositionComponent3D>(*state.selectedEntity);
-            activeSceneGizmoAxis_ = hoveredGizmoAxis;
-            activeSceneGizmoEntity_ = *state.selectedEntity;
-            sceneGizmoDragStartMouseX_ = io.MousePos.x;
-            sceneGizmoDragStartMouseY_ = io.MousePos.y;
-            sceneGizmoDragStartPositionX_ = position.x;
-            sceneGizmoDragStartPositionY_ = position.y;
-            sceneGizmoDragStartPositionZ_ = position.z;
-            sceneGizmoAxisScreenDirectionX_ = (projection->endScreen.x - projection->originScreen.x) / axisScreenLength;
-            sceneGizmoAxisScreenDirectionY_ = (projection->endScreen.y - projection->originScreen.y) / axisScreenLength;
-            sceneGizmoPixelsPerWorldUnit_ = projection->pixelsPerWorldUnit;
-            handledClick = true;
+            const float axisScreenLength = std::sqrt(squared_distance(projection->originScreen, projection->endScreen));
+            if (axisScreenLength > 1e-5f)
+            {
+              const auto &position = componentManager.getComponent<PositionComponent3D>(*state.selectedEntity);
+              activeSceneGizmoAxis_ = hoveredGizmoAxis;
+              activeSceneGizmoEntity_ = *state.selectedEntity;
+              sceneGizmoDragStartMouseX_ = io.MousePos.x;
+              sceneGizmoDragStartMouseY_ = io.MousePos.y;
+              sceneGizmoDragStartPositionX_ = position.x;
+              sceneGizmoDragStartPositionY_ = position.y;
+              sceneGizmoDragStartPositionZ_ = position.z;
+              sceneGizmoAxisScreenDirectionX_ = (projection->endScreen.x - projection->originScreen.x) / axisScreenLength;
+              sceneGizmoAxisScreenDirectionY_ = (projection->endScreen.y - projection->originScreen.y) / axisScreenLength;
+              sceneGizmoPixelsPerWorldUnit_ = projection->pixelsPerWorldUnit;
+              handledClick = true;
+            }
           }
+        }
+        else if (sceneGizmoMode_ == SceneGizmoMode::Rotate)
+        {
+          if (!componentManager.hasComponent<RotationComponent3D>(*state.selectedEntity))
+          {
+            componentManager.addComponent(*state.selectedEntity, RotationComponent3D{});
+          }
+          const auto &rot = componentManager.getComponent<RotationComponent3D>(*state.selectedEntity);
+          activeSceneGizmoAxis_ = hoveredGizmoAxis;
+          activeSceneGizmoEntity_ = *state.selectedEntity;
+          sceneGizmoDragStartMouseX_ = io.MousePos.x;
+          sceneGizmoDragStartMouseY_ = io.MousePos.y;
+          sceneGizmoDragStartRotationQx_ = rot.qx;
+          sceneGizmoDragStartRotationQy_ = rot.qy;
+          sceneGizmoDragStartRotationQz_ = rot.qz;
+          sceneGizmoDragStartRotationQw_ = rot.qw;
+          handledClick = true;
         }
       }
 
@@ -1905,7 +2316,23 @@ namespace hades
             activeSceneGizmoAxis_ != SceneGizmoAxis::None
                 ? activeSceneGizmoAxis_
                 : hoveredGizmoAxis;
-        draw_translation_gizmo(drawList, gizmoAxes, highlightedAxis);
+
+        if (sceneGizmoMode_ == SceneGizmoMode::Translate)
+        {
+          draw_translation_gizmo(drawList, gizmoAxes, highlightedAxis);
+        }
+        else if (sceneGizmoMode_ == SceneGizmoMode::Rotate)
+        {
+          draw_rotation_gizmo(
+              drawList,
+              componentManager.getComponent<PositionComponent3D>(*state.selectedEntity),
+              sceneCamera,
+              camera,
+              canvasOrigin,
+              canvasSize,
+              highlightedAxis);
+        }
+
         if (highlightedAxis != SceneGizmoAxis::None)
         {
           ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);

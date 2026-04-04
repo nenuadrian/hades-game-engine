@@ -54,6 +54,7 @@ function(hades_configure_dependencies)
   hades_prefer_local_source(assimp "${CMAKE_SOURCE_DIR}/lib/assimp")
   hades_prefer_local_source(imgui_color_text_edit "${CMAKE_SOURCE_DIR}/lib/ImGuiColorTextEdit")
   hades_prefer_local_source(nlohmann_json "${CMAKE_SOURCE_DIR}/lib/json")
+  hades_prefer_local_source(joltphysics "${CMAKE_SOURCE_DIR}/lib/JoltPhysics")
 
   set(CLI11_BUILD_DOCS OFF CACHE BOOL "" FORCE)
   set(CLI11_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)

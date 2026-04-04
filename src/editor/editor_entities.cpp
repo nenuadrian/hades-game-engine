@@ -6,6 +6,7 @@
 
 #include "imgui.h"
 #include "../engine/components/audio_listener_component.hpp"
+#include "../engine/components/light_component.hpp"
 #include "../engine/components/audio_source_component.hpp"
 #include "../engine/components/camera_component.hpp"
 #include "../engine/components/model_component.hpp"
@@ -44,6 +45,11 @@ namespace hades
           componentManager.getComponent<CameraComponent>(entity).isMainCamera)
       {
         name += " [Main]";
+      }
+
+      if (componentManager.hasComponent<LightComponent>(entity))
+      {
+        name += " [Light]";
       }
 
       if (componentManager.hasComponent<WorldComponent>(entity))
@@ -127,6 +133,7 @@ namespace hades
       remove_component_if_present<AudioSourceComponent>(componentManager, entity);
       remove_component_if_present<ModelComponent>(componentManager, entity);
       remove_component_if_present<RenderComponent>(componentManager, entity);
+      remove_component_if_present<LightComponent>(componentManager, entity);
       remove_component_if_present<ScriptComponent>(componentManager, entity);
 
       entityManager.destroyEntity(entity);
@@ -246,8 +253,20 @@ namespace hades
     case EditorEntityPreset::AudioEmitter:
       createdEntity = EntityFactory::createAudioEmitter(entityManager, componentManager, parent);
       break;
+    case EditorEntityPreset::Plane:
+      createdEntity = EntityFactory::createPlane(entityManager, componentManager, parent);
+      break;
     case EditorEntityPreset::PhysicsCube:
       createdEntity = EntityFactory::createPhysicsCube(entityManager, componentManager, parent);
+      break;
+    case EditorEntityPreset::DirectionalLight:
+      createdEntity = EntityFactory::createDirectionalLight(entityManager, componentManager, parent);
+      break;
+    case EditorEntityPreset::PointLight:
+      createdEntity = EntityFactory::createPointLight(entityManager, componentManager, parent);
+      break;
+    case EditorEntityPreset::SpotLight:
+      createdEntity = EntityFactory::createSpotLight(entityManager, componentManager, parent);
       break;
     case EditorEntityPreset::None:
       break;
@@ -576,10 +595,28 @@ namespace hades
         {
           request_entity_creation(EditorEntityPreset::AudioEmitter, entity);
         }
+        if (ImGui::MenuItem("Plane"))
+        {
+          request_entity_creation(EditorEntityPreset::Plane, entity);
+        }
         if (ImGui::MenuItem("Physics Cube"))
         {
           request_entity_creation(EditorEntityPreset::PhysicsCube, entity);
         }
+        ImGui::Separator();
+        if (ImGui::MenuItem("Directional Light"))
+        {
+          request_entity_creation(EditorEntityPreset::DirectionalLight, entity);
+        }
+        if (ImGui::MenuItem("Point Light"))
+        {
+          request_entity_creation(EditorEntityPreset::PointLight, entity);
+        }
+        if (ImGui::MenuItem("Spot Light"))
+        {
+          request_entity_creation(EditorEntityPreset::SpotLight, entity);
+        }
+        ImGui::Separator();
         if (ImGui::MenuItem("Import Model..."))
         {
           request_model_import(entity);

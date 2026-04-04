@@ -11,6 +11,7 @@
 #include <fstream>
 #include <future>
 #include <string>
+#include <unordered_set>
 #include <utility>
 
 #include "imgui.h"
@@ -110,6 +111,131 @@ namespace hades
       editor->SetText(contents);
       return editor;
     }
+
+    // ── Autocomplete helpers ──────────────────────────────────────────
+
+    bool is_identifier_char(char c)
+    {
+      return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
+    }
+
+    std::string extract_partial_word(const std::string &lineText, int cursorColumn)
+    {
+      if (cursorColumn <= 0 || cursorColumn > static_cast<int>(lineText.size()))
+        return {};
+
+      int start = cursorColumn;
+      while (start > 0 && is_identifier_char(lineText[start - 1]))
+        --start;
+
+      return lineText.substr(start, cursorColumn - start);
+    }
+
+    int find_word_start_column(const std::string &lineText, int cursorColumn)
+    {
+      if (cursorColumn <= 0 || cursorColumn > static_cast<int>(lineText.size()))
+        return cursorColumn;
+
+      int start = cursorColumn;
+      while (start > 0 && is_identifier_char(lineText[start - 1]))
+        --start;
+
+      return start;
+    }
+
+    bool case_insensitive_prefix(const std::string &candidate, const std::string &prefix)
+    {
+      if (prefix.size() > candidate.size())
+        return false;
+      for (std::size_t i = 0; i < prefix.size(); ++i)
+      {
+        if (std::tolower(static_cast<unsigned char>(candidate[i])) !=
+            std::tolower(static_cast<unsigned char>(prefix[i])))
+          return false;
+      }
+      return true;
+    }
+
+    const std::vector<std::string> &get_static_autocomplete_words()
+    {
+      static const std::vector<std::string> words = {
+          // C# keywords
+          "abstract", "as", "async", "await", "base", "bool", "break", "byte",
+          "case", "catch", "char", "checked", "class", "const", "continue",
+          "decimal", "default", "delegate", "do", "double", "dynamic", "else",
+          "enum", "event", "explicit", "extern", "false", "finally", "fixed",
+          "float", "for", "foreach", "get", "goto", "if", "implicit", "in",
+          "int", "interface", "internal", "is", "lock", "long", "nameof",
+          "namespace", "new", "null", "object", "operator", "out", "override",
+          "params", "partial", "private", "protected", "public", "readonly",
+          "ref", "return", "sbyte", "sealed", "set", "short", "sizeof",
+          "stackalloc", "static", "string", "struct", "switch", "this", "throw",
+          "true", "try", "typeof", "uint", "ulong", "unchecked", "unsafe",
+          "ushort", "using", "var", "virtual", "void", "volatile", "where",
+          "while", "yield",
+          // .NET built-in types
+          "Console", "Math", "String", "Int32", "Int64", "Boolean", "Object",
+          "Exception", "List", "Dictionary", "Task", "Action", "Func",
+          "IEnumerable", "IDisposable", "EventArgs",
+          // Hades engine API
+          "HadesScript", "EntityContext", "Vector3", "Quaternion",
+          "GameObject", "Transform", "Debug",
+          "OnStart", "OnUpdate", "OnKeyDown", "OnKeyUp",
+          "EntityId", "Name", "Position",
+      };
+      return words;
+    }
+
+    std::vector<std::string> filter_autocomplete_candidates(
+        const std::string &prefix,
+        const std::vector<std::string> &staticWords,
+        const std::unordered_map<std::string, std::vector<ParsedScriptClass>> &parsedScriptCache)
+    {
+      std::vector<std::string> results;
+      std::unordered_set<std::string> seen;
+
+      auto try_add = [&](const std::string &word)
+      {
+        if (word == prefix)
+          return;
+        if (!case_insensitive_prefix(word, prefix))
+          return;
+        if (seen.insert(word).second)
+          results.push_back(word);
+      };
+
+      for (const auto &word : staticWords)
+        try_add(word);
+
+      for (const auto &[path, classes] : parsedScriptCache)
+      {
+        for (const auto &cls : classes)
+        {
+          try_add(cls.simpleName);
+          for (const auto &[type, name] : cls.publicFields)
+          {
+            try_add(type);
+            try_add(name);
+          }
+        }
+      }
+
+      std::sort(results.begin(), results.end(), [&prefix](const std::string &a, const std::string &b)
+                {
+        bool aExact = (a.substr(0, prefix.size()) == prefix);
+        bool bExact = (b.substr(0, prefix.size()) == prefix);
+        if (aExact != bExact) return aExact;
+        if (a.size() != b.size()) return a.size() < b.size();
+        return a < b; });
+
+      constexpr std::size_t kMaxCandidates = 12;
+      if (results.size() > kMaxCandidates)
+        results.resize(kMaxCandidates);
+
+      return results;
+    }
+
+    // ── End autocomplete helpers ────────────────────────────────────
 
     std::string path_display_name(const std::filesystem::path &path)
     {
@@ -1496,7 +1622,14 @@ namespace hades
             activeTab->textEditor = create_script_text_editor(activeTab->contents);
           }
           ImGui::PushID(activeTab->path.string().c_str());
+          // If autocomplete popup is open, intercept keyboard before TextEditor processes it.
+          if (autocompleteOpen_)
+          {
+            activeTab->textEditor->SetHandleKeyboardInputs(false);
+          }
+
           activeTab->textEditor->Render("##ScriptEditorContents", editorSize, true);
+
           if (activeTab->textEditor->IsTextChanged())
           {
             activeTab->contents = activeTab->textEditor->GetText();
@@ -1506,6 +1639,120 @@ namespace hades
               scriptEditorStatusMessage_.clear();
             }
           }
+
+          // ── Autocomplete logic ──────────────────────────────────────
+          {
+            auto &editor = *activeTab->textEditor;
+            const auto cursorPos = editor.GetCursorPosition();
+            const std::string lineText = editor.GetCurrentLineText();
+            const std::string partial = extract_partial_word(lineText, cursorPos.mColumn);
+            const int wordStartCol = find_word_start_column(lineText, cursorPos.mColumn);
+
+            if (partial.size() >= 2)
+            {
+              const auto &staticWords = get_static_autocomplete_words();
+              auto candidates = filter_autocomplete_candidates(partial, staticWords, parsedScriptCache_);
+
+              if (!candidates.empty())
+              {
+                autocompleteOpen_ = true;
+                autocompletePrefix_ = partial;
+                autocompleteCandidates_ = std::move(candidates);
+                autocompleteWordStartColumn_ = wordStartCol;
+
+                if (autocompleteSelectedIndex_ >= static_cast<int>(autocompleteCandidates_.size()))
+                  autocompleteSelectedIndex_ = 0;
+              }
+              else
+              {
+                autocompleteOpen_ = false;
+              }
+            }
+            else
+            {
+              autocompleteOpen_ = false;
+            }
+
+            if (autocompleteOpen_)
+            {
+              // Estimate cursor screen position.
+              // The editor child window was just rendered, so we can get its rect.
+              const ImVec2 editorPos = ImGui::GetItemRectMin();
+              const float charWidth = ImGui::GetFontSize() * 0.5f;
+              const float lineHeight = ImGui::GetTextLineHeightWithSpacing();
+              // Approximate left margin (line numbers + gutter). ~48px works for typical setups.
+              constexpr float kLeftMarginEstimate = 48.0f;
+
+              const float popupX = editorPos.x + kLeftMarginEstimate + cursorPos.mColumn * charWidth;
+              const float popupY = editorPos.y + (cursorPos.mLine + 1) * lineHeight;
+
+              ImGui::SetNextWindowPos(ImVec2(popupX, popupY));
+              ImGui::SetNextWindowSizeConstraints(ImVec2(150.0f, 0.0f), ImVec2(350.0f, 200.0f));
+
+              ImGuiWindowFlags popupFlags =
+                  ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                  ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                  ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoFocusOnAppearing;
+
+              ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(4.0f, 4.0f));
+              ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 4.0f);
+
+              if (ImGui::Begin("##ScriptAutocomplete", nullptr, popupFlags))
+              {
+                for (int i = 0; i < static_cast<int>(autocompleteCandidates_.size()); ++i)
+                {
+                  const bool isSelected = (i == autocompleteSelectedIndex_);
+                  if (ImGui::Selectable(autocompleteCandidates_[i].c_str(), isSelected))
+                  {
+                    // Clicked a candidate — accept it.
+                    const auto start = TextEditor::Coordinates(cursorPos.mLine, autocompleteWordStartColumn_);
+                    const auto end = cursorPos;
+                    editor.SetSelection(start, end);
+                    editor.Delete();
+                    editor.InsertText(autocompleteCandidates_[i]);
+                    autocompleteOpen_ = false;
+                  }
+                  if (isSelected)
+                    ImGui::SetItemDefaultFocus();
+                }
+              }
+              ImGui::End();
+              ImGui::PopStyleVar(2);
+
+              // Handle keyboard while popup is open.
+              if (ImGui::IsKeyPressed(ImGuiKey_DownArrow))
+              {
+                autocompleteSelectedIndex_ = std::min(
+                    autocompleteSelectedIndex_ + 1,
+                    static_cast<int>(autocompleteCandidates_.size()) - 1);
+              }
+              else if (ImGui::IsKeyPressed(ImGuiKey_UpArrow))
+              {
+                autocompleteSelectedIndex_ = std::max(autocompleteSelectedIndex_ - 1, 0);
+              }
+              else if (ImGui::IsKeyPressed(ImGuiKey_Tab) || ImGui::IsKeyPressed(ImGuiKey_Enter))
+              {
+                if (autocompleteSelectedIndex_ < static_cast<int>(autocompleteCandidates_.size()))
+                {
+                  const auto start = TextEditor::Coordinates(cursorPos.mLine, autocompleteWordStartColumn_);
+                  const auto end = cursorPos;
+                  editor.SetSelection(start, end);
+                  editor.Delete();
+                  editor.InsertText(autocompleteCandidates_[autocompleteSelectedIndex_]);
+                }
+                autocompleteOpen_ = false;
+              }
+              else if (ImGui::IsKeyPressed(ImGuiKey_Escape))
+              {
+                autocompleteOpen_ = false;
+              }
+            }
+
+            // Restore keyboard handling if we disabled it.
+            editor.SetHandleKeyboardInputs(true);
+          }
+          // ── End autocomplete logic ──────────────────────────────────
+
           ImGui::PopID();
         }
       }
