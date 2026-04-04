@@ -9,7 +9,9 @@
 #include "engine/core/ecs/component_manager.hpp"
 #include "engine/core/ecs/entity_manager.hpp"
 #include "engine/core/ecs/system_manager.hpp"
+#ifndef HADES_PLATFORM_WEB
 #include "engine/runtime/script_runtime.hpp"
+#endif
 
 struct SDL_Window;
 
@@ -29,6 +31,8 @@ namespace hades
 
     bool init(const std::filesystem::path &projectPath, bool headless = false);
     int run();
+    void render_frame();
+    bool is_running() const { return running_; }
 
   private:
     struct SDLWindowDeleter
@@ -52,7 +56,9 @@ namespace hades
     EntityManager entityManager_;
     ComponentManager componentManager_;
     SystemManager systemManager_;
+#ifndef HADES_PLATFORM_WEB
     ScriptRuntime scriptRuntime_;
+#endif
     SdlSession sdlSession_;
     WindowPtr window_{nullptr};
     std::unique_ptr<Renderer> renderer_;
@@ -65,7 +71,6 @@ namespace hades
     bool running_ = false;
     std::optional<Entity::EntityId> activeWorld_;
 
-    void render_frame();
     std::string project_name() const;
   };
 }

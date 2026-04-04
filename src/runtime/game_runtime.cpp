@@ -5,11 +5,19 @@
 
 #include <SDL.h>
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 #include "engine/audio/audio_engine.hpp"
 #include "engine/core/ecs/scene_serializer.hpp"
 #include "engine/core/ecs/world_utils.hpp"
 #include "engine/physics/physics_world.hpp"
+#ifdef HADES_PLATFORM_WEB
+#include "engine/rendering/webgpu_renderer.hpp"
+#else
 #include "engine/rendering/vulkan.hpp"
+#endif
 #include "engine/runtime/main_camera_selection.hpp"
 #include "engine/systems/audio_system.hpp"
 #include "engine/systems/movement_system.hpp"
@@ -79,7 +87,12 @@ namespace hades
   }
 
   GameRuntime::GameRuntime()
-      : renderer_(std::make_unique<VulkanRenderer>()),
+      :
+#ifdef HADES_PLATFORM_WEB
+        renderer_(std::make_unique<WebGPURenderer>()),
+#else
+        renderer_(std::make_unique<VulkanRenderer>()),
+#endif
         audioEngine_(std::make_unique<AudioEngine>()),
         physicsWorld_(std::make_unique<PhysicsWorld>())
   {
@@ -87,7 +100,9 @@ namespace hades
 
   GameRuntime::~GameRuntime()
   {
+#ifndef HADES_PLATFORM_WEB
     scriptRuntime_.stop();
+#endif
   }
 
   std::string GameRuntime::project_name() const
@@ -119,8 +134,13 @@ namespace hades
 
       constexpr int WINDOW_WIDTH = 1280;
       constexpr int WINDOW_HEIGHT = 720;
+#ifdef HADES_PLATFORM_WEB
+      const SDL_WindowFlags window_flags =
+          static_cast<SDL_WindowFlags>(SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+#else
       const SDL_WindowFlags window_flags =
           static_cast<SDL_WindowFlags>(SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+#endif
       window_.reset(SDL_CreateWindow(
           title.c_str(),
           SDL_WINDOWPOS_CENTERED,
@@ -201,6 +221,7 @@ namespace hades
       physicsSystem_->set_active_world(activeWorld_);
     }
 
+#ifndef HADES_PLATFORM_WEB
     // Start the script runtime.
     std::string scriptError;
     if (!scriptRuntime_.start(componentManager_, entityManager_, projectPath_, activeWorld_, &scriptError))
@@ -210,6 +231,7 @@ namespace hades
         std::fprintf(stderr, "Warning: script runtime failed to start: %s\n", scriptError.c_str());
       }
     }
+#endif
 
     initialized_ = true;
     return true;
@@ -230,6 +252,7 @@ namespace hades
         running_ = false;
       }
 
+#ifndef HADES_PLATFORM_WEB
       if (event.type == SDL_KEYDOWN)
       {
         scriptRuntime_.on_key_down(static_cast<int>(event.key.keysym.sym));
@@ -248,6 +271,7 @@ namespace hades
           running_ = false;
         }
       }
+#endif
     }
 
     if (renderer_)
@@ -264,6 +288,7 @@ namespace hades
         static_cast<double>(SDL_GetPerformanceFrequency()));
     lastTicks = currentTicks;
 
+#ifndef HADES_PLATFORM_WEB
     // Update scripts.
     if (scriptRuntime_.is_running())
     {
@@ -275,6 +300,7 @@ namespace hades
         return;
       }
     }
+#endif
 
     // Update all engine systems (physics, movement, rendering, audio).
     systemManager_.updateSystems(deltaTime, componentManager_, entityManager_);
@@ -294,6 +320,24 @@ namespace hades
     }
 
     running_ = true;
+
+#ifdef __EMSCRIPTEN__
+    // Emscripten requires a non-blocking main loop. The callback is invoked
+    // once per animation frame by the browser.
+    emscripten_set_main_loop_arg(
+        [](void *arg)
+        {
+          auto *self = static_cast<GameRuntime *>(arg);
+          if (self->is_running())
+          {
+            self->render_frame();
+          }
+        },
+        this,
+        0,    // fps: 0 = use requestAnimationFrame
+        true  // simulate_infinite_loop
+    );
+#else
     while (running_)
     {
       render_frame();
@@ -304,6 +348,7 @@ namespace hades
     {
       audioEngine_->stop_all();
     }
+#endif
 
     return EXIT_SUCCESS;
   }

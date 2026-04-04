@@ -58,6 +58,7 @@ namespace hades
       macOS,
       Linux,
       Windows,
+      Web,
     };
 
     struct ExportBuildState

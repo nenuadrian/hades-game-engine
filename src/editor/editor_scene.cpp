@@ -2027,7 +2027,9 @@ namespace hades
 
   void Editor::scene(EntityManager &entityManager, ComponentManager &componentManager)
   {
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     ImGui::Begin(SCENE_WINDOW_TITLE);
+    ImGui::PopStyleVar();
     ImGuiIO &io = ImGui::GetIO();
 
     const auto sceneWorld = state.isPlaying
@@ -2100,7 +2102,6 @@ namespace hades
       }
     }
 
-    ImGui::Spacing();
     const ImVec2 canvasSize = ImGui::GetContentRegionAvail();
     if (canvasSize.x < 64.0f || canvasSize.y < 64.0f)
     {

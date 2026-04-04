@@ -152,7 +152,13 @@ function(hades_configure_dependencies)
     GIT_SHALLOW TRUE
     SOURCE_SUBDIR Build)
 
-  FetchContent_MakeAvailable(cli11 googletest miniaudio sdl2 assimp imgui_color_text_edit nlohmann_json joltphysics)
+  if(EMSCRIPTEN)
+    # Emscripten provides SDL2 as a built-in port (-sUSE_SDL=2).
+    # Skip SDL2 FetchContent and GoogleTest/CLI11 (not needed for web runtime).
+    FetchContent_MakeAvailable(miniaudio assimp nlohmann_json joltphysics)
+  else()
+    FetchContent_MakeAvailable(cli11 googletest miniaudio sdl2 assimp imgui_color_text_edit nlohmann_json joltphysics)
+  endif()
 
   FetchContent_GetProperties(imgui)
   if(NOT imgui_POPULATED)
@@ -165,34 +171,55 @@ function(hades_configure_dependencies)
   endif()
 
   if(NOT TARGET hades_imgui)
-    add_library(
-      hades_imgui STATIC
+    set(IMGUI_CORE_SOURCES
       ${imgui_SOURCE_DIR}/imgui.cpp
       ${imgui_SOURCE_DIR}/imgui_draw.cpp
       ${imgui_SOURCE_DIR}/misc/cpp/imgui_stdlib.cpp
       ${imgui_SOURCE_DIR}/imgui_tables.cpp
       ${imgui_SOURCE_DIR}/imgui_widgets.cpp
-      ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl2.cpp
-      ${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp)
+      ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl2.cpp)
 
-    target_include_directories(
-      hades_imgui
-      PUBLIC ${imgui_SOURCE_DIR}
-             ${imgui_SOURCE_DIR}/backends)
-    target_link_libraries(hades_imgui PUBLIC SDL2::SDL2 Vulkan::Vulkan)
+    if(EMSCRIPTEN)
+      # Web builds use the WebGPU ImGui backend.
+      add_library(
+        hades_imgui STATIC
+        ${IMGUI_CORE_SOURCES}
+        ${imgui_SOURCE_DIR}/backends/imgui_impl_wgpu.cpp)
 
-    if(APPLE)
-      target_link_libraries(hades_imgui PUBLIC "-framework QuartzCore")
+      target_include_directories(
+        hades_imgui
+        PUBLIC ${imgui_SOURCE_DIR}
+               ${imgui_SOURCE_DIR}/backends)
+      # Emscripten provides SDL2 and WebGPU via compiler flags.
+      target_compile_options(hades_imgui PUBLIC -sUSE_SDL=2)
+      target_link_options(hades_imgui PUBLIC -sUSE_SDL=2 -sUSE_WEBGPU=1)
+    else()
+      add_library(
+        hades_imgui STATIC
+        ${IMGUI_CORE_SOURCES}
+        ${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp)
+
+      target_include_directories(
+        hades_imgui
+        PUBLIC ${imgui_SOURCE_DIR}
+               ${imgui_SOURCE_DIR}/backends)
+      target_link_libraries(hades_imgui PUBLIC SDL2::SDL2 Vulkan::Vulkan)
+
+      if(APPLE)
+        target_link_libraries(hades_imgui PUBLIC "-framework QuartzCore")
+      endif()
     endif()
   endif()
 
-  if(NOT TARGET hades_imgui_textedit)
-    add_library(
-      hades_imgui_textedit STATIC
-      ${imgui_color_text_edit_SOURCE_DIR}/TextEditor.cpp)
-    target_include_directories(
-      hades_imgui_textedit
-      PUBLIC ${imgui_color_text_edit_SOURCE_DIR})
-    target_link_libraries(hades_imgui_textedit PUBLIC hades_imgui)
+  if(NOT EMSCRIPTEN)
+    if(NOT TARGET hades_imgui_textedit)
+      add_library(
+        hades_imgui_textedit STATIC
+        ${imgui_color_text_edit_SOURCE_DIR}/TextEditor.cpp)
+      target_include_directories(
+        hades_imgui_textedit
+        PUBLIC ${imgui_color_text_edit_SOURCE_DIR})
+      target_link_libraries(hades_imgui_textedit PUBLIC hades_imgui)
+    endif()
   endif()
 endfunction()

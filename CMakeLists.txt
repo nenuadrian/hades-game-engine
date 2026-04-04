@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(cmake/Dependencies.cmake)
+include(cmake/WebPlatform.cmake)
 
 function(hades_stage_runtime_dependency target dependency)
   if(NOT WIN32 OR NOT TARGET "${target}" OR NOT TARGET "${dependency}")
@@ -28,9 +29,12 @@ function(hades_stage_runtime_dependency target dependency)
     VERBATIM)
 endfunction()
 
-find_package(Vulkan REQUIRED)
+if(NOT EMSCRIPTEN)
+  find_package(Vulkan REQUIRED)
+endif()
 hades_configure_dependencies()
 
+if(NOT EMSCRIPTEN)
 set(HADES_DOTNET_EXECUTABLE "" CACHE FILEPATH "Absolute path to the dotnet executable used by runtime scripting")
 set(HADES_DOTNET_ROOT "" CACHE PATH "Absolute path to DOTNET_ROOT used by runtime scripting")
 
@@ -66,6 +70,7 @@ configure_file(
   "${CMAKE_SOURCE_DIR}/cmake/dotnet_config.hpp.in"
   "${CMAKE_BINARY_DIR}/generated/dotnet_config.hpp"
   @ONLY)
+endif() # NOT EMSCRIPTEN (.NET configuration)
 
 configure_file(
   "${CMAKE_SOURCE_DIR}/cmake/build_config.hpp.in"
@@ -80,6 +85,20 @@ set(SRC_DIR "${CMAKE_SOURCE_DIR}/src")
 file(GLOB_RECURSE ENGINE_SOURCE_FILES CONFIGURE_DEPENDS "${SRC_DIR}/engine/*.cpp")
 file(GLOB_RECURSE ENGINE_HEADER_FILES CONFIGURE_DEPENDS "${SRC_DIR}/engine/*.h" "${SRC_DIR}/engine/*.hpp")
 list(REMOVE_ITEM ENGINE_SOURCE_FILES "${SRC_DIR}/engine/gui/imgui.cpp")
+
+if(EMSCRIPTEN)
+  # For web builds: remove Vulkan renderer and .NET scripting sources;
+  # the WebGPU renderer is already picked up by the glob.
+  list(REMOVE_ITEM ENGINE_SOURCE_FILES
+    "${SRC_DIR}/engine/rendering/vulkan.cpp"
+    "${SRC_DIR}/engine/runtime/script_runtime.cpp"
+    "${SRC_DIR}/engine/runtime/clr_host.cpp"
+    "${SRC_DIR}/engine/runtime/subprocess.cpp")
+else()
+  # For native builds: remove WebGPU renderer (only usable with Emscripten).
+  list(REMOVE_ITEM ENGINE_SOURCE_FILES
+    "${SRC_DIR}/engine/rendering/webgpu_renderer.cpp")
+endif()
 
 # Collect editor sources (src/editor/ plus the editor-only ImGui GUI and main.cpp).
 file(GLOB_RECURSE EDITOR_SOURCE_FILES CONFIGURE_DEPENDS "${SRC_DIR}/editor/*.cpp")
@@ -103,23 +122,34 @@ target_include_directories(HadesEngine PUBLIC "${SRC_DIR}" "${CMAKE_BINARY_DIR}/
 if(HADES_FRAME_METRICS)
   target_compile_definitions(HadesEngine PUBLIC HADES_ENABLE_FRAME_METRICS)
 endif()
-target_link_libraries(
-  HadesEngine
-  PUBLIC hades_imgui
-         assimp
-         Jolt
-         miniaudio
-         nlohmann_json::nlohmann_json
-         Vulkan::Vulkan)
-if(WIN32)
-  target_link_libraries(HadesEngine PUBLIC Ole32 uuid)
+if(EMSCRIPTEN)
+  target_link_libraries(
+    HadesEngine
+    PUBLIC hades_imgui
+           assimp
+           Jolt
+           miniaudio
+           nlohmann_json::nlohmann_json)
 else()
-  target_link_libraries(HadesEngine PUBLIC dl)
+  target_link_libraries(
+    HadesEngine
+    PUBLIC hades_imgui
+           assimp
+           Jolt
+           miniaudio
+           nlohmann_json::nlohmann_json
+           Vulkan::Vulkan)
+  if(WIN32)
+    target_link_libraries(HadesEngine PUBLIC Ole32 uuid)
+  else()
+    target_link_libraries(HadesEngine PUBLIC dl)
+  endif()
 endif()
 
 # ---------------------------------------------------------------------------
-# Hades editor executable
+# Hades editor executable (native builds only)
 # ---------------------------------------------------------------------------
+if(NOT EMSCRIPTEN)
 add_executable(${PROJECT_NAME} ${EDITOR_SOURCE_FILES} ${EDITOR_HEADER_FILES})
 target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(
@@ -141,34 +171,41 @@ add_custom_command(
 if(TARGET SDL2::SDL2main)
   target_link_libraries(${PROJECT_NAME} PRIVATE SDL2::SDL2main)
 endif()
+endif() # NOT EMSCRIPTEN (editor)
 
 # ---------------------------------------------------------------------------
 # HadesRuntime standalone game executable
 # ---------------------------------------------------------------------------
 add_executable(HadesRuntime ${RUNTIME_SOURCE_FILES} ${RUNTIME_HEADER_FILES})
 target_include_directories(HadesRuntime PRIVATE "${CMAKE_BINARY_DIR}/generated")
-target_link_libraries(
-  HadesRuntime
-  PRIVATE HadesEngine
-          CLI11::CLI11)
-hades_stage_runtime_dependency(HadesRuntime assimp)
+if(EMSCRIPTEN)
+  target_link_libraries(HadesRuntime PRIVATE HadesEngine)
+  hades_configure_web_target(HadesRuntime)
+else()
+  target_link_libraries(
+    HadesRuntime
+    PRIVATE HadesEngine
+            CLI11::CLI11)
+  hades_stage_runtime_dependency(HadesRuntime assimp)
 
-add_custom_command(
-  TARGET HadesRuntime
-  POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:HadesRuntime>/assets"
-  COMMAND
-    ${CMAKE_COMMAND} -E copy_if_different
-    "${CMAKE_SOURCE_DIR}/assets/logo.bmp"
-    "$<TARGET_FILE_DIR:HadesRuntime>/assets/logo.bmp")
+  add_custom_command(
+    TARGET HadesRuntime
+    POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:HadesRuntime>/assets"
+    COMMAND
+      ${CMAKE_COMMAND} -E copy_if_different
+      "${CMAKE_SOURCE_DIR}/assets/logo.bmp"
+      "$<TARGET_FILE_DIR:HadesRuntime>/assets/logo.bmp")
 
-if(TARGET SDL2::SDL2main)
-  target_link_libraries(HadesRuntime PRIVATE SDL2::SDL2main)
+  if(TARGET SDL2::SDL2main)
+    target_link_libraries(HadesRuntime PRIVATE SDL2::SDL2main)
+  endif()
 endif()
 
 # ---------------------------------------------------------------------------
-# Tests
+# Tests (native builds only)
 # ---------------------------------------------------------------------------
+if(NOT EMSCRIPTEN)
 # Tests reference a few editor-specific sources (workspace manager, settings,
 # script analysis, plugin registry) in addition to the engine library.
 set(TEST_EDITOR_SUPPORT_SOURCES
@@ -191,3 +228,4 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.18)
 else()
   gtest_discover_tests(hades_tests)
 endif()
+endif() # NOT EMSCRIPTEN (tests)
