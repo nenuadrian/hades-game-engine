@@ -17,6 +17,7 @@ namespace hades
     virtual void start_imgui_frame() = 0;
     virtual void render_imgui(ImDrawData *draw_data) = 0;
     virtual void shutdown_imgui_backend() = 0;
+    virtual void present_frame() = 0;
 
     virtual ~Renderer() = default;
   };

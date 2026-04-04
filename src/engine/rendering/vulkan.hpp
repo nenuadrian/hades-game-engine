@@ -109,6 +109,7 @@ namespace hades
     void render_frame(SDL_Window *window) override;
     void render_imgui(ImDrawData *draw_data) override;
     void shutdown_imgui_backend() override;
+    void present_frame() override;
   };
 
 }

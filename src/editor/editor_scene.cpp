@@ -1632,18 +1632,6 @@ namespace hades
                                        ? state.loadedWorld
                                        : normalize_default_world(entityManager, componentManager));
 
-    if (sceneWorld.has_value())
-    {
-      ImGui::TextDisabled(
-          "%s: %s",
-          state.isPlaying ? "Active World" : "Loaded World",
-          entity_label(*sceneWorld, componentManager).c_str());
-    }
-    else
-    {
-      ImGui::TextDisabled("No world is loaded.");
-    }
-
     if (!state.playModeMessage.empty())
     {
       ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "%s", state.playModeMessage.c_str());

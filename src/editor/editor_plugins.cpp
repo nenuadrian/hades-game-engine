@@ -252,6 +252,31 @@ namespace hades
         }));
 
     register_plugin(std::make_unique<CallbackEditorPlugin>(
+        "export",
+        "Export",
+        EditorPluginPhase::PostEntityDeletion,
+        76,
+        [this](EditorPluginContext &context)
+        {
+          render_export_window(context.entityManager, context.componentManager);
+        },
+        false,
+        [this](const Editor &editor)
+        {
+          return editor.openExportWindow_;
+        },
+        [this](Editor &editor, bool visible)
+        {
+          editor.openExportWindow_ = visible;
+          editor.focusExportWindow_ = visible;
+        },
+        [this](Editor &editor)
+        {
+          editor.openExportWindow_ = true;
+          editor.focusExportWindow_ = true;
+        }));
+
+    register_plugin(std::make_unique<CallbackEditorPlugin>(
         "debug",
         "Debug",
         EditorPluginPhase::PostEntityDeletion,

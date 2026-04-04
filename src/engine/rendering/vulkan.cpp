@@ -958,7 +958,10 @@ namespace hades
     if (fb_width > 0 && fb_height > 0 &&
         (g_SwapChainRebuild || g_MainWindowData.Width != fb_width || g_MainWindowData.Height != fb_height))
     {
-      ImGui_ImplVulkan_SetMinImageCount(g_MinImageCount);
+      if (imgui_backend_initialized)
+      {
+        ImGui_ImplVulkan_SetMinImageCount(g_MinImageCount);
+      }
       VulkanH_CreateOrResizeWindow(
           g_Instance,
           g_PhysicalDevice,
@@ -994,5 +997,85 @@ namespace hades
 
     ImGui_ImplVulkan_Shutdown();
     imgui_backend_initialized = false;
+  }
+
+  void VulkanRenderer::present_frame()
+  {
+    ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
+
+    g_MainWindowData.ClearValue.color.float32[0] = clear_color.x * clear_color.w;
+    g_MainWindowData.ClearValue.color.float32[1] = clear_color.y * clear_color.w;
+    g_MainWindowData.ClearValue.color.float32[2] = clear_color.z * clear_color.w;
+    g_MainWindowData.ClearValue.color.float32[3] = clear_color.w;
+
+    VkResult err;
+
+    VkSemaphore image_acquired_semaphore =
+        g_MainWindowData.FrameSemaphores[g_MainWindowData.SemaphoreIndex].ImageAcquiredSemaphore;
+    VkSemaphore render_complete_semaphore =
+        g_MainWindowData.FrameSemaphores[g_MainWindowData.SemaphoreIndex].RenderCompleteSemaphore;
+    err = vkAcquireNextImageKHR(
+        g_Device,
+        g_MainWindowData.Swapchain,
+        UINT64_MAX,
+        image_acquired_semaphore,
+        VK_NULL_HANDLE,
+        &g_MainWindowData.FrameIndex);
+    if (err == VK_ERROR_OUT_OF_DATE_KHR || err == VK_SUBOPTIMAL_KHR)
+    {
+      g_SwapChainRebuild = true;
+      return;
+    }
+    check_vk_result(err);
+
+    Vulkan_Frame *fd = &g_MainWindowData.Frames[g_MainWindowData.FrameIndex];
+    {
+      err = vkWaitForFences(g_Device, 1, &fd->Fence, VK_TRUE, UINT64_MAX);
+      check_vk_result(err);
+      err = vkResetFences(g_Device, 1, &fd->Fence);
+      check_vk_result(err);
+    }
+    {
+      err = vkResetCommandPool(g_Device, fd->CommandPool, 0);
+      check_vk_result(err);
+      VkCommandBufferBeginInfo info = {};
+      info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      info.flags |= VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+      err = vkBeginCommandBuffer(fd->CommandBuffer, &info);
+      check_vk_result(err);
+    }
+    {
+      VkRenderPassBeginInfo info = {};
+      info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+      info.renderPass = g_MainWindowData.RenderPass;
+      info.framebuffer = fd->Framebuffer;
+      info.renderArea.extent.width = g_MainWindowData.Width;
+      info.renderArea.extent.height = g_MainWindowData.Height;
+      info.clearValueCount = 1;
+      info.pClearValues = &g_MainWindowData.ClearValue;
+      vkCmdBeginRenderPass(fd->CommandBuffer, &info, VK_SUBPASS_CONTENTS_INLINE);
+    }
+
+    // No ImGui draw data -- just the clear color render pass.
+    vkCmdEndRenderPass(fd->CommandBuffer);
+
+    {
+      VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+      VkSubmitInfo info = {};
+      info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      info.waitSemaphoreCount = 1;
+      info.pWaitSemaphores = &image_acquired_semaphore;
+      info.pWaitDstStageMask = &wait_stage;
+      info.commandBufferCount = 1;
+      info.pCommandBuffers = &fd->CommandBuffer;
+      info.signalSemaphoreCount = 1;
+      info.pSignalSemaphores = &render_complete_semaphore;
+      err = vkEndCommandBuffer(fd->CommandBuffer);
+      check_vk_result(err);
+      err = vkQueueSubmit(g_Queue, 1, &info, fd->Fence);
+      check_vk_result(err);
+    }
+
+    FramePresent();
   }
 }

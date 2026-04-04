@@ -1,0 +1,11 @@
+#ifndef HADES_BUILD_CONFIG_HPP
+#define HADES_BUILD_CONFIG_HPP
+
+namespace hades::build_config
+{
+  inline constexpr const char *cmake_source_dir = "@CMAKE_SOURCE_DIR@";
+  inline constexpr const char *cmake_command = "@CMAKE_COMMAND@";
+  inline constexpr const char *cmake_generator = "@CMAKE_GENERATOR@";
+}
+
+#endif

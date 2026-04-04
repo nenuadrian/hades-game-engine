@@ -67,43 +67,66 @@ configure_file(
   "${CMAKE_BINARY_DIR}/generated/dotnet_config.hpp"
   @ONLY)
 
+configure_file(
+  "${CMAKE_SOURCE_DIR}/cmake/build_config.hpp.in"
+  "${CMAKE_BINARY_DIR}/generated/build_config.hpp"
+  @ONLY)
+
 # Define the source directory.
 set(SRC_DIR "${CMAKE_SOURCE_DIR}/src")
 
-# Automatically find application source and header files.
-file(GLOB_RECURSE APP_SOURCE_FILES CONFIGURE_DEPENDS "${SRC_DIR}/*.cpp")
-file(GLOB_RECURSE TEST_SOURCE_FILES CONFIGURE_DEPENDS "${SRC_DIR}/tests/*.cpp")
-list(REMOVE_ITEM APP_SOURCE_FILES ${TEST_SOURCE_FILES})
-file(
-  GLOB_RECURSE HEADER_FILES
-  CONFIGURE_DEPENDS
-  "${SRC_DIR}/*.h"
-  "${SRC_DIR}/*.hpp")
+# Collect engine sources (everything under src/engine/ except the editor-only
+# ImGui GUI implementation which renders the dockspace and menu bar).
+file(GLOB_RECURSE ENGINE_SOURCE_FILES CONFIGURE_DEPENDS "${SRC_DIR}/engine/*.cpp")
+file(GLOB_RECURSE ENGINE_HEADER_FILES CONFIGURE_DEPENDS "${SRC_DIR}/engine/*.h" "${SRC_DIR}/engine/*.hpp")
+list(REMOVE_ITEM ENGINE_SOURCE_FILES "${SRC_DIR}/engine/gui/imgui.cpp")
 
-set(SOURCES ${APP_SOURCE_FILES} ${HEADER_FILES})
+# Collect editor sources (src/editor/ plus the editor-only ImGui GUI and main.cpp).
+file(GLOB_RECURSE EDITOR_SOURCE_FILES CONFIGURE_DEPENDS "${SRC_DIR}/editor/*.cpp")
+file(GLOB_RECURSE EDITOR_HEADER_FILES CONFIGURE_DEPENDS "${SRC_DIR}/editor/*.h" "${SRC_DIR}/editor/*.hpp")
+list(APPEND EDITOR_SOURCE_FILES "${SRC_DIR}/engine/gui/imgui.cpp" "${SRC_DIR}/main.cpp")
+
+# Collect runtime sources.
+file(GLOB_RECURSE RUNTIME_SOURCE_FILES CONFIGURE_DEPENDS "${SRC_DIR}/runtime/*.cpp")
+file(GLOB_RECURSE RUNTIME_HEADER_FILES CONFIGURE_DEPENDS "${SRC_DIR}/runtime/*.hpp")
+
+# Collect test sources.
+file(GLOB_RECURSE TEST_SOURCE_FILES CONFIGURE_DEPENDS "${SRC_DIR}/tests/*.cpp")
 
 option(HADES_FRAME_METRICS "Enable frame metrics profiling" OFF)
 
-add_executable(${PROJECT_NAME} ${SOURCES})
-target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_BINARY_DIR}/generated")
+# ---------------------------------------------------------------------------
+# HadesEngine static library (engine core, shared by editor and runtime)
+# ---------------------------------------------------------------------------
+add_library(HadesEngine STATIC ${ENGINE_SOURCE_FILES} ${ENGINE_HEADER_FILES})
+target_include_directories(HadesEngine PUBLIC "${SRC_DIR}" "${CMAKE_BINARY_DIR}/generated")
 if(HADES_FRAME_METRICS)
-  target_compile_definitions(${PROJECT_NAME} PRIVATE HADES_ENABLE_FRAME_METRICS)
+  target_compile_definitions(HadesEngine PUBLIC HADES_ENABLE_FRAME_METRICS)
 endif()
 target_link_libraries(
-  ${PROJECT_NAME}
-  PRIVATE CLI11::CLI11
-          assimp
-          hades_imgui
-          hades_imgui_textedit
-          Jolt
-          miniaudio
-          nlohmann_json::nlohmann_json
-          Vulkan::Vulkan)
+  HadesEngine
+  PUBLIC hades_imgui
+         assimp
+         Jolt
+         miniaudio
+         nlohmann_json::nlohmann_json
+         Vulkan::Vulkan)
 if(WIN32)
-  target_link_libraries(${PROJECT_NAME} PRIVATE Ole32 uuid)
+  target_link_libraries(HadesEngine PUBLIC Ole32 uuid)
 else()
-  target_link_libraries(${PROJECT_NAME} PRIVATE dl)
+  target_link_libraries(HadesEngine PUBLIC dl)
 endif()
+
+# ---------------------------------------------------------------------------
+# HadesGameEngine editor executable
+# ---------------------------------------------------------------------------
+add_executable(${PROJECT_NAME} ${EDITOR_SOURCE_FILES} ${EDITOR_HEADER_FILES})
+target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_BINARY_DIR}/generated")
+target_link_libraries(
+  ${PROJECT_NAME}
+  PRIVATE HadesEngine
+          CLI11::CLI11
+          hades_imgui_textedit)
 hades_stage_runtime_dependency(${PROJECT_NAME} assimp)
 
 add_custom_command(
@@ -119,30 +142,46 @@ if(TARGET SDL2::SDL2main)
   target_link_libraries(${PROJECT_NAME} PRIVATE SDL2::SDL2main)
 endif()
 
-set(TEST_SUPPORT_SOURCES
+# ---------------------------------------------------------------------------
+# HadesRuntime standalone game executable
+# ---------------------------------------------------------------------------
+add_executable(HadesRuntime ${RUNTIME_SOURCE_FILES} ${RUNTIME_HEADER_FILES})
+target_include_directories(HadesRuntime PRIVATE "${CMAKE_BINARY_DIR}/generated")
+target_link_libraries(
+  HadesRuntime
+  PRIVATE HadesEngine
+          CLI11::CLI11)
+hades_stage_runtime_dependency(HadesRuntime assimp)
+
+add_custom_command(
+  TARGET HadesRuntime
+  POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:HadesRuntime>/assets"
+  COMMAND
+    ${CMAKE_COMMAND} -E copy_if_different
+    "${CMAKE_SOURCE_DIR}/assets/logo.bmp"
+    "$<TARGET_FILE_DIR:HadesRuntime>/assets/logo.bmp")
+
+if(TARGET SDL2::SDL2main)
+  target_link_libraries(HadesRuntime PRIVATE SDL2::SDL2main)
+endif()
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+# Tests reference a few editor-specific sources (workspace manager, settings,
+# script analysis, plugin registry) in addition to the engine library.
+set(TEST_EDITOR_SUPPORT_SOURCES
   src/editor/editor_settings.cpp
   src/editor/plugins/editor_plugin.cpp
   src/editor/script_analysis.cpp
   src/editor/script_document.cpp
   src/editor/workspace_manager.cpp
-  src/editor/workspace_file_operations.cpp
-  src/engine/assets/model_importer.cpp
-  src/engine/components/position_component_3d.cpp
-  src/engine/components/transform_hierarchy_component.cpp
-  src/engine/core/ecs/entity_factory.cpp
-  src/engine/core/ecs/entity_manager.cpp
-  src/engine/core/ecs/scene_serializer.cpp
-  src/engine/rendering/vector_text.cpp
-  src/engine/runtime/clr_host.cpp
-  src/engine/runtime/script_runtime.cpp
-  src/engine/runtime/subprocess.cpp)
+  src/editor/workspace_file_operations.cpp)
 
-add_executable(hades_tests ${TEST_SOURCE_FILES} ${TEST_SUPPORT_SOURCES})
-target_include_directories(hades_tests PRIVATE "${CMAKE_BINARY_DIR}/generated")
-target_link_libraries(hades_tests PRIVATE assimp gtest_main nlohmann_json::nlohmann_json)
-if(NOT WIN32)
-  target_link_libraries(hades_tests PRIVATE dl)
-endif()
+add_executable(hades_tests ${TEST_SOURCE_FILES} ${TEST_EDITOR_SUPPORT_SOURCES})
+target_include_directories(hades_tests PRIVATE "${SRC_DIR}" "${CMAKE_BINARY_DIR}/generated")
+target_link_libraries(hades_tests PRIVATE HadesEngine gtest_main)
 hades_stage_runtime_dependency(hades_tests assimp)
 
 enable_testing()

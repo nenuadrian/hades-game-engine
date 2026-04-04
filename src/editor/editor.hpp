@@ -2,13 +2,16 @@
 #define HADES_EDITOR_EDITOR_HPP
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <filesystem>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string_view>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -48,6 +51,22 @@ namespace hades
       std::filesystem::path path;
       bool directory = false;
       std::vector<WorkspaceTreeNode> children;
+    };
+
+    enum class ExportPlatform
+    {
+      macOS,
+      Linux,
+      Windows,
+    };
+
+    struct ExportBuildState
+    {
+      std::mutex mutex;
+      std::string log;
+      std::string error;
+      bool finished = false;
+      bool succeeded = false;
     };
 
     EditorState state;
@@ -137,6 +156,27 @@ namespace hades
     SettingsCategory selectedSettingsCategory_ = SettingsCategory::Editor;
     bool openDebugConsoleWindow_ = false;
     bool focusDebugConsoleWindow_ = false;
+
+    // Export window state.
+    bool openExportWindow_ = false;
+    bool focusExportWindow_ = false;
+#ifdef __APPLE__
+    ExportPlatform selectedExportPlatform_ = ExportPlatform::macOS;
+#elif defined(__linux__)
+    ExportPlatform selectedExportPlatform_ = ExportPlatform::Linux;
+#else
+    ExportPlatform selectedExportPlatform_ = ExportPlatform::Windows;
+#endif
+    std::array<char, 512> exportOutputPathBuffer_{};
+    std::array<char, 256> exportProjectNameBuffer_{};
+    bool exportBuildInProgress_ = false;
+    std::shared_ptr<ExportBuildState> exportBuildState_;
+    std::thread exportBuildThread_;
+    std::string exportBuildLog_;
+    std::string exportBuildError_;
+    bool exportBuildSucceeded_ = false;
+    bool exportBuildFinished_ = false;
+
     std::filesystem::path pendingWorkspaceDeletePath_;
     std::string workspaceDeleteError_;
     std::optional<Entity::EntityId> pendingEntityDeletion_;
@@ -192,6 +232,7 @@ namespace hades
     void render_workspace_dialogs(EntityManager &entityManager, ComponentManager &componentManager);
     void render_settings_window();
     void render_debug_console_window();
+    void render_export_window(EntityManager &entityManager, ComponentManager &componentManager);
     void render_workspace_tree_node(const WorkspaceTreeNode &node);
     void render_script_editor(EntityManager &entityManager, ComponentManager &componentManager);
     std::optional<std::size_t> find_script_editor_tab_index(const std::filesystem::path &scriptPath) const;
