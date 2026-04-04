@@ -8,7 +8,7 @@
 
 A C++ 3D game engine with a Vulkan renderer, in-process C# scripting, spatial audio, and an ImGui-based editor. Built around a custom Entity-Component-System architecture.
 
-The purpose is educational and experimental in nature to explore the intriguing world of game engine development.
+The purpose is educational and experimental in nature to explore the intriguing world of game engine development, but also to enable quick usage of environments created in machine learning / AI training through headless mode and flexibly API.
 
 <p align="center">
     <img src="https://github.com/nenuadrian/hades-game-engine/raw/main/docs/logo.png" alt="Hades Game Engine Logo">
