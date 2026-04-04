@@ -1,0 +1,234 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v1.0.0). Leave empty for a draft from HEAD."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  # ------------------------------------------------------------------
+  # 1. Vendor all dependencies and produce a self-contained source archive
+  # ------------------------------------------------------------------
+  vendor-source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          elif [[ -n "${{ inputs.tag }}" ]]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=dev-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Vendor dependencies
+        run: bash scripts/vendor-deps.sh
+
+      - name: Create vendored source archive
+        run: |
+          VERSION="${{ steps.version.outputs.tag }}"
+          ARCHIVE_NAME="hades-engine-${VERSION}-full-source"
+          # Create a clean copy excluding build artifacts and .git
+          mkdir -p /tmp/archive-staging
+          rsync -a --exclude='.git' --exclude='build/' --exclude='site/' \
+            . "/tmp/archive-staging/${ARCHIVE_NAME}"
+          cd /tmp/archive-staging
+          tar czf "${GITHUB_WORKSPACE}/${ARCHIVE_NAME}.tar.gz" "${ARCHIVE_NAME}"
+          cd "${GITHUB_WORKSPACE}"
+          zip -qr "${ARCHIVE_NAME}.zip" -j /dev/null || true
+          cd /tmp/archive-staging
+          zip -qr "${GITHUB_WORKSPACE}/${ARCHIVE_NAME}.zip" "${ARCHIVE_NAME}"
+
+      - name: Upload vendored source artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vendored-source
+          path: |
+            hades-engine-*-full-source.tar.gz
+            hades-engine-*-full-source.zip
+
+    outputs:
+      version: ${{ steps.version.outputs.tag }}
+
+  # ------------------------------------------------------------------
+  # 2. Build release binaries on each platform
+  # ------------------------------------------------------------------
+  build:
+    needs: vendor-source
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            c_compiler: gcc
+            cpp_compiler: g++
+            artifact_name: linux-x64
+          - os: windows-latest
+            c_compiler: cl
+            cpp_compiler: cl
+            artifact_name: windows-x64
+          - os: macos-latest
+            c_compiler: clang
+            cpp_compiler: clang++
+            artifact_name: macos-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libglu1-mesa-dev freeglut3-dev mesa-common-dev \
+            xorg-dev libvulkan-dev vulkan-tools
+
+      - name: Setup Vulkan SDK (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: humbletim/setup-vulkan-sdk@v1.2.1
+        with:
+          vulkan-query-version: 1.4.304.1
+          vulkan-components: Vulkan-Headers, Vulkan-Loader
+          vulkan-use-cache: true
+
+      - name: Install Vulkan SDK (macOS)
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          sdk_tmp_dir="$(mktemp -d)"
+          curl --fail --location -o "$sdk_tmp_dir/vulkan-sdk.zip" https://sdk.lunarg.com/sdk/download/latest/mac/vulkan-sdk.zip
+          unzip -q "$sdk_tmp_dir/vulkan-sdk.zip" -d "$sdk_tmp_dir"
+
+          sdk_app="$(find "$sdk_tmp_dir" -maxdepth 2 -name 'vulkansdk-macOS-*.app' -print -quit)"
+          if [ -z "$sdk_app" ]; then
+            echo "Failed to locate the Vulkan SDK installer app."
+            exit 1
+          fi
+
+          sdk_version="$(basename "$sdk_app" .app | sed 's/^vulkansdk-macOS-//')"
+          sdk_root="$HOME/VulkanSDK/$sdk_version"
+
+          "$sdk_app/Contents/MacOS/vulkansdk-macOS-$sdk_version" \
+            --root "$sdk_root" \
+            --accept-licenses \
+            --default-answer \
+            --confirm-command \
+            install \
+            copy_only=1 \
+            com.lunarg.vulkan.core
+
+          echo "VULKAN_SDK=$sdk_root/macOS" >> "$GITHUB_ENV"
+          echo "$sdk_root/macOS/bin" >> "$GITHUB_PATH"
+
+      - name: Configure CMake
+        run: >-
+          cmake -S "${{ github.workspace }}"
+          -B "${{ github.workspace }}/build"
+          -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
+          -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          -DHADES_USE_BUNDLED_DEPS=OFF
+
+      - name: Build
+        run: cmake --build "${{ github.workspace }}/build" --config ${{ env.BUILD_TYPE }}
+
+      - name: Test
+        working-directory: ${{ github.workspace }}/build
+        run: ctest --build-config ${{ env.BUILD_TYPE }} --output-on-failure
+
+      - name: Package binaries
+        shell: bash
+        run: |
+          VERSION="${{ needs.vendor-source.outputs.version }}"
+          PKG_DIR="hades-engine-${VERSION}-${{ matrix.artifact_name }}"
+          mkdir -p "$PKG_DIR/assets"
+
+          # Copy assets
+          cp assets/logo.bmp "$PKG_DIR/assets/"
+
+          # Copy binaries — location depends on single vs multi-config generators
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            BIN_DIR="build/${{ env.BUILD_TYPE }}"
+            cp "$BIN_DIR/HadesGameEngine.exe" "$PKG_DIR/" 2>/dev/null || true
+            cp "$BIN_DIR/HadesRuntime.exe"    "$PKG_DIR/" 2>/dev/null || true
+            # Copy any runtime DLLs staged next to the executables
+            cp "$BIN_DIR"/*.dll "$PKG_DIR/" 2>/dev/null || true
+          else
+            BIN_DIR="build"
+            cp "$BIN_DIR/HadesGameEngine" "$PKG_DIR/" 2>/dev/null || true
+            cp "$BIN_DIR/HadesRuntime"    "$PKG_DIR/" 2>/dev/null || true
+          fi
+
+          # Create archive
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            7z a "${PKG_DIR}.zip" "$PKG_DIR"
+          else
+            tar czf "${PKG_DIR}.tar.gz" "$PKG_DIR"
+          fi
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.artifact_name }}
+          path: hades-engine-*-${{ matrix.artifact_name }}.*
+
+  # ------------------------------------------------------------------
+  # 3. Create GitHub Release and attach all artifacts
+  # ------------------------------------------------------------------
+  release:
+    needs: [vendor-source, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts -type f | sort
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.vendor-source.outputs.version }}
+          name: Hades Engine ${{ needs.vendor-source.outputs.version }}
+          draft: ${{ github.event_name == 'workflow_dispatch' }}
+          generate_release_notes: true
+          files: |
+            artifacts/vendored-source/*
+            artifacts/binaries-linux-x64/*
+            artifacts/binaries-windows-x64/*
+            artifacts/binaries-macos-arm64/*
+          body: |
+            ## Downloads
+
+            | Artifact | Description |
+            |----------|-------------|
+            | `*-full-source.tar.gz` / `.zip` | Complete source with all dependencies vendored — build offline with no internet required |
+            | `*-linux-x64.tar.gz` | Pre-built editor + runtime for Linux x86_64 |
+            | `*-windows-x64.zip` | Pre-built editor + runtime for Windows x64 |
+            | `*-macos-arm64.tar.gz` | Pre-built editor + runtime for macOS Apple Silicon |
+
+            ### Building from vendored source (offline)
+            ```bash
+            tar xzf hades-engine-*-full-source.tar.gz
+            cd hades-engine-*-full-source
+            cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHADES_ALLOW_DOWNLOADS=OFF
+            cmake --build build --config Release
+            ```
