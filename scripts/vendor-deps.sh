@@ -23,7 +23,7 @@ done
 # Extract a CMake cache variable value from Dependencies.cmake.
 cmake_tag() {
   local var="$1"
-  grep "set(${var}" "$DEPS_CMAKE" | sed -E 's/.*"([^"]+)".*/\1/'
+  grep "set(${var}" "$DEPS_CMAKE" | sed -E 's/^[^"]*"([^"]+)".*/\1/'
 }
 
 clone_dep() {
