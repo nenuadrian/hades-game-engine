@@ -1,7 +1,9 @@
 #ifndef HADES_ENGINE_PHYSICS_WORLD_HPP
 #define HADES_ENGINE_PHYSICS_WORLD_HPP
 
+#include <cstdint>
 #include <memory>
+#include <vector>
 
 namespace JPH
 {
@@ -10,6 +12,13 @@ namespace JPH
 
 namespace hades
 {
+  struct ContactEvent
+  {
+    std::uint32_t bodyIdA;
+    std::uint32_t bodyIdB;
+    bool began; ///< true = contact began, false = contact ended
+  };
+
   class PhysicsWorld
   {
   public:
@@ -27,6 +36,9 @@ namespace hades
 
     JPH::BodyInterface &body_interface();
     void set_gravity(float x, float y, float z);
+
+    /// Drain buffered contact events (thread-safe). Returns events and clears the buffer.
+    std::vector<ContactEvent> drain_contacts();
 
   private:
     struct Impl;

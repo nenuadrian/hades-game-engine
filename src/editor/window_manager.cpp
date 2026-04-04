@@ -1113,6 +1113,7 @@ namespace hades
     entityManager = EntityManager();
     componentManager = ComponentManager();
     componentManager.setEntityManager(&entityManager);
+    eventBus.clear();
     editor.reset_workspace_session();
     wasPlayingLastFrame = false;
 
@@ -1425,7 +1426,9 @@ namespace hades
         else
         {
           HADES_FRAME_METRIC_SCOPE("systems_update");
-          systemManager.updateSystems(io.DeltaTime, componentManager, entityManager);
+          eventBus.dispatch();
+          SystemContext context{componentManager, entityManager, eventBus};
+          systemManager.updateSystems(io.DeltaTime, context);
         }
       }
       else if (wasPlayingLastFrame && audio_engine != nullptr)

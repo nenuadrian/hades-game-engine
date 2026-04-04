@@ -58,6 +58,7 @@ namespace hades
     }
 
     void updateSystems(float deltaTime, ComponentManager &componentManager, EntityManager &entityManager);
+    void updateSystems(float deltaTime, SystemContext &context);
   };
 }
 

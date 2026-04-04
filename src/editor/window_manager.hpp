@@ -11,6 +11,7 @@
 #include "../engine/core/ecs/component_manager.hpp"
 #include "../engine/core/ecs/entity_manager.hpp"
 #include "../engine/core/ecs/system_manager.hpp"
+#include "../engine/core/events/event_bus.hpp"
 #include "../engine/runtime/script_runtime.hpp"
 #include "detached_play_window.hpp"
 #include "editor.hpp"
@@ -97,6 +98,7 @@ namespace hades
     EntityManager entityManager;
     ComponentManager componentManager;
     SystemManager systemManager;
+    EventBus eventBus;
     ScriptRuntime scriptRuntime;
     WorkspaceManager workspaceManager;
     Editor editor;

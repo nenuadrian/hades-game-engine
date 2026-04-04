@@ -18,6 +18,8 @@
 #include "../core/ecs/component_manager.hpp"
 #include "../core/ecs/entity_manager.hpp"
 #include "../core/ecs/query.hpp"
+#include "../core/events/event_bus.hpp"
+#include "../core/events/events.hpp"
 #include "../physics/physics_layers.hpp"
 #include "../physics/physics_math.hpp"
 #include "../physics/physics_world.hpp"
@@ -52,6 +54,39 @@ namespace hades
     }
 
     sync_transforms(componentManager);
+  }
+
+  void PhysicsSystem::update(float deltaTime, SystemContext &context)
+  {
+    update(deltaTime, context.componentManager, context.entityManager);
+
+    // Publish collision events from the physics step.
+    if (physicsWorld_ != nullptr && physicsWorld_->is_initialized())
+    {
+      auto contacts = physicsWorld_->drain_contacts();
+      for (const auto &contact : contacts)
+      {
+        // Look up entities from body IDs.
+        auto itA = bodyToEntity_.find(contact.bodyIdA);
+        auto itB = bodyToEntity_.find(contact.bodyIdB);
+        if (itA == bodyToEntity_.end() || itB == bodyToEntity_.end())
+        {
+          continue;
+        }
+
+        if (contact.began)
+        {
+          context.eventBus.publish(CollisionBeginEvent{
+              itA->second, itB->second,
+              contact.bodyIdA, contact.bodyIdB});
+        }
+        else
+        {
+          context.eventBus.publish(CollisionEndEvent{
+              itA->second, itB->second});
+        }
+      }
+    }
   }
 
   void PhysicsSystem::clear_bodies()

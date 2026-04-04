@@ -304,8 +304,10 @@ namespace hades
     }
 #endif
 
-    // Update all engine systems (physics, movement, rendering, audio).
-    systemManager_.updateSystems(deltaTime, componentManager_, entityManager_);
+    // Dispatch pending events, then update all engine systems.
+    eventBus_.dispatch();
+    SystemContext context{componentManager_, entityManager_, eventBus_};
+    systemManager_.updateSystems(deltaTime, context);
 
     if (renderer_)
     {

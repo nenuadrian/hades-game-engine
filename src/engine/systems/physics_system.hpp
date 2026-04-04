@@ -7,6 +7,7 @@
 
 #include "../core/ecs/entity.hpp"
 #include "../core/ecs/system.hpp"
+#include "../core/ecs/system_context.hpp"
 
 namespace hades
 {
@@ -18,6 +19,7 @@ namespace hades
     void setPhysicsWorld(PhysicsWorld *physicsWorld);
     void set_active_world(std::optional<Entity::EntityId> activeWorld);
     void update(float deltaTime, ComponentManager &componentManager, EntityManager &entityManager) override;
+    void update(float deltaTime, SystemContext &context) override;
     void clear_bodies();
 
   private:

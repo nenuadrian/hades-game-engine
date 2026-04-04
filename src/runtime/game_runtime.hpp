@@ -9,6 +9,7 @@
 #include "engine/core/ecs/component_manager.hpp"
 #include "engine/core/ecs/entity_manager.hpp"
 #include "engine/core/ecs/system_manager.hpp"
+#include "engine/core/events/event_bus.hpp"
 #ifndef HADES_PLATFORM_WEB
 #include "engine/runtime/script_runtime.hpp"
 #endif
@@ -56,6 +57,7 @@ namespace hades
     EntityManager entityManager_;
     ComponentManager componentManager_;
     SystemManager systemManager_;
+    EventBus eventBus_;
 #ifndef HADES_PLATFORM_WEB
     ScriptRuntime scriptRuntime_;
 #endif

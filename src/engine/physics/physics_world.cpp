@@ -2,6 +2,7 @@
 
 #include <cstdarg>
 #include <cstdio>
+#include <mutex>
 #include <thread>
 
 #include <Jolt/Jolt.h>
@@ -12,6 +13,8 @@
 #include <Jolt/Core/JobSystemThreadPool.h>
 #include <Jolt/Physics/PhysicsSettings.h>
 #include <Jolt/Physics/PhysicsSystem.h>
+#include <Jolt/Physics/Body/BodyID.h>
+#include <Jolt/Physics/Collision/ContactListener.h>
 
 #include "physics_layers.hpp"
 
@@ -38,11 +41,57 @@ namespace
 
 namespace hades
 {
+  class HadesContactListener : public JPH::ContactListener
+  {
+  public:
+    JPH::ValidateResult OnContactValidate(
+        const JPH::Body & /*body1*/,
+        const JPH::Body & /*body2*/,
+        JPH::RVec3Arg /*baseOffset*/,
+        const JPH::CollideShapeResult & /*collisionResult*/) override
+    {
+      return JPH::ValidateResult::AcceptAllContactsForThisBodyPair;
+    }
+
+    void OnContactAdded(
+        const JPH::Body &body1,
+        const JPH::Body &body2,
+        const JPH::ContactManifold & /*manifold*/,
+        JPH::ContactSettings & /*settings*/) override
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      contacts_.push_back({body1.GetID().GetIndexAndSequenceNumber(),
+                           body2.GetID().GetIndexAndSequenceNumber(),
+                           true});
+    }
+
+    void OnContactRemoved(const JPH::SubShapeIDPair &subShapePair) override
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      contacts_.push_back({subShapePair.GetBody1ID().GetIndexAndSequenceNumber(),
+                           subShapePair.GetBody2ID().GetIndexAndSequenceNumber(),
+                           false});
+    }
+
+    std::vector<ContactEvent> drain()
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      std::vector<ContactEvent> result;
+      result.swap(contacts_);
+      return result;
+    }
+
+  private:
+    std::mutex mutex_;
+    std::vector<ContactEvent> contacts_;
+  };
+
   struct PhysicsWorld::Impl
   {
     std::unique_ptr<JPH::TempAllocatorImpl> tempAllocator;
     std::unique_ptr<JPH::JobSystemThreadPool> jobSystem;
     std::unique_ptr<JPH::PhysicsSystem> physicsSystem;
+    HadesContactListener contactListener;
 
     physics::BroadPhaseLayerInterfaceImpl broadPhaseLayerInterface;
     physics::ObjectVsBroadPhaseLayerFilterImpl objectVsBroadPhaseFilter;
@@ -98,6 +147,7 @@ namespace hades
         impl_->objectLayerPairFilter);
 
     impl_->physicsSystem->SetGravity(JPH::Vec3(0.0f, -9.81f, 0.0f));
+    impl_->physicsSystem->SetContactListener(&impl_->contactListener);
 
     impl_->initialized = true;
     std::fprintf(stderr, "PhysicsWorld: Jolt Physics initialized (%u threads)\n", numThreads);
@@ -154,5 +204,14 @@ namespace hades
     {
       impl_->physicsSystem->SetGravity(JPH::Vec3(x, y, z));
     }
+  }
+
+  std::vector<ContactEvent> PhysicsWorld::drain_contacts()
+  {
+    if (!impl_->initialized)
+    {
+      return {};
+    }
+    return impl_->contactListener.drain();
   }
 }
