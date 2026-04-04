@@ -6,6 +6,7 @@ namespace hades
   enum class PrimitiveType
   {
     Cube,
+    Plane,
   };
 
   struct PrimitiveComponent
