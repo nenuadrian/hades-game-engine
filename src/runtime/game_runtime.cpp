@@ -95,7 +95,7 @@ namespace hades
     return projectPath_.filename().string();
   }
 
-  bool GameRuntime::init(const std::filesystem::path &projectPath)
+  bool GameRuntime::init(const std::filesystem::path &projectPath, bool headless)
   {
     if (initialized_)
     {
@@ -103,36 +103,47 @@ namespace hades
     }
 
     projectPath_ = projectPath;
+    headless_ = headless;
 
-    if (!sdlSession_.init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_GAMECONTROLLER))
+    const std::uint32_t sdlFlags = headless_
+                                       ? (SDL_INIT_TIMER | SDL_INIT_GAMECONTROLLER)
+                                       : (SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_GAMECONTROLLER);
+    if (!sdlSession_.init(sdlFlags))
     {
       return false;
     }
 
-    const std::string title = project_name();
-
-    constexpr int WINDOW_WIDTH = 1280;
-    constexpr int WINDOW_HEIGHT = 720;
-    const SDL_WindowFlags window_flags =
-        static_cast<SDL_WindowFlags>(SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
-    window_.reset(SDL_CreateWindow(
-        title.c_str(),
-        SDL_WINDOWPOS_CENTERED,
-        SDL_WINDOWPOS_CENTERED,
-        WINDOW_WIDTH,
-        WINDOW_HEIGHT,
-        window_flags));
-    if (window_ == nullptr)
+    if (!headless_)
     {
-      std::fprintf(stderr, "Error: SDL_CreateWindow(): %s\n", SDL_GetError());
-      return false;
+      const std::string title = project_name();
+
+      constexpr int WINDOW_WIDTH = 1280;
+      constexpr int WINDOW_HEIGHT = 720;
+      const SDL_WindowFlags window_flags =
+          static_cast<SDL_WindowFlags>(SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+      window_.reset(SDL_CreateWindow(
+          title.c_str(),
+          SDL_WINDOWPOS_CENTERED,
+          SDL_WINDOWPOS_CENTERED,
+          WINDOW_WIDTH,
+          WINDOW_HEIGHT,
+          window_flags));
+      if (window_ == nullptr)
+      {
+        std::fprintf(stderr, "Error: SDL_CreateWindow(): %s\n", SDL_GetError());
+        return false;
+      }
+
+      set_window_icon(window_.get());
+
+      if (!renderer_->init(window_.get()))
+      {
+        return false;
+      }
     }
-
-    set_window_icon(window_.get());
-
-    if (!renderer_->init(window_.get()))
+    else
     {
-      return false;
+      renderer_.reset();
     }
 
     // Do NOT call init_imgui_backend -- the runtime has no editor UI.
@@ -239,8 +250,11 @@ namespace hades
       }
     }
 
-    // Handle swap chain management (resize, etc.).
-    renderer_->render_frame(window_.get());
+    if (renderer_)
+    {
+      // Handle swap chain management (resize, etc.).
+      renderer_->render_frame(window_.get());
+    }
 
     // Compute delta time.
     static Uint64 lastTicks = SDL_GetPerformanceCounter();
@@ -265,8 +279,11 @@ namespace hades
     // Update all engine systems (physics, movement, rendering, audio).
     systemManager_.updateSystems(deltaTime, componentManager_, entityManager_);
 
-    // Present the frame (clear + present, no ImGui).
-    renderer_->present_frame();
+    if (renderer_)
+    {
+      // Present the frame (clear + present, no ImGui).
+      renderer_->present_frame();
+    }
   }
 
   int GameRuntime::run()

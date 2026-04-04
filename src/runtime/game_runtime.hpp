@@ -27,7 +27,7 @@ namespace hades
     GameRuntime();
     ~GameRuntime();
 
-    bool init(const std::filesystem::path &projectPath);
+    bool init(const std::filesystem::path &projectPath, bool headless = false);
     int run();
 
   private:
@@ -60,6 +60,7 @@ namespace hades
     std::shared_ptr<AudioSystem> audioSystem_;
     std::unique_ptr<PhysicsWorld> physicsWorld_;
     std::shared_ptr<PhysicsSystem> physicsSystem_;
+    bool headless_ = false;
     bool initialized_ = false;
     bool running_ = false;
     std::optional<Entity::EntityId> activeWorld_;
