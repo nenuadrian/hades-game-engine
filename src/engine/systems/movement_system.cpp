@@ -3,6 +3,7 @@
 #include "../components/position_component_3d.hpp"
 #include "../core/ecs/component_manager.hpp"
 #include "../core/ecs/entity_manager.hpp"
+#include "../core/ecs/query.hpp"
 
 namespace hades
 {
@@ -10,11 +11,9 @@ namespace hades
   {
     (void)deltaTime;
 
-    for (auto entity : entityManager.getAllEntities())
+    for (auto entity : query<PositionComponent3D>(entityManager))
     {
-      if (componentManager.hasComponent<PositionComponent3D>(entity))
-      {
-      }
+      (void)entity;
     }
   }
 }

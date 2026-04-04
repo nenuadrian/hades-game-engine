@@ -14,9 +14,10 @@
 #include "../components/position_component_3d.hpp"
 #include "../components/rigid_body_component.hpp"
 #include "../components/rotation_component_3d.hpp"
+#include "../components/transform_hierarchy_component.hpp"
 #include "../core/ecs/component_manager.hpp"
 #include "../core/ecs/entity_manager.hpp"
-#include "../core/ecs/world_utils.hpp"
+#include "../core/ecs/query.hpp"
 #include "../physics/physics_layers.hpp"
 #include "../physics/physics_math.hpp"
 #include "../physics/physics_world.hpp"
@@ -62,19 +63,8 @@ namespace hades
 
   void PhysicsSystem::ensure_bodies(ComponentManager &componentManager, EntityManager &entityManager)
   {
-    for (Entity::EntityId entity : entityManager.getAllEntities())
+    for (Entity::EntityId entity : query<RigidBodyComponent, ColliderComponent>(entityManager, componentManager, activeWorld_))
     {
-      if (activeWorld_.has_value() && !entity_belongs_to_world(entity, *activeWorld_, componentManager))
-      {
-        continue;
-      }
-
-      if (!componentManager.hasComponent<RigidBodyComponent>(entity) ||
-          !componentManager.hasComponent<ColliderComponent>(entity))
-      {
-        continue;
-      }
-
       auto &rb = componentManager.getComponent<RigidBodyComponent>(entity);
       if (rb.bodyCreated)
       {
@@ -88,7 +78,7 @@ namespace hades
   void PhysicsSystem::remove_stale_bodies(ComponentManager &componentManager, EntityManager &entityManager)
   {
     std::vector<Entity::EntityId> toRemove;
-    const auto &allEntities = entityManager.getAllEntities();
+    const auto &allEntities = entityManager.getActiveEntities();
 
     for (const auto &[entity, bodyId] : entityToBody_)
     {
@@ -147,6 +137,12 @@ namespace hades
       {
         auto &rot = componentManager.getComponent<RotationComponent3D>(entity);
         physics::from_jph(rotation, rot);
+      }
+
+      if (componentManager.hasComponent<TransformHierarchyComponent>(entity))
+      {
+        auto &hierarchy = componentManager.getComponent<TransformHierarchyComponent>(entity);
+        hierarchy.transformDirty = true;
       }
     }
   }

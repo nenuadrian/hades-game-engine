@@ -9,42 +9,11 @@
 #include "../components/position_component_3d.hpp"
 #include "../core/ecs/component_manager.hpp"
 #include "../core/ecs/entity_manager.hpp"
-#include "../core/ecs/world_utils.hpp"
+#include "../core/ecs/query.hpp"
 #include "../runtime/main_camera_selection.hpp"
 
 namespace hades
 {
-  namespace
-  {
-    std::optional<Entity::EntityId> find_fallback_listener(
-        EntityManager &entityManager,
-        ComponentManager &componentManager,
-        std::optional<Entity::EntityId> activeWorld)
-    {
-      for (Entity::EntityId entity : entityManager.getAllEntities())
-      {
-        if (activeWorld.has_value() && !entity_belongs_to_world(entity, *activeWorld, componentManager))
-        {
-          continue;
-        }
-
-        if (!componentManager.hasComponent<AudioListenerComponent>(entity) ||
-            !componentManager.hasComponent<PositionComponent3D>(entity))
-        {
-          continue;
-        }
-
-        const auto &listener = componentManager.getComponent<AudioListenerComponent>(entity);
-        if (listener.enabled)
-        {
-          return entity;
-        }
-      }
-
-      return std::nullopt;
-    }
-  }
-
   void AudioSystem::setAudioEngine(AudioEngine *audioEngine)
   {
     audioEngine_ = audioEngine;
@@ -79,7 +48,15 @@ namespace hades
 
     if (!listenerEntity.has_value())
     {
-      listenerEntity = find_fallback_listener(entityManager, componentManager, activeWorld_);
+      for (Entity::EntityId entity : query<AudioListenerComponent, PositionComponent3D>(entityManager, componentManager, activeWorld_))
+      {
+        const auto &listener = componentManager.getComponent<AudioListenerComponent>(entity);
+        if (listener.enabled)
+        {
+          listenerEntity = entity;
+          break;
+        }
+      }
     }
 
     if (listenerEntity.has_value())
@@ -90,18 +67,8 @@ namespace hades
     }
 
     std::unordered_set<Entity::EntityId> activeSources;
-    for (Entity::EntityId entity : entityManager.getAllEntities())
+    for (Entity::EntityId entity : query<AudioSourceComponent>(entityManager, componentManager, activeWorld_))
     {
-      if (activeWorld_.has_value() && !entity_belongs_to_world(entity, *activeWorld_, componentManager))
-      {
-        continue;
-      }
-
-      if (!componentManager.hasComponent<AudioSourceComponent>(entity))
-      {
-        continue;
-      }
-
       activeSources.insert(entity);
       const auto &source = componentManager.getComponent<AudioSourceComponent>(entity);
       const PositionComponent3D *position = nullptr;

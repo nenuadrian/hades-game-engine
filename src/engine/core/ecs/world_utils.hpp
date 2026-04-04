@@ -20,26 +20,57 @@ namespace hades
       Entity::EntityId entity,
       ComponentManager &componentManager)
   {
+    // Check the cache on the hierarchy component if it exists.
+    if (componentManager.hasComponent<TransformHierarchyComponent>(entity))
+    {
+      auto &hierarchy = componentManager.getComponent<TransformHierarchyComponent>(entity);
+      if (!hierarchy.worldCacheDirty)
+      {
+        return hierarchy.cachedWorld;
+      }
+    }
+
+    // Walk the parent chain to find the world root.
     Entity::EntityId current = entity;
     while (true)
     {
       if (componentManager.hasComponent<WorldComponent>(current))
       {
+        // Cache the result on the original entity.
+        if (componentManager.hasComponent<TransformHierarchyComponent>(entity))
+        {
+          auto &hierarchy = componentManager.getComponent<TransformHierarchyComponent>(entity);
+          hierarchy.cachedWorld = current;
+          hierarchy.worldCacheDirty = false;
+        }
         return current;
       }
 
       if (!componentManager.hasComponent<TransformHierarchyComponent>(current))
       {
+        // Cache the miss too.
+        if (componentManager.hasComponent<TransformHierarchyComponent>(entity))
+        {
+          auto &hierarchy = componentManager.getComponent<TransformHierarchyComponent>(entity);
+          hierarchy.cachedWorld = std::nullopt;
+          hierarchy.worldCacheDirty = false;
+        }
         return std::nullopt;
       }
 
-      const auto &hierarchy = componentManager.getComponent<TransformHierarchyComponent>(current);
-      if (!hierarchy.parent.has_value())
+      const auto &h = componentManager.getComponent<TransformHierarchyComponent>(current);
+      if (!h.parent.has_value())
       {
+        if (componentManager.hasComponent<TransformHierarchyComponent>(entity))
+        {
+          auto &hierarchy = componentManager.getComponent<TransformHierarchyComponent>(entity);
+          hierarchy.cachedWorld = std::nullopt;
+          hierarchy.worldCacheDirty = false;
+        }
         return std::nullopt;
       }
 
-      current = *hierarchy.parent;
+      current = *h.parent;
     }
   }
 
@@ -52,12 +83,32 @@ namespace hades
     return entityWorld.has_value() && *entityWorld == world;
   }
 
+  /// Recursively invalidate cached world lookups for an entity and all its
+  /// descendants. Call this after modifying the transform hierarchy.
+  inline void invalidate_world_caches(
+      Entity::EntityId entity,
+      ComponentManager &componentManager)
+  {
+    if (!componentManager.hasComponent<TransformHierarchyComponent>(entity))
+    {
+      return;
+    }
+
+    auto &hierarchy = componentManager.getComponent<TransformHierarchyComponent>(entity);
+    hierarchy.worldCacheDirty = true;
+
+    for (Entity::EntityId child : hierarchy.children)
+    {
+      invalidate_world_caches(child, componentManager);
+    }
+  }
+
   inline std::vector<Entity::EntityId> find_world_entities(
       EntityManager &entityManager,
       ComponentManager &componentManager)
   {
     std::vector<Entity::EntityId> worlds;
-    for (Entity::EntityId entity : entityManager.getAllEntities())
+    for (Entity::EntityId entity : entityManager.getActiveEntities())
     {
       if (!componentManager.hasComponent<WorldComponent>(entity))
       {
@@ -84,7 +135,7 @@ namespace hades
       EntityManager &entityManager,
       ComponentManager &componentManager)
   {
-    for (Entity::EntityId entity : entityManager.getAllEntities())
+    for (Entity::EntityId entity : entityManager.getActiveEntities())
     {
       if (!componentManager.hasComponent<WorldComponent>(entity))
       {
@@ -108,7 +159,7 @@ namespace hades
     std::optional<Entity::EntityId> firstWorld;
     std::optional<Entity::EntityId> defaultWorld;
 
-    for (Entity::EntityId entity : entityManager.getAllEntities())
+    for (Entity::EntityId entity : entityManager.getActiveEntities())
     {
       if (!componentManager.hasComponent<WorldComponent>(entity))
       {
@@ -150,7 +201,7 @@ namespace hades
       ComponentManager &componentManager,
       Entity::EntityId worldEntity)
   {
-    for (Entity::EntityId entity : entityManager.getAllEntities())
+    for (Entity::EntityId entity : entityManager.getActiveEntities())
     {
       if (!componentManager.hasComponent<WorldComponent>(entity))
       {

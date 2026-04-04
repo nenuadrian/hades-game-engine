@@ -3,6 +3,7 @@
 #include "../components/render_component.hpp"
 #include "../core/ecs/component_manager.hpp"
 #include "../core/ecs/entity_manager.hpp"
+#include "../core/ecs/query.hpp"
 
 namespace hades
 {
@@ -10,13 +11,10 @@ namespace hades
   {
     (void)deltaTime;
 
-    for (auto entity : entityManager.getAllEntities())
+    for (auto entity : query<RenderComponent>(entityManager))
     {
-      if (componentManager.hasComponent<RenderComponent>(entity))
-      {
-        auto &renderComp = componentManager.getComponent<RenderComponent>(entity);
-        (void)renderComp;
-      }
+      auto &renderComp = componentManager.getComponent<RenderComponent>(entity);
+      (void)renderComp;
     }
   }
 }

@@ -19,6 +19,7 @@
 #include "../../components/world_component.hpp"
 #include "component_manager.hpp"
 #include "entity_manager.hpp"
+#include "query.hpp"
 #include "world_utils.hpp"
 
 namespace hades
@@ -30,20 +31,7 @@ namespace hades
         ComponentManager &componentManager,
         std::optional<Entity::EntityId> world)
     {
-      for (Entity::EntityId entity : entityManager.getAllEntities())
-      {
-        if (world.has_value() && !entity_belongs_to_world(entity, *world, componentManager))
-        {
-          continue;
-        }
-
-        if (componentManager.hasComponent<CameraComponent>(entity))
-        {
-          return true;
-        }
-      }
-
-      return false;
+      return !query<CameraComponent>(entityManager, componentManager, world).empty();
     }
   }
 
@@ -217,5 +205,7 @@ namespace hades
 
     auto &parentHierarchy = componentManager.getComponent<TransformHierarchyComponent>(*parent);
     parentHierarchy.addChild(entity);
+
+    invalidate_world_caches(entity, componentManager);
   }
 }
