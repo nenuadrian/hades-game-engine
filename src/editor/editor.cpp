@@ -25,7 +25,6 @@ namespace hades
     constexpr char ENTITY_WINDOW_TITLE[] = "Entities";
     constexpr char WORKSPACE_WINDOW_TITLE[] = "Workspace";
     constexpr char PROPERTIES_WINDOW_TITLE[] = "Properties";
-    constexpr char COMPONENTS_WINDOW_TITLE[] = "Components";
     constexpr char SCENE_WINDOW_TITLE[] = "World";
   }
 
@@ -407,13 +406,11 @@ namespace hades
     ImGuiID mainDockId = dockspaceId;
     ImGuiID workspaceDockId = ImGui::DockBuilderSplitNode(mainDockId, ImGuiDir_Left, 0.22f, nullptr, &mainDockId);
     const ImGuiID entitiesDockId = ImGui::DockBuilderSplitNode(workspaceDockId, ImGuiDir_Down, 0.56f, nullptr, &workspaceDockId);
-    ImGuiID inspectorDockId = ImGui::DockBuilderSplitNode(mainDockId, ImGuiDir_Right, 0.34f, nullptr, &mainDockId);
-    const ImGuiID componentsDockId = ImGui::DockBuilderSplitNode(inspectorDockId, ImGuiDir_Right, 0.45f, nullptr, &inspectorDockId);
+    const ImGuiID inspectorDockId = ImGui::DockBuilderSplitNode(mainDockId, ImGuiDir_Right, 0.34f, nullptr, &mainDockId);
     const ImGuiID consoleDockId = ImGui::DockBuilderSplitNode(mainDockId, ImGuiDir_Down, 0.25f, nullptr, &mainDockId);
     ImGui::DockBuilderDockWindow(WORKSPACE_WINDOW_TITLE, workspaceDockId);
     ImGui::DockBuilderDockWindow(ENTITY_WINDOW_TITLE, entitiesDockId);
     ImGui::DockBuilderDockWindow(PROPERTIES_WINDOW_TITLE, inspectorDockId);
-    ImGui::DockBuilderDockWindow(COMPONENTS_WINDOW_TITLE, componentsDockId);
     ImGui::DockBuilderDockWindow(SCENE_WINDOW_TITLE, mainDockId);
     ImGui::DockBuilderDockWindow("Debug Console", consoleDockId);
     ImGui::DockBuilderFinish(dockspaceId);

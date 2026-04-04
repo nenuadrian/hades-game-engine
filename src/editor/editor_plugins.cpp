@@ -200,16 +200,6 @@ namespace hades
         }));
 
     register_plugin(std::make_unique<CallbackEditorPlugin>(
-        "components",
-        "Components",
-        EditorPluginPhase::PostEntityDeletion,
-        60,
-        [this](EditorPluginContext &context)
-        {
-          components(context.entityManager, context.componentManager);
-        }));
-
-    register_plugin(std::make_unique<CallbackEditorPlugin>(
         "settings",
         "Settings",
         EditorPluginPhase::PostEntityDeletion,

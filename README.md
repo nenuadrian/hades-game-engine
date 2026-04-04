@@ -163,14 +163,6 @@ destroy_entities                     avg   314.592 ms  min   299.797 ms  max   3
 For C# scripting workflow, runtime behavior, and the current limitations, see
 [SCRIPTS.md](SCRIPTS.md).
 
-## Documentation
-
-```bash
-python3 -m pip install -r requirements-docs.txt
-python3 scripts/generate_class_diagram.py
-python3 -m mkdocs serve
-```
-
 ## Previous Versions
 
 The engine has gone through several renderer backends in this repository: Metal, OpenGL, and now Vulkan (<https://github.com/nenuadrian/hades-game-engine/tree/507e1d5c3bece7e09d78d668d4e3d652be0b2431>).

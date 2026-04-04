@@ -34,7 +34,6 @@ namespace hades
   namespace
   {
     constexpr char PROPERTIES_WINDOW_TITLE[] = "Properties";
-    constexpr char COMPONENTS_WINDOW_TITLE[] = "Components";
 
     const char *primitive_type_label(PrimitiveType type)
     {
@@ -72,8 +71,6 @@ namespace hades
 
   void Editor::properties(EntityManager &entityManager, ComponentManager &componentManager)
   {
-    (void)entityManager;
-
     ImGui::Begin(PROPERTIES_WINDOW_TITLE);
 
     if (!state.selectedEntity.has_value())
@@ -101,34 +98,6 @@ namespace hades
       ImGui::TextDisabled("Unnamed");
     }
 
-    if (isWorld)
-    {
-      const auto &world = componentManager.getComponent<WorldComponent>(entity);
-      ImGui::Text("Startup World: %s", world.isDefault ? "Yes" : "No");
-    }
-
-    ImGui::End();
-  }
-
-  void Editor::components(EntityManager &entityManager, ComponentManager &componentManager)
-  {
-    ImGui::Begin(COMPONENTS_WINDOW_TITLE);
-
-    if (!state.selectedEntity.has_value())
-    {
-      ImGui::TextDisabled("No selection.");
-      ImGui::End();
-      return;
-    }
-
-    const Entity::EntityId entity = *state.selectedEntity;
-    const bool isWorld = componentManager.hasComponent<WorldComponent>(entity);
-
-    ImGui::Text("%s %u", isWorld ? "World" : "Entity", entity);
-    if (componentManager.hasComponent<NameComponent>(entity))
-    {
-      ImGui::TextDisabled("%s", componentManager.getComponent<NameComponent>(entity).value.c_str());
-    }
     ImGui::Separator();
 
     if (isWorld)

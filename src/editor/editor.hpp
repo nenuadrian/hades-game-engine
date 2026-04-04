@@ -227,7 +227,6 @@ namespace hades
     void entities(EntityManager &entityManager, ComponentManager &componentManager);
     void scene(EntityManager &entityManager, ComponentManager &componentManager);
     void properties(EntityManager &entityManager, ComponentManager &componentManager);
-    void components(EntityManager &entityManager, ComponentManager &componentManager);
     void render_hierarchy(Entity::EntityId entity, EntityManager &entityManager, ComponentManager &componentManager);
     void render_hierarchies(EntityManager &entityManager, ComponentManager &componentManager);
     void debug(float deltaTime);

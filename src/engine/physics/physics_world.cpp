@@ -1,17 +1,40 @@
 #include "physics_world.hpp"
 
+#include <cstdarg>
 #include <cstdio>
 #include <thread>
 
 #include <Jolt/Jolt.h>
 #include <Jolt/RegisterTypes.h>
 #include <Jolt/Core/Factory.h>
+#include <Jolt/Core/IssueReporting.h>
 #include <Jolt/Core/TempAllocator.h>
 #include <Jolt/Core/JobSystemThreadPool.h>
 #include <Jolt/Physics/PhysicsSettings.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 
 #include "physics_layers.hpp"
+
+namespace
+{
+  static void jolt_trace(const char *fmt, ...)
+  {
+    std::va_list args;
+    va_start(args, fmt);
+    char buf[1024];
+    std::vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+    std::fprintf(stderr, "[Jolt] %s\n", buf);
+  }
+
+#ifdef JPH_ENABLE_ASSERTS
+  static bool jolt_assert_failed(const char *expression, const char *message, const char *file, JPH::uint line)
+  {
+    std::fprintf(stderr, "[Jolt] Assertion failed: %s:%u: (%s) %s\n", file, line, expression, message ? message : "");
+    return true; // trigger breakpoint
+  }
+#endif
+}
 
 namespace hades
 {
@@ -43,6 +66,8 @@ namespace hades
     }
 
     JPH::RegisterDefaultAllocator();
+    JPH::Trace = jolt_trace;
+    JPH_IF_ENABLE_ASSERTS(JPH::AssertFailed = jolt_assert_failed;)
 
     if (JPH::Factory::sInstance == nullptr)
     {
@@ -50,7 +75,7 @@ namespace hades
     }
     JPH::RegisterTypes();
 
-    impl_->tempAllocator = std::make_unique<JPH::TempAllocatorImpl>(10 * 1024 * 1024);
+    impl_->tempAllocator = std::make_unique<JPH::TempAllocatorImpl>(32 * 1024 * 1024);
 
     const unsigned int numThreads =
         std::max(1u, std::thread::hardware_concurrency() - 1);
