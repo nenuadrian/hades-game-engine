@@ -30,12 +30,16 @@ using json = nlohmann::json;
 
 namespace hades
 {
-  namespace
+  void register_builtin_components()
   {
-    struct RegisterAllComponents
+    static bool registered = false;
+    if (registered)
     {
-      RegisterAllComponents()
-      {
+      return;
+    }
+    registered = true;
+
+    {
         auto &registry = ComponentRegistry::instance();
 
         // NameComponent
@@ -506,9 +510,6 @@ namespace hades
               cm.addComponent(entity, c);
               return true;
             });
-      }
-    };
-
-    static RegisterAllComponents _registerAllComponents;
+    }
   }
 }

@@ -34,6 +34,10 @@ namespace hades
     DeserializeFn deserialize;
   };
 
+  /// Call this to ensure all built-in component serializers are registered.
+  /// Safe to call multiple times; only runs once.
+  void register_builtin_components();
+
   class ComponentRegistry
   {
   public:
