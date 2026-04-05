@@ -15,6 +15,7 @@
 #include <SDL.h>
 
 #include "native_dialogs.hpp"
+#include "IconsFontAwesome6.h"
 #include "imgui.h"
 #include "imgui_impl_sdl2.h"
 #include "../engine/assets/asset_manager.hpp"
@@ -408,6 +409,21 @@ namespace hades
       if (std::filesystem::exists(fontPath))
       {
         io.Fonts->AddFontFromFileTTF(fontPath.c_str(), 16.0f);
+      }
+    }
+
+    // Merge FontAwesome 6 icon glyphs into the default font.
+    {
+      const std::string iconFontPath = asset_path("assets/fonts/fa-solid-900.ttf");
+      if (std::filesystem::exists(iconFontPath))
+      {
+        static const ImWchar iconRanges[] = {ICON_MIN_FA, ICON_MAX_16_FA, 0};
+        ImFontConfig iconConfig;
+        iconConfig.MergeMode = true;
+        iconConfig.PixelSnapH = true;
+        iconConfig.GlyphMinAdvanceX = 16.0f;
+        iconConfig.GlyphOffset = ImVec2(0.0f, 2.0f);
+        io.Fonts->AddFontFromFileTTF(iconFontPath.c_str(), 14.0f, &iconConfig, iconRanges);
       }
     }
 
@@ -1353,8 +1369,7 @@ namespace hades
                    event.window.windowID == *scriptEditorWindowId)
           {
             closedAuxiliaryWindowThisFrame = true;
-            editor.set_script_editor_window_open(false);
-            scriptEditorWindow.close();
+            editor.request_close_script_editor_window();
           }
           else if (playWindowId.has_value() &&
                    event.window.windowID == *playWindowId)

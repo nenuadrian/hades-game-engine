@@ -71,6 +71,12 @@ namespace
     state.log += text;
   }
 
+  void sync_log_buffer(const std::string &source, std::vector<char> &buffer)
+  {
+    buffer.assign(source.begin(), source.end());
+    buffer.push_back('\0');
+  }
+
   void copy_directory_recursive(
       const std::filesystem::path &source,
       const std::filesystem::path &destination,
@@ -663,6 +669,7 @@ namespace hades
     {
       std::lock_guard<std::mutex> lock(exportBuildState_->mutex);
       exportBuildLog_ = exportBuildState_->log;
+      sync_log_buffer(exportBuildLog_, exportBuildLogBuffer_);
       if (exportBuildState_->finished)
       {
         exportBuildInProgress_ = false;
@@ -776,6 +783,7 @@ namespace hades
       save_worlds(entityManager, componentManager);
 
       exportBuildLog_.clear();
+      sync_log_buffer(exportBuildLog_, exportBuildLogBuffer_);
       exportBuildError_.clear();
       exportBuildSucceeded_ = false;
       exportBuildFinished_ = false;
@@ -837,7 +845,15 @@ namespace hades
       }
       else
       {
-        ImGui::TextUnformatted(exportBuildLog_.c_str(), exportBuildLog_.c_str() + exportBuildLog_.size());
+        if (exportBuildLogBuffer_.empty())
+        {
+          sync_log_buffer(exportBuildLog_, exportBuildLogBuffer_);
+        }
+        ImGui::InputTextMultiline("##BuildOutputText",
+                                  exportBuildLogBuffer_.data(),
+                                  exportBuildLogBuffer_.size(),
+                                  ImVec2(-1.0f, -1.0f),
+                                  ImGuiInputTextFlags_ReadOnly);
         if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
         {
           ImGui::SetScrollHereY(1.0f);

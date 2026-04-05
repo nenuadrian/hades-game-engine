@@ -66,6 +66,8 @@ namespace hades
     sceneGizmoPixelsPerWorldUnit_ = 1.0f;
     pendingSavedWorldRestore_ = false;
 
+    scriptAutoComplete_.reset();
+
     activeWorkspacePath_.clear();
     workspaceTreeRoot_.reset();
     workspaceScriptFiles_.clear();
@@ -79,6 +81,7 @@ namespace hades
     focusScriptEditorWindow_ = false;
     openScriptEditorUnsavedChangesDialog_ = false;
     pendingScriptEditorClosePath_.reset();
+    pendingCloseScriptEditorWindow_ = false;
     cachedDiskWorlds_.clear();
     workspaceScriptListDirty_ = false;
     parsedScriptCache_.clear();
@@ -230,6 +233,21 @@ namespace hades
   void Editor::sync_menu_bar(EntityManager &entityManager, ComponentManager &componentManager)
   {
     gui->menu_bar_items.clear();
+
+    const auto add_plugin_toggle_item = [this](MenuBarItem &menu, const char *title, std::string_view pluginId)
+    {
+      MenuBarItem item;
+      item.title = title;
+      item.selected = is_plugin_visible(pluginId);
+      item.on_activate = [this, pluginId]()
+      {
+        if (EditorPlugin *plugin = find_plugin(pluginId))
+        {
+          plugin->set_visible(*this, !plugin->visible(*this));
+        }
+      };
+      menu.children_menu_items.push_back(std::move(item));
+    };
 
     MenuBarItem file;
     file.title = "File";
@@ -466,6 +484,15 @@ namespace hades
     }
     gui->menu_bar_items.push_back(game);
 
+    MenuBarItem windows;
+    windows.title = "Windows";
+    add_plugin_toggle_item(windows, "Workspace", "workspace");
+    add_plugin_toggle_item(windows, "Entities", "entities");
+    add_plugin_toggle_item(windows, "Properties", "properties");
+    add_plugin_toggle_item(windows, "World", "world");
+    add_plugin_toggle_item(windows, "Debug Console", "debug-console");
+    gui->menu_bar_items.push_back(std::move(windows));
+
     MenuBarItem help;
     help.title = "Help";
 
@@ -488,6 +515,12 @@ namespace hades
     help.children_menu_items.push_back(std::move(statsForNerds));
 
     gui->menu_bar_items.push_back(std::move(help));
+  }
+
+  void Editor::select_entity(Entity::EntityId entity)
+  {
+    state.selectedEntity = entity;
+    show_plugin("properties");
   }
 
   void Editor::configure_default_dock_layout(std::uint32_t dockspaceId)

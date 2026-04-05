@@ -12,6 +12,7 @@
 #include "../engine/components/audio_source_component.hpp"
 #include "../engine/components/camera_component.hpp"
 #include "../engine/components/light_component.hpp"
+#include "../engine/components/mesh_renderer_component.hpp"
 #include "../engine/components/model_component.hpp"
 #include "../engine/components/name_component.hpp"
 #include "../engine/components/position_component_3d.hpp"
@@ -105,7 +106,7 @@ namespace hades
     }
     {
       static int selectedComponentType = 0;
-      const char *componentTypes[] = {"Script Component", "Rigid Body"};
+      const char *componentTypes[] = {"Script Component", "Rigid Body", "Mesh Renderer"};
       ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.65f);
       ImGui::Combo("##AddComponentType", &selectedComponentType, componentTypes, IM_ARRAYSIZE(componentTypes));
       ImGui::SameLine();
@@ -139,6 +140,13 @@ namespace hades
             componentManager.addComponent(entity, ColliderComponent{});
           }
         }
+        else if (selectedComponentType == 2)
+        {
+          if (!componentManager.hasComponent<MeshRendererComponent>(entity))
+          {
+            componentManager.addComponent(entity, MeshRendererComponent{});
+          }
+        }
       }
     }
     if (isWorld)
@@ -164,6 +172,18 @@ namespace hades
     {
       auto &scale = componentManager.getComponent<ScaleComponent3D>(entity);
       ImGui::DragFloat3("Scale", &scale.x, 0.01f, 0.01f, 100.0f);
+    }
+
+    if (componentManager.hasComponent<MeshRendererComponent>(entity) && ImGui::CollapsingHeader("Material"))
+    {
+      auto &meshRenderer = componentManager.getComponent<MeshRendererComponent>(entity);
+      auto &mat = meshRenderer.material;
+
+      ImGui::ColorEdit3("Base Color", &mat.baseColorR);
+      ImGui::DragFloat("Metallic", &mat.metallic, 0.01f, 0.0f, 1.0f);
+      ImGui::DragFloat("Roughness", &mat.roughness, 0.01f, 0.0f, 1.0f);
+      ImGui::DragFloat("Opacity", &mat.opacity, 0.01f, 0.0f, 1.0f);
+      ImGui::Checkbox("Wireframe", &mat.wireframe);
     }
 
     if (componentManager.hasComponent<RigidBodyComponent>(entity) && ImGui::CollapsingHeader("Rigid Body"))
@@ -466,7 +486,7 @@ namespace hades
         const Entity::EntityId parent = *hierarchy.parent;
         if (ImGui::Selectable(entity_label(parent, componentManager).c_str(), false))
         {
-          state.selectedEntity = parent;
+          select_entity(parent);
         }
       }
       else
@@ -485,7 +505,7 @@ namespace hades
         {
           if (ImGui::Selectable(entity_label(child, componentManager).c_str(), false))
           {
-            state.selectedEntity = child;
+            select_entity(child);
           }
         }
       }

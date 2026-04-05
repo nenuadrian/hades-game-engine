@@ -382,7 +382,7 @@ namespace hades
 
       if (createdEntity.has_value())
       {
-        state.selectedEntity = *createdEntity;
+        select_entity(*createdEntity);
         importModelError.clear();
         ImGui::CloseCurrentPopup();
       }
@@ -572,7 +572,7 @@ namespace hades
     ImGui::PopStyleVar();
     if (ImGui::IsItemClicked())
     {
-      state.selectedEntity = entity;
+      select_entity(entity);
     }
 
     if (ImGui::BeginPopupContextItem())

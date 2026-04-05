@@ -11,9 +11,9 @@
 #include <fstream>
 #include <future>
 #include <string>
-#include <unordered_set>
 #include <utility>
 
+#include "IconsFontAwesome6.h"
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "TextEditor.h"
@@ -113,131 +113,6 @@ namespace hades
       return editor;
     }
 
-    // ── Autocomplete helpers ──────────────────────────────────────────
-
-    bool is_identifier_char(char c)
-    {
-      return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
-    }
-
-    std::string extract_partial_word(const std::string &lineText, int cursorColumn)
-    {
-      if (cursorColumn <= 0 || cursorColumn > static_cast<int>(lineText.size()))
-        return {};
-
-      int start = cursorColumn;
-      while (start > 0 && is_identifier_char(lineText[start - 1]))
-        --start;
-
-      return lineText.substr(start, cursorColumn - start);
-    }
-
-    int find_word_start_column(const std::string &lineText, int cursorColumn)
-    {
-      if (cursorColumn <= 0 || cursorColumn > static_cast<int>(lineText.size()))
-        return cursorColumn;
-
-      int start = cursorColumn;
-      while (start > 0 && is_identifier_char(lineText[start - 1]))
-        --start;
-
-      return start;
-    }
-
-    bool case_insensitive_prefix(const std::string &candidate, const std::string &prefix)
-    {
-      if (prefix.size() > candidate.size())
-        return false;
-      for (std::size_t i = 0; i < prefix.size(); ++i)
-      {
-        if (std::tolower(static_cast<unsigned char>(candidate[i])) !=
-            std::tolower(static_cast<unsigned char>(prefix[i])))
-          return false;
-      }
-      return true;
-    }
-
-    const std::vector<std::string> &get_static_autocomplete_words()
-    {
-      static const std::vector<std::string> words = {
-          // C# keywords
-          "abstract", "as", "async", "await", "base", "bool", "break", "byte",
-          "case", "catch", "char", "checked", "class", "const", "continue",
-          "decimal", "default", "delegate", "do", "double", "dynamic", "else",
-          "enum", "event", "explicit", "extern", "false", "finally", "fixed",
-          "float", "for", "foreach", "get", "goto", "if", "implicit", "in",
-          "int", "interface", "internal", "is", "lock", "long", "nameof",
-          "namespace", "new", "null", "object", "operator", "out", "override",
-          "params", "partial", "private", "protected", "public", "readonly",
-          "ref", "return", "sbyte", "sealed", "set", "short", "sizeof",
-          "stackalloc", "static", "string", "struct", "switch", "this", "throw",
-          "true", "try", "typeof", "uint", "ulong", "unchecked", "unsafe",
-          "ushort", "using", "var", "virtual", "void", "volatile", "where",
-          "while", "yield",
-          // .NET built-in types
-          "Console", "Math", "String", "Int32", "Int64", "Boolean", "Object",
-          "Exception", "List", "Dictionary", "Task", "Action", "Func",
-          "IEnumerable", "IDisposable", "EventArgs",
-          // Hades engine API
-          "HadesScript", "EntityContext", "Vector3", "Quaternion",
-          "GameObject", "Transform", "Debug",
-          "OnStart", "OnUpdate", "OnKeyDown", "OnKeyUp",
-          "EntityId", "Name", "Position",
-      };
-      return words;
-    }
-
-    std::vector<std::string> filter_autocomplete_candidates(
-        const std::string &prefix,
-        const std::vector<std::string> &staticWords,
-        const std::unordered_map<std::string, std::vector<ParsedScriptClass>> &parsedScriptCache)
-    {
-      std::vector<std::string> results;
-      std::unordered_set<std::string> seen;
-
-      auto try_add = [&](const std::string &word)
-      {
-        if (word == prefix)
-          return;
-        if (!case_insensitive_prefix(word, prefix))
-          return;
-        if (seen.insert(word).second)
-          results.push_back(word);
-      };
-
-      for (const auto &word : staticWords)
-        try_add(word);
-
-      for (const auto &[path, classes] : parsedScriptCache)
-      {
-        for (const auto &cls : classes)
-        {
-          try_add(cls.simpleName);
-          for (const auto &[type, name] : cls.publicFields)
-          {
-            try_add(type);
-            try_add(name);
-          }
-        }
-      }
-
-      std::sort(results.begin(), results.end(), [&prefix](const std::string &a, const std::string &b)
-                {
-        bool aExact = (a.substr(0, prefix.size()) == prefix);
-        bool bExact = (b.substr(0, prefix.size()) == prefix);
-        if (aExact != bExact) return aExact;
-        if (a.size() != b.size()) return a.size() < b.size();
-        return a < b; });
-
-      constexpr std::size_t kMaxCandidates = 12;
-      if (results.size() > kMaxCandidates)
-        results.resize(kMaxCandidates);
-
-      return results;
-    }
-
-    // ── End autocomplete helpers ────────────────────────────────────
-
     std::string path_display_name(const std::filesystem::path &path)
     {
       const std::string filename = path.filename().string();
@@ -306,6 +181,72 @@ namespace hades
     {
       std::error_code errorCode;
       return std::filesystem::is_directory(path, errorCode) ? "Delete Folder" : "Delete File";
+    }
+
+    struct FileTypeVisual
+    {
+      const char *icon;
+      ImU32 iconColor;
+    };
+
+    std::string to_lower(const std::string &str)
+    {
+      std::string result = str;
+      for (auto &c : result)
+      {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+      }
+      return result;
+    }
+
+    FileTypeVisual get_file_type_visual(const std::filesystem::path &path, bool isDirectory, bool isOpen)
+    {
+      if (isDirectory)
+      {
+        return {isOpen ? ICON_FA_FOLDER_OPEN : ICON_FA_FOLDER, IM_COL32(210, 180, 100, 255)};
+      }
+
+      const std::string ext = to_lower(path.extension().string());
+
+      if (ext == ".cs")
+        return {ICON_FA_FILE_CODE, IM_COL32(130, 150, 210, 255)};
+      if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".tga")
+        return {ICON_FA_IMAGE, IM_COL32(130, 190, 130, 255)};
+      if (ext == ".obj" || ext == ".fbx" || ext == ".gltf" || ext == ".glb")
+        return {ICON_FA_CUBE, IM_COL32(210, 160, 100, 255)};
+      if (ext == ".wav" || ext == ".mp3" || ext == ".ogg")
+        return {ICON_FA_VOLUME_HIGH, IM_COL32(210, 200, 120, 255)};
+      if (ext == ".glsl" || ext == ".hlsl" || ext == ".vert" || ext == ".frag" || ext == ".shader")
+        return {ICON_FA_MICROCHIP, IM_COL32(120, 190, 200, 255)};
+      if (ext == ".json" || ext == ".txt" || ext == ".xml" || ext == ".yaml" || ext == ".yml" || ext == ".cfg" || ext == ".ini")
+        return {ICON_FA_FILE_LINES, IM_COL32(161, 151, 146, 255)};
+
+      return {ICON_FA_FILE, IM_COL32(161, 151, 146, 255)};
+    }
+
+    bool subtree_matches_filter(const Editor::WorkspaceTreeNode &node, const char *filter)
+    {
+      if (filter[0] == '\0')
+      {
+        return true;
+      }
+
+      const std::string lowerFilter = to_lower(filter);
+      const std::string lowerName = to_lower(path_display_name(node.path));
+      if (lowerName.find(lowerFilter) != std::string::npos)
+      {
+        return true;
+      }
+
+      for (const auto &child : node.children)
+      {
+        if (subtree_matches_filter(child, filter))
+        {
+          return true;
+        }
+      }
+
+      return false;
     }
 
     std::string csharp_class_name_from_stem(const std::string &stem)
@@ -558,6 +499,7 @@ namespace hades
       openScriptEditorUnsavedChangesDialog_ = false;
       pendingScriptEditorClosePath_.reset();
       pendingCloseAllScriptEditorTabs_ = false;
+      pendingCloseScriptEditorWindow_ = false;
       workspaceScriptListDirty_ = false;
       parsedScriptCache_.clear();
       parsedScriptModTimes_.clear();
@@ -850,36 +792,236 @@ namespace hades
     ImGui::EndPopup();
   }
 
-  void Editor::render_workspace_tree_node(const WorkspaceTreeNode &node)
+  void Editor::render_workspace_tree_node(const WorkspaceTreeNode &node, int depth, int &rowIndex, const char *filter)
   {
     const std::string label = path_display_name(node.path);
-    const std::string treeNodeId = label + "##" + node.path.string();
+    const bool isLeaf = !node.directory || node.children.empty();
+    const bool hasFilter = filter[0] != '\0';
+
+    // Filter: skip nodes that don't match.
+    if (hasFilter)
+    {
+      if (!node.directory)
+      {
+        const std::string lowerName = to_lower(label);
+        const std::string lowerFilter = to_lower(filter);
+        if (lowerName.find(lowerFilter) == std::string::npos)
+        {
+          return;
+        }
+      }
+      else if (!subtree_matches_filter(node, filter))
+      {
+        return;
+      }
+    }
+
+    // Determine selection state.
+    const ScriptEditorTab *activeTab = active_script_editor_tab();
+    const bool isSelected = !node.directory &&
+                            activeTab != nullptr &&
+                            activeTab->path.lexically_normal() == node.path.lexically_normal();
+
+    // Get visual properties for this file type.
+    // We need to peek at whether the tree node will be open for the folder icon.
+    // Use ImGui storage to check the open state from the previous frame.
+    const std::string treeNodeId = "##ws_" + node.path.string();
+    const ImGuiID nodeId = ImGui::GetID(treeNodeId.c_str());
+    const bool wasOpen = ImGui::GetStateStorage()->GetBool(nodeId, false);
+    const bool effectiveOpen = hasFilter && node.directory ? true : wasOpen;
+    const FileTypeVisual visual = get_file_type_visual(node.path, node.directory, effectiveOpen);
+
+    // --- Draw alternating row background ---
+    ImDrawList *drawList = ImGui::GetWindowDrawList();
+    const float rowHeight = ImGui::GetFrameHeight();
+    const ImVec2 cursorPos = ImGui::GetCursorScreenPos();
+    const float windowLeft = ImGui::GetWindowPos().x;
+    const float windowWidth = ImGui::GetWindowSize().x;
+    const ImVec2 rowMin = ImVec2(windowLeft, cursorPos.y);
+    const ImVec2 rowMax = ImVec2(windowLeft + windowWidth, cursorPos.y + rowHeight);
+
+    if (rowIndex % 2 == 1)
+    {
+      drawList->AddRectFilled(rowMin, rowMax, IM_COL32(255, 255, 255, 6));
+    }
+
+    // --- Draw indentation guide lines ---
+    const float indentSpacing = ImGui::GetStyle().IndentSpacing;
+    const float baseX = windowLeft + ImGui::GetStyle().WindowPadding.x;
+    for (int d = 1; d <= depth; ++d)
+    {
+      const float lineX = baseX + (static_cast<float>(d) - 0.5f) * indentSpacing;
+      drawList->AddLine(
+          ImVec2(lineX, rowMin.y),
+          ImVec2(lineX, rowMax.y),
+          IM_COL32(255, 255, 255, 16),
+          1.0f);
+    }
+
+    rowIndex++;
+
+    // --- TreeNodeEx with suppressed built-in backgrounds ---
     ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow |
                                ImGuiTreeNodeFlags_OpenOnDoubleClick |
-                               ImGuiTreeNodeFlags_SpanAvailWidth;
-    if (!node.directory || node.children.empty())
+                               ImGuiTreeNodeFlags_SpanAvailWidth |
+                               ImGuiTreeNodeFlags_FramePadding;
+    if (isLeaf)
     {
       flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
     }
-    const ScriptEditorTab *activeTab = active_script_editor_tab();
-    if (!node.directory &&
-        activeTab != nullptr &&
-        activeTab->path.lexically_normal() == node.path.lexically_normal())
+    if (isSelected)
     {
       flags |= ImGuiTreeNodeFlags_Selected;
     }
 
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 6.0f));
-    const bool open = ImGui::TreeNodeEx(treeNodeId.c_str(), flags);
+    // Force open when filtering.
+    if (hasFilter && node.directory)
+    {
+      ImGui::SetNextItemOpen(true);
+    }
+
+    // Suppress built-in header colors to draw our own.
+    ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0, 0, 0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 3.0f));
+
+    const bool open = ImGui::TreeNodeEx(treeNodeId.c_str(), flags, "");
+
     ImGui::PopStyleVar();
-    if (!node.directory &&
+    ImGui::PopStyleColor(3);
+
+    // --- Capture tree node interaction state while it's still the last item ---
+    const bool isHovered = ImGui::IsItemHovered(ImGuiHoveredFlags_None);
+    const bool isTreeNodeFocused = ImGui::IsItemFocused();
+    const bool isRenaming = workspaceRenamePath_ == node.path && !workspaceRenamePath_.empty();
+
+    // --- Drag-and-drop source (must be right after TreeNodeEx, the last interactive item) ---
+    if (!isRenaming && ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceNoHoldToOpenOthers))
+    {
+      const std::string pathStr = node.path.string();
+      ImGui::SetDragDropPayload("WS_NODE", pathStr.c_str(), pathStr.size() + 1);
+      ImGui::PushStyleColor(ImGuiCol_Text, ImColor(visual.iconColor).Value);
+      ImGui::TextUnformatted(visual.icon);
+      ImGui::PopStyleColor();
+      ImGui::SameLine(0.0f, 6.0f);
+      ImGui::TextUnformatted(label.c_str());
+      ImGui::EndDragDropSource();
+    }
+
+    // --- Drag-and-drop target (directories only) ---
+    if (node.directory && ImGui::BeginDragDropTarget())
+    {
+      drawList->AddRect(rowMin, rowMax, IM_COL32(210, 180, 100, 120), 2.0f, 0, 2.0f);
+
+      if (const ImGuiPayload *payload = ImGui::AcceptDragDropPayload("WS_NODE"))
+      {
+        const std::filesystem::path sourcePath(static_cast<const char *>(payload->Data));
+        const std::filesystem::path destPath = node.path / sourcePath.filename();
+
+        bool isSelfOrDescendant = false;
+        if (sourcePath == node.path)
+        {
+          isSelfOrDescendant = true;
+        }
+        else
+        {
+          const auto rel = node.path.lexically_relative(sourcePath);
+          if (!rel.empty() && *rel.begin() != "..")
+          {
+            isSelfOrDescendant = true;
+          }
+        }
+
+        if (!isSelfOrDescendant && sourcePath.parent_path() != node.path)
+        {
+          std::error_code ec;
+          std::filesystem::rename(sourcePath, destPath, ec);
+          if (!ec)
+          {
+            invalidate_workspace_cache();
+          }
+        }
+      }
+      ImGui::EndDragDropTarget();
+    }
+
+    // --- Draw hover / selection overlay ---
+    if (isSelected)
+    {
+      drawList->AddRectFilled(rowMin, rowMax, IM_COL32(179, 168, 161, 30));
+    }
+    else if (isHovered)
+    {
+      drawList->AddRectFilled(rowMin, rowMax, IM_COL32(255, 255, 255, 12));
+    }
+
+    // --- Draw icon + label on same line ---
+    ImGui::SameLine(0.0f, 0.0f);
+    ImGui::PushStyleColor(ImGuiCol_Text, ImColor(visual.iconColor).Value);
+    ImGui::TextUnformatted(visual.icon);
+    ImGui::PopStyleColor();
+    ImGui::SameLine(0.0f, 6.0f);
+
+    // Inline rename mode.
+    if (isRenaming)
+    {
+      ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+      if (workspaceRenameFocusPending_)
+      {
+        ImGui::SetKeyboardFocusHere();
+        workspaceRenameFocusPending_ = false;
+      }
+      if (ImGui::InputText("##rename", workspaceRenameBuffer_.data(), workspaceRenameBuffer_.size(),
+                           ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll))
+      {
+        // Confirm rename.
+        const std::string newName(workspaceRenameBuffer_.data());
+        if (!newName.empty() && newName != label)
+        {
+          std::error_code ec;
+          std::filesystem::rename(node.path, node.path.parent_path() / newName, ec);
+          if (!ec)
+          {
+            invalidate_workspace_cache();
+          }
+        }
+        workspaceRenamePath_.clear();
+      }
+      else if (ImGui::IsKeyPressed(ImGuiKey_Escape) ||
+               (!ImGui::IsItemActive() && !workspaceRenameFocusPending_ && ImGui::IsItemDeactivated()))
+      {
+        workspaceRenamePath_.clear();
+      }
+    }
+    else
+    {
+      ImGui::TextUnformatted(label.c_str());
+    }
+
+    // --- Click handling ---
+    if (!isRenaming && !node.directory &&
         node.path.extension() == ".cs" &&
-        ImGui::IsItemClicked(ImGuiMouseButton_Left))
+        isHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
     {
       request_script_editor_open(node.path, relative_workspace_path(activeWorkspacePath_, node.path));
     }
 
-    if (ImGui::BeginPopupContextItem())
+    // --- F2 to rename ---
+    if (!isRenaming && isTreeNodeFocused && ImGui::IsKeyPressed(ImGuiKey_F2))
+    {
+      const bool isWorkspaceRoot = node.path == activeWorkspacePath_;
+      if (!isWorkspaceRoot)
+      {
+        workspaceRenamePath_ = node.path;
+        std::snprintf(workspaceRenameBuffer_.data(), workspaceRenameBuffer_.size(), "%s", label.c_str());
+        workspaceRenameFocusPending_ = true;
+      }
+    }
+
+    // --- Context menu ---
+    const std::string contextMenuId = "##ws_ctx_" + node.path.string();
+    if (ImGui::BeginPopupContextItem(contextMenuId.c_str()))
     {
       const std::filesystem::path destinationDirectory =
           node.directory ? node.path : node.path.parent_path();
@@ -908,6 +1050,12 @@ namespace hades
       if (!isWorkspaceRoot)
       {
         ImGui::Separator();
+        if (ImGui::MenuItem("Rename"))
+        {
+          workspaceRenamePath_ = node.path;
+          std::snprintf(workspaceRenameBuffer_.data(), workspaceRenameBuffer_.size(), "%s", label.c_str());
+          workspaceRenameFocusPending_ = true;
+        }
         if (ImGui::MenuItem(workspace_delete_button_label(node.path).c_str()))
         {
           request_workspace_item_deletion(node.path);
@@ -916,6 +1064,7 @@ namespace hades
       ImGui::EndPopup();
     }
 
+    // --- Render children ---
     if (!node.directory || !open || node.children.empty())
     {
       return;
@@ -923,7 +1072,7 @@ namespace hades
 
     for (const auto &child : node.children)
     {
-      render_workspace_tree_node(child);
+      render_workspace_tree_node(child, depth + 1, rowIndex, filter);
     }
 
     ImGui::TreePop();
@@ -947,7 +1096,20 @@ namespace hades
       openScriptEditorUnsavedChangesDialog_ = false;
       pendingScriptEditorClosePath_.reset();
       pendingCloseAllScriptEditorTabs_ = false;
+      pendingCloseScriptEditorWindow_ = false;
     }
+  }
+
+  void Editor::request_close_script_editor_window()
+  {
+    if (!openScriptEditorWindow_)
+    {
+      return;
+    }
+
+    pendingCloseScriptEditorWindow_ = true;
+    pendingCloseAllScriptEditorTabs_ = true;
+    continue_close_all_script_editor_tabs();
   }
 
   bool Editor::consume_script_editor_focus_request()
@@ -1044,6 +1206,7 @@ namespace hades
 
     const std::filesystem::path closedPath = openScriptEditorTabs_[index].path.lexically_normal();
     openScriptEditorTabs_.erase(openScriptEditorTabs_.begin() + index);
+    scriptAutoComplete_.reset();
 
     if (pendingScriptEditorClosePath_.has_value() &&
         pendingScriptEditorClosePath_->lexically_normal() == closedPath)
@@ -1105,6 +1268,11 @@ namespace hades
     if (openScriptEditorTabs_.empty())
     {
       pendingCloseAllScriptEditorTabs_ = false;
+      if (pendingCloseScriptEditorWindow_)
+      {
+        pendingCloseScriptEditorWindow_ = false;
+        set_script_editor_window_open(false);
+      }
     }
   }
 
@@ -1375,6 +1543,7 @@ namespace hades
       {
         pendingScriptEditorClosePath_.reset();
         pendingCloseAllScriptEditorTabs_ = false;
+        pendingCloseScriptEditorWindow_ = false;
         ImGui::CloseCurrentPopup();
       }
 
@@ -1388,6 +1557,7 @@ namespace hades
     bool revertRequested = false;
     bool closeRequested = false;
     bool closeAllRequested = false;
+    bool closeScriptEditorRequested = false;
 
     {
       const bool hasActiveTab = activeScriptEditorTabIndex_.has_value() &&
@@ -1405,6 +1575,8 @@ namespace hades
           ImGui::Separator();
           closeRequested = ImGui::MenuItem("Close", nullptr, false, hasActiveTab);
           closeAllRequested = ImGui::MenuItem("Close All", nullptr, false, !openScriptEditorTabs_.empty());
+          ImGui::Separator();
+          closeScriptEditorRequested = ImGui::MenuItem("Close Script Editor");
           ImGui::EndMenu();
         }
         ImGui::EndMenuBar();
@@ -1482,6 +1654,7 @@ namespace hades
 
     if (closeRequested)
     {
+      pendingCloseScriptEditorWindow_ = false;
       pendingCloseAllScriptEditorTabs_ = false;
       if (activeScriptEditorTabIndex_.has_value() && *activeScriptEditorTabIndex_ < openScriptEditorTabs_.size())
       {
@@ -1500,8 +1673,14 @@ namespace hades
 
     if (closeAllRequested)
     {
+      pendingCloseScriptEditorWindow_ = false;
       pendingCloseAllScriptEditorTabs_ = true;
       continue_close_all_script_editor_tabs();
+    }
+
+    if (closeScriptEditorRequested)
+    {
+      request_close_script_editor_window();
     }
 
     // --- Three-column layout below the menu bar ---
@@ -1529,8 +1708,12 @@ namespace hades
       }
       else
       {
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 3.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
+        int scriptTreeRowIndex = 0;
         ImGui::SetNextItemOpen(true, ImGuiCond_Once);
-        render_workspace_tree_node(*workspaceTreeRoot_);
+        render_workspace_tree_node(*workspaceTreeRoot_, 0, scriptTreeRowIndex, "");
+        ImGui::PopStyleVar(2);
       }
 
       if (ImGui::BeginPopupContextWindow("ScriptEditorRootContext", ImGuiPopupFlags_NoOpenOverItems))
@@ -1680,51 +1863,13 @@ namespace hades
           }
           ImGui::PushID(activeTab->path.string().c_str());
 
-          // ── Autocomplete: handle accept/dismiss keys BEFORE TextEditor ──
-          bool autocompleteConsumedKey = false;
-          if (autocompleteOpen_ && !autocompleteCandidates_.empty())
-          {
-            auto &editor = *activeTab->textEditor;
-            if (ImGui::IsKeyPressed(ImGuiKey_Tab) || ImGui::IsKeyPressed(ImGuiKey_Enter))
-            {
-              if (autocompleteSelectedIndex_ < static_cast<int>(autocompleteCandidates_.size()))
-              {
-                const auto pos = editor.GetCursorPosition();
-                const auto start = TextEditor::Coordinates(pos.mLine, autocompleteWordStartColumn_);
-                editor.SetSelection(start, pos);
-                editor.Delete();
-                editor.InsertText(autocompleteCandidates_[autocompleteSelectedIndex_]);
-              }
-              autocompleteOpen_ = false;
-              autocompleteSelectedIndex_ = 0;
-              autocompleteConsumedKey = true;
-            }
-            else if (ImGui::IsKeyPressed(ImGuiKey_Escape))
-            {
-              autocompleteOpen_ = false;
-              autocompleteConsumedKey = true;
-            }
-            else if (ImGui::IsKeyPressed(ImGuiKey_UpArrow))
-            {
-              autocompleteSelectedIndex_ = std::max(autocompleteSelectedIndex_ - 1, 0);
-              autocompleteConsumedKey = true;
-            }
-            else if (ImGui::IsKeyPressed(ImGuiKey_DownArrow))
-            {
-              autocompleteSelectedIndex_ = std::min(
-                  autocompleteSelectedIndex_ + 1,
-                  static_cast<int>(autocompleteCandidates_.size()) - 1);
-              autocompleteConsumedKey = true;
-            }
-          }
-
-          // Only disable TextEditor keyboard for the specific frame where we consumed a key.
+          // Handle autocomplete keys before TextEditor processes input.
+          const bool autocompleteConsumedKey = scriptAutoComplete_.handleKeys(*activeTab->textEditor);
           if (autocompleteConsumedKey)
             activeTab->textEditor->SetHandleKeyboardInputs(false);
 
           activeTab->textEditor->Render("##ScriptEditorContents", editorSize, true);
 
-          // Always re-enable keyboard handling after render.
           activeTab->textEditor->SetHandleKeyboardInputs(true);
 
           if (activeTab->textEditor->IsTextChanged())
@@ -1737,142 +1882,8 @@ namespace hades
             }
           }
 
-          // ── Autocomplete: update candidates and render popup ────────
-          {
-            auto &editor = *activeTab->textEditor;
-            const auto cursorPos = editor.GetCursorPosition();
-            const std::string lineText = editor.GetCurrentLineText();
-            const std::string partial = extract_partial_word(lineText, cursorPos.mColumn);
-            const int wordStartCol = find_word_start_column(lineText, cursorPos.mColumn);
-
-            if (partial.size() >= 2)
-            {
-              const auto &staticWords = get_static_autocomplete_words();
-              auto candidates = filter_autocomplete_candidates(partial, staticWords, parsedScriptCache_);
-
-              if (!candidates.empty())
-              {
-                autocompleteOpen_ = true;
-                autocompletePrefix_ = partial;
-                autocompleteCandidates_ = std::move(candidates);
-                autocompleteWordStartColumn_ = wordStartCol;
-
-                if (autocompleteSelectedIndex_ >= static_cast<int>(autocompleteCandidates_.size()))
-                  autocompleteSelectedIndex_ = 0;
-              }
-              else
-              {
-                autocompleteOpen_ = false;
-              }
-            }
-            else
-            {
-              autocompleteOpen_ = false;
-            }
-
-            if (autocompleteOpen_)
-            {
-              // Compute cursor screen position using the child window's scroll state.
-              const ImVec2 editorWidgetMin = ImGui::GetItemRectMin();
-              const ImVec2 editorWidgetMax = ImGui::GetItemRectMax();
-
-              const float fontSize = ImGui::GetFontSize();
-              const float charWidth = ImGui::GetFont()->CalcTextSizeA(fontSize, FLT_MAX, -1.0f, " ").x;
-              const float lineHeight = ImGui::GetTextLineHeightWithSpacing();
-
-              // Compute the left margin (line numbers gutter) the same way TextEditor does.
-              char lineCountBuf[16];
-              snprintf(lineCountBuf, sizeof(lineCountBuf), " %d ", editor.GetTotalLines());
-              const float textStart = ImGui::GetFont()->CalcTextSizeA(fontSize, FLT_MAX, -1.0f, lineCountBuf).x + 10.0f;
-
-              // Read scroll offset from the editor's child window.
-              float scrollX = 0.0f;
-              float scrollY = 0.0f;
-              const ImGuiID childId = ImGui::GetID("##ScriptEditorContents");
-              ImGuiWindow *childWindow = ImGui::FindWindowByID(childId);
-              if (childWindow)
-              {
-                scrollX = childWindow->Scroll.x;
-                scrollY = childWindow->Scroll.y;
-              }
-
-              const float cursorScreenX = editorWidgetMin.x + textStart + cursorPos.mColumn * charWidth - scrollX;
-              const float cursorScreenY = editorWidgetMin.y + cursorPos.mLine * lineHeight - scrollY + lineHeight;
-
-              // Clamp popup position within the editor bounds.
-              const float popupWidth = 250.0f;
-              const float popupMaxHeight = 200.0f;
-              float popupX = std::max(editorWidgetMin.x, std::min(cursorScreenX, editorWidgetMax.x - popupWidth));
-              float popupY = cursorScreenY;
-
-              // If popup would go below the editor, show it above the cursor instead.
-              if (popupY + popupMaxHeight > editorWidgetMax.y)
-                popupY = cursorScreenY - lineHeight - popupMaxHeight;
-
-              // Draw the popup using the foreground draw list (always on top).
-              ImDrawList *drawList = ImGui::GetForegroundDrawList();
-              const ImU32 bgColor = ImGui::ColorConvertFloat4ToU32(ImVec4(0.18f, 0.18f, 0.20f, 0.96f));
-              const ImU32 borderColor = ImGui::ColorConvertFloat4ToU32(ImVec4(0.45f, 0.45f, 0.50f, 0.80f));
-              const ImU32 selectedBgColor = ImGui::ColorConvertFloat4ToU32(ImVec4(0.26f, 0.42f, 0.65f, 0.80f));
-              const ImU32 textColor = ImGui::ColorConvertFloat4ToU32(ImVec4(0.90f, 0.90f, 0.90f, 1.0f));
-
-              constexpr float kPadX = 6.0f;
-              constexpr float kPadY = 4.0f;
-              const float itemHeight = lineHeight;
-              const int candidateCount = static_cast<int>(autocompleteCandidates_.size());
-              const float contentHeight = candidateCount * itemHeight + kPadY * 2.0f;
-              const float boxHeight = std::min(contentHeight, popupMaxHeight);
-
-              const ImVec2 boxMin(popupX, popupY);
-              const ImVec2 boxMax(popupX + popupWidth, popupY + boxHeight);
-
-              // Background and border.
-              drawList->AddRectFilled(boxMin, boxMax, bgColor, 4.0f);
-              drawList->AddRect(boxMin, boxMax, borderColor, 4.0f);
-
-              // Draw each candidate.
-              const ImVec2 mousePos = ImGui::GetMousePos();
-              int clickedIndex = -1;
-
-              for (int i = 0; i < candidateCount; ++i)
-              {
-                const float itemY = popupY + kPadY + i * itemHeight;
-                if (itemY + itemHeight < boxMin.y || itemY > boxMax.y)
-                  continue;
-
-                const ImVec2 itemMin(popupX, itemY);
-                const ImVec2 itemMax(popupX + popupWidth, itemY + itemHeight);
-
-                // Hover detection.
-                const bool hovered = mousePos.x >= itemMin.x && mousePos.x < itemMax.x &&
-                                     mousePos.y >= itemMin.y && mousePos.y < itemMax.y;
-                if (hovered)
-                  autocompleteSelectedIndex_ = i;
-
-                if (i == autocompleteSelectedIndex_)
-                  drawList->AddRectFilled(itemMin, itemMax, selectedBgColor, 2.0f);
-
-                drawList->AddText(ImVec2(popupX + kPadX, itemY + 1.0f), textColor,
-                                  autocompleteCandidates_[i].c_str());
-
-                if (hovered && ImGui::IsMouseClicked(0))
-                  clickedIndex = i;
-              }
-
-              // Handle click to accept.
-              if (clickedIndex >= 0 && clickedIndex < candidateCount)
-              {
-                const auto pos = editor.GetCursorPosition();
-                const auto start = TextEditor::Coordinates(pos.mLine, autocompleteWordStartColumn_);
-                editor.SetSelection(start, pos);
-                editor.Delete();
-                editor.InsertText(autocompleteCandidates_[clickedIndex]);
-                autocompleteOpen_ = false;
-                autocompleteSelectedIndex_ = 0;
-              }
-            }
-          }
-          // ── End autocomplete ────────────────────────────────────────
+          scriptAutoComplete_.update(*activeTab->textEditor, parsedScriptCache_);
+          scriptAutoComplete_.renderPopup(*activeTab->textEditor);
 
           ImGui::PopID();
         }
@@ -1932,7 +1943,7 @@ namespace hades
               {
                 load_world(*world, componentManager);
               }
-              state.selectedEntity = entity;
+              select_entity(entity);
             }
           }
         }
@@ -1974,8 +1985,22 @@ namespace hades
       return;
     }
 
+    // --- Filter bar ---
+    {
+      ImGui::SetNextItemWidth(-1.0f);
+      ImGui::InputTextWithHint("##wsfilter", ICON_FA_MAGNIFYING_GLASS "  Filter...",
+                               workspaceFilterBuffer_.data(), workspaceFilterBuffer_.size());
+      ImGui::Spacing();
+    }
+
+    // --- File tree ---
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 3.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
+    int workspaceRowIndex = 0;
     ImGui::SetNextItemOpen(true, ImGuiCond_Once);
-    render_workspace_tree_node(*workspaceTreeRoot_);
+    render_workspace_tree_node(*workspaceTreeRoot_, 0, workspaceRowIndex, workspaceFilterBuffer_.data());
+    ImGui::PopStyleVar(2);
+
     if (ImGui::BeginPopupContextWindow("WorkspaceRootContext", ImGuiPopupFlags_NoOpenOverItems))
     {
       if (ImGui::MenuItem("New Folder"))

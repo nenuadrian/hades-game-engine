@@ -9,6 +9,7 @@
 #include "../../components/audio_source_component.hpp"
 #include "../../components/camera_component.hpp"
 #include "../../components/collider_component.hpp"
+#include "../../components/mesh_renderer_component.hpp"
 #include "../../components/model_component.hpp"
 #include "../../components/name_component.hpp"
 #include "../../components/position_component_3d.hpp"
@@ -57,6 +58,7 @@ namespace hades
   {
     const auto entity = createBaseEntity(entityManager, componentManager, "Cube", parent);
     componentManager.addComponent(entity, PrimitiveComponent());
+    componentManager.addComponent(entity, MeshRendererComponent{});
     return entity;
   }
 
@@ -87,6 +89,7 @@ namespace hades
   {
     const auto entity = createBaseEntity(entityManager, componentManager, "Plane", parent);
     componentManager.addComponent(entity, PrimitiveComponent{PrimitiveType::Plane});
+    componentManager.addComponent(entity, MeshRendererComponent{});
     return entity;
   }
 
@@ -97,6 +100,7 @@ namespace hades
   {
     const auto entity = createBaseEntity(entityManager, componentManager, "Physics Cube", parent);
     componentManager.addComponent(entity, PrimitiveComponent());
+    componentManager.addComponent(entity, MeshRendererComponent{});
     componentManager.addComponent(entity, RotationComponent3D());
     componentManager.addComponent(entity, RigidBodyComponent());
     componentManager.addComponent(entity, ColliderComponent());

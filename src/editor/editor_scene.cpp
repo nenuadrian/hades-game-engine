@@ -573,19 +573,6 @@ namespace hades
       return true;
     }
 
-    float entity_bounds_radius(const ImportedModel &model)
-    {
-      if (!model.hasBounds)
-      {
-        return CUBE_HALF_EXTENT * 1.732f;
-      }
-
-      const float dx = std::max(std::abs(model.minX), std::abs(model.maxX));
-      const float dy = std::max(std::abs(model.minY), std::abs(model.maxY));
-      const float dz = std::max(std::abs(model.minZ), std::abs(model.maxZ));
-      return std::sqrt(dx * dx + dy * dy + dz * dz);
-    }
-
     struct ModelProjectionCacheKey
     {
       float cameraX, cameraY, cameraZ;
@@ -698,6 +685,7 @@ namespace hades
         float cameraDistance = 0.0f,
         float cameraYaw = 0.0f,
         float cameraPitch = 0.0f,
+        bool drawTriangleWireframe = false,
         const RotationComponent3D *rotation = nullptr,
         const ScaleComponent3D *scale = nullptr)
     {
@@ -724,12 +712,15 @@ namespace hades
             hades::preview::scale_color_channel(208, triangle.shadeB),
             230);
         drawList->AddConvexPolyFilled(points, 3, fillColor);
-        const ImU32 wireColor = IM_COL32(
-            hades::preview::scale_color_channel(227, std::min(triangle.shadeR + 0.1f, 1.0f)),
-            hades::preview::scale_color_channel(232, std::min(triangle.shadeG + 0.1f, 1.0f)),
-            hades::preview::scale_color_channel(238, std::min(triangle.shadeB + 0.1f, 1.0f)),
-            255);
-        drawList->AddPolyline(points, 3, wireColor, ImDrawFlags_Closed, 1.0f);
+        if (drawTriangleWireframe)
+        {
+          const ImU32 wireColor = IM_COL32(
+              hades::preview::scale_color_channel(227, std::min(triangle.shadeR + 0.1f, 1.0f)),
+              hades::preview::scale_color_channel(232, std::min(triangle.shadeG + 0.1f, 1.0f)),
+              hades::preview::scale_color_channel(238, std::min(triangle.shadeB + 0.1f, 1.0f)),
+              255);
+          drawList->AddPolyline(points, 3, wireColor, ImDrawFlags_Closed, 1.0f);
+        }
       }
 
       if (label != nullptr)
@@ -1461,7 +1452,7 @@ namespace hades
     {
       SceneHitCandidate hitCandidate;
 
-      for (Entity::EntityId entity : entityManager.getAllEntities())
+      for (Entity::EntityId entity : entityManager.getActiveEntities())
       {
         if (world.has_value() && !entity_belongs_to_world(entity, *world, componentManager))
         {
@@ -1778,6 +1769,7 @@ namespace hades
         std::optional<Entity::EntityId> world,
         std::optional<Entity::EntityId> excludedEntity,
         std::optional<Entity::EntityId> selectedEntity,
+        bool drawModelMeshes,
         float cameraDistance = 0.0f,
         float cameraYaw = 0.0f,
         float cameraPitch = 0.0f)
@@ -1808,7 +1800,150 @@ namespace hades
       }
 
       int visibleRenderableCount = 0;
-      for (Entity::EntityId entity : entityManager.getAllEntities())
+      const auto render_render_item = [&](const RenderItem &item)
+      {
+        const Entity::EntityId entity = item.entity;
+        if (excludedEntity.has_value() && entity == *excludedEntity)
+        {
+          return;
+        }
+
+        const PositionComponent3D position(item.worldPosition.x, item.worldPosition.y, item.worldPosition.z);
+        const RotationComponent3D *rotation = componentManager.hasComponent<RotationComponent3D>(entity)
+                                                  ? &componentManager.getComponent<RotationComponent3D>(entity)
+                                                  : nullptr;
+        const ScaleComponent3D *scale = componentManager.hasComponent<ScaleComponent3D>(entity)
+                                            ? &componentManager.getComponent<ScaleComponent3D>(entity)
+                                            : nullptr;
+        const bool isSelected = selectedEntity.has_value() && *selectedEntity == entity;
+        const ImU32 selectedColor = IM_COL32(255, 205, 107, 255);
+        const ImU32 selectedLabelColor = IM_COL32(255, 235, 186, 255);
+
+        std::string label;
+        const auto get_label = [&]() -> const std::string *
+        {
+          if (label.empty())
+          {
+            label = entity_display_label(entity, componentManager);
+          }
+          return &label;
+        };
+
+        if (item.isPrimitive)
+        {
+          if (item.primitiveType != PrimitiveType::Cube)
+          {
+            return;
+          }
+
+          if (draw_wire_box(
+                  drawList,
+                  sceneCamera,
+                  camera,
+                  canvasOrigin,
+                  canvasSize,
+                  position,
+                  make_vec3(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT),
+                  make_vec3(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT),
+                  isSelected ? selectedColor : IM_COL32(223, 228, 235, 255),
+                  isSelected ? 2.5f : 1.5f,
+                  get_label(),
+                  isSelected ? selectedLabelColor : IM_COL32(205, 210, 218, 255),
+                  rotation,
+                  scale))
+          {
+            ++visibleRenderableCount;
+          }
+
+          if (isSelected)
+          {
+            ImVec2 screenPoint;
+            if (project_point(make_vec3(position), sceneCamera, camera, canvasOrigin, canvasSize, screenPoint))
+            {
+              draw_position_marker(drawList, screenPoint, true, nullptr, selectedLabelColor);
+            }
+          }
+          return;
+        }
+
+        if (item.model != nullptr)
+        {
+          const bool modelDrawn = (drawModelMeshes || isSelected) &&
+                                  hades::preview::has_renderable_geometry(*item.model) &&
+                                  draw_model_mesh(
+                                      drawList,
+                                      sceneCamera,
+                                      camera,
+                                      canvasOrigin,
+                                      canvasSize,
+                                      position,
+                                      *item.model,
+                                      get_label(),
+                                      isSelected ? selectedLabelColor : IM_COL32(205, 210, 218, 255),
+                                      entity,
+                                      cameraDistance,
+                                      cameraYaw,
+                                      cameraPitch,
+                                      isSelected,
+                                      rotation,
+                                      scale);
+          if (modelDrawn)
+          {
+            ++visibleRenderableCount;
+          }
+
+          const Vec3 minCorner = item.model->hasBounds
+                                     ? make_vec3(item.model->minX, item.model->minY, item.model->minZ)
+                                     : make_vec3(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT);
+          const Vec3 maxCorner = item.model->hasBounds
+                                     ? make_vec3(item.model->maxX, item.model->maxY, item.model->maxZ)
+                                     : make_vec3(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT);
+
+          if ((!modelDrawn || isSelected) &&
+              draw_wire_box(
+                  drawList,
+                  sceneCamera,
+                  camera,
+                  canvasOrigin,
+                  canvasSize,
+                  position,
+                  minCorner,
+                  maxCorner,
+                  isSelected ? selectedColor : IM_COL32(179, 189, 202, 255),
+                  isSelected ? 2.5f : 1.5f,
+                  modelDrawn ? nullptr : get_label(),
+                  isSelected ? selectedLabelColor : IM_COL32(205, 210, 218, 255),
+                  rotation,
+                  scale))
+          {
+            if (!modelDrawn)
+            {
+              ++visibleRenderableCount;
+            }
+
+            if (isSelected)
+            {
+              ImVec2 screenPoint;
+              if (project_point(make_vec3(position), sceneCamera, camera, canvasOrigin, canvasSize, screenPoint))
+              {
+                draw_position_marker(drawList, screenPoint, true, nullptr, selectedLabelColor);
+              }
+            }
+          }
+          return;
+        }
+      };
+
+      for (const auto &item : renderList.opaqueItems)
+      {
+        render_render_item(item);
+      }
+      for (const auto &item : renderList.transparentItems)
+      {
+        render_render_item(item);
+      }
+
+      for (Entity::EntityId entity : entityManager.getActiveEntities())
       {
         if (excludedEntity.has_value() && entity == *excludedEntity)
         {
@@ -1825,14 +1960,15 @@ namespace hades
           continue;
         }
 
+        const bool renderableHandledByRenderList =
+            componentManager.hasComponent<PrimitiveComponent>(entity) ||
+            componentManager.hasComponent<ModelComponent>(entity);
+        if (renderableHandledByRenderList)
+        {
+          continue;
+        }
+
         const auto &position = componentManager.getComponent<PositionComponent3D>(entity);
-        const RotationComponent3D *rotation = componentManager.hasComponent<RotationComponent3D>(entity)
-                                                  ? &componentManager.getComponent<RotationComponent3D>(entity)
-                                                  : nullptr;
-        const ScaleComponent3D *scale = componentManager.hasComponent<ScaleComponent3D>(entity)
-                                            ? &componentManager.getComponent<ScaleComponent3D>(entity)
-                                            : nullptr;
-        const std::string label = entity_display_label(entity, componentManager);
         const bool isSelected = selectedEntity.has_value() && *selectedEntity == entity;
         const ImU32 selectedColor = IM_COL32(255, 205, 107, 255);
         const ImU32 selectedLabelColor = IM_COL32(255, 235, 186, 255);
@@ -1854,102 +1990,6 @@ namespace hades
           {
             ++visibleRenderableCount;
             previewDrawn = true;
-          }
-        }
-
-        if (componentManager.hasComponent<PrimitiveComponent>(entity))
-        {
-          const auto &primitive = componentManager.getComponent<PrimitiveComponent>(entity);
-          if (primitive.type != PrimitiveType::Cube)
-          {
-            continue;
-          }
-
-          if (draw_wire_box(
-                  drawList,
-                  sceneCamera,
-                  camera,
-                  canvasOrigin,
-                  canvasSize,
-                  position,
-                  make_vec3(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT),
-                  make_vec3(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT),
-                  isSelected ? selectedColor : IM_COL32(223, 228, 235, 255),
-                  isSelected ? 2.5f : 1.5f,
-                  &label,
-                  isSelected ? selectedLabelColor : IM_COL32(205, 210, 218, 255),
-                  rotation,
-                  scale))
-          {
-            ++visibleRenderableCount;
-            previewDrawn = true;
-          }
-          continue;
-        }
-
-        if (componentManager.hasComponent<ModelComponent>(entity))
-        {
-          const auto *model = componentManager.getComponent<ModelComponent>(entity).modelAsset.get();
-          if (model != nullptr)
-          {
-          // Frustum culling is handled by the RenderList — use the pre-computed
-          // camera frustum for a fast sphere check.
-          const bool modelInFrustum = renderList.camera.frustum.containsSphere(
-              {position.x, position.y, position.z}, entity_bounds_radius(*model));
-          const bool modelDrawn = modelInFrustum &&
-                                  hades::preview::has_renderable_geometry(*model) &&
-                                  draw_model_mesh(
-                                      drawList,
-                                      sceneCamera,
-                                      camera,
-                                      canvasOrigin,
-                                      canvasSize,
-                                      position,
-                                      *model,
-                                      &label,
-                                      isSelected ? selectedLabelColor : IM_COL32(205, 210, 218, 255),
-                                      entity,
-                                      cameraDistance,
-                                      cameraYaw,
-                                      cameraPitch,
-                                      rotation,
-                                      scale);
-          if (modelDrawn)
-          {
-            ++visibleRenderableCount;
-            previewDrawn = true;
-          }
-
-          const Vec3 minCorner = model->hasBounds
-                                     ? make_vec3(model->minX, model->minY, model->minZ)
-                                     : make_vec3(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT);
-          const Vec3 maxCorner = model->hasBounds
-                                     ? make_vec3(model->maxX, model->maxY, model->maxZ)
-                                     : make_vec3(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT);
-
-          if ((!modelDrawn || isSelected) &&
-              draw_wire_box(
-                  drawList,
-                  sceneCamera,
-                  camera,
-                  canvasOrigin,
-                  canvasSize,
-                  position,
-                  minCorner,
-                  maxCorner,
-                  isSelected ? selectedColor : IM_COL32(179, 189, 202, 255),
-                  isSelected ? 2.5f : 1.5f,
-                  modelDrawn ? nullptr : &label,
-                  isSelected ? selectedLabelColor : IM_COL32(205, 210, 218, 255),
-                  rotation,
-                  scale))
-          {
-            if (!modelDrawn)
-            {
-              ++visibleRenderableCount;
-            }
-            previewDrawn = true;
-          }
           }
         }
 
@@ -1985,6 +2025,7 @@ namespace hades
             (!previewDrawn || isSelected || componentManager.hasComponent<CameraComponent>(entity)))
         {
           const bool showLabel = !previewDrawn || componentManager.hasComponent<CameraComponent>(entity);
+          const std::string label = showLabel ? entity_display_label(entity, componentManager) : std::string{};
           draw_position_marker(
               drawList,
               screenPoint,
@@ -2040,7 +2081,13 @@ namespace hades
       return;
     }
 
+    constexpr float sceneToolbarMarginX = 8.0f;
+    constexpr float sceneToolbarMarginTop = 8.0f;
+    constexpr float sceneToolbarMarginBottom = 8.0f;
+    ImGui::SetCursorPos(ImVec2(sceneToolbarMarginX, ImGui::GetCursorPosY() + sceneToolbarMarginTop));
+
     {
+      const float toolbarStartY = ImGui::GetCursorPosY();
       const bool translateActive = sceneGizmoMode_ == SceneGizmoMode::Translate;
       const bool rotateActive = sceneGizmoMode_ == SceneGizmoMode::Rotate;
 
@@ -2090,6 +2137,15 @@ namespace hades
       {
         ImGui::PopStyleColor(2);
       }
+
+      ImGui::SameLine();
+      if (ImGui::SmallButton(sceneDrawModelMeshes_ ? "Shaded" : "Bounds"))
+      {
+        sceneDrawModelMeshes_ = !sceneDrawModelMeshes_;
+      }
+
+      const float toolbarBottomY = toolbarStartY + ImGui::GetFrameHeight();
+      ImGui::SetCursorPos(ImVec2(0.0f, toolbarBottomY + sceneToolbarMarginBottom));
     }
 
     const ImVec2 canvasSize = ImGui::GetContentRegionAvail();
@@ -2490,7 +2546,7 @@ namespace hades
             io.MousePos);
         if (hitCandidate.entity.has_value())
         {
-          state.selectedEntity = *hitCandidate.entity;
+          select_entity(*hitCandidate.entity);
           activeSceneGizmoAxis_ = SceneGizmoAxis::None;
           activeSceneGizmoEntity_ = Entity::INVALID;
         }
@@ -2529,6 +2585,7 @@ namespace hades
           sceneWorld,
           std::nullopt,
           state.selectedEntity,
+          sceneDrawModelMeshes_,
           sceneCameraDistance_,
           sceneCameraYawDegrees_,
           sceneCameraPitchDegrees_);
@@ -2790,7 +2847,11 @@ namespace hades
       return;
     }
 
-    ImGui::Begin("Stats for Nerds");
+    if (!ImGui::Begin("Stats for Nerds", &state.showDebugInfo))
+    {
+      ImGui::End();
+      return;
+    }
     ImGui::Text("FPS: %.1f  (%.2f ms)", 1.0f / deltaTime, deltaTime * 1000.0f);
     ImGui::Text("Play Mode: %s", state.isPlaying ? "Playing" : "Stopped");
     if (state.activeCamera.has_value())

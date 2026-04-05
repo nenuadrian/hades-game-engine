@@ -19,6 +19,7 @@
 #include "types.h"
 #include "editor_settings.hpp"
 #include "script_analysis.hpp"
+#include "script_autocomplete.hpp"
 #include "plugins/editor_plugin.hpp"
 #include "../engine/core/ecs/entity.hpp"
 #include "../engine/rendering/render_types.hpp"
@@ -91,6 +92,7 @@ namespace hades
     bool is_plugin_visible(std::string_view pluginId) const;
     bool is_script_editor_window_open() const;
     void set_script_editor_window_open(bool open);
+    void request_close_script_editor_window();
     bool consume_script_editor_focus_request();
     void render_script_editor_window(EntityManager &entityManager, ComponentManager &componentManager);
     void log_message(DebugMessageLevel level, const std::string &text);
@@ -125,12 +127,7 @@ namespace hades
       bool dirty = false;
     };
 
-    // Script editor autocomplete state.
-    bool autocompleteOpen_ = false;
-    int autocompleteSelectedIndex_ = 0;
-    std::string autocompletePrefix_;
-    std::vector<std::string> autocompleteCandidates_;
-    int autocompleteWordStartColumn_ = 0;
+    ScriptAutoComplete scriptAutoComplete_;
 
     bool dockLayoutInitialized = false;
     bool openImportModelDialog = false;
@@ -150,6 +147,7 @@ namespace hades
     bool openScriptEditorUnsavedChangesDialog_ = false;
     std::optional<std::filesystem::path> pendingScriptEditorClosePath_;
     bool pendingCloseAllScriptEditorTabs_ = false;
+    bool pendingCloseScriptEditorWindow_ = false;
     std::vector<std::string> cachedDiskWorlds_;
     bool workspaceScriptListDirty_ = false;
     bool openWorkspaceCreateDialog_ = false;
@@ -187,12 +185,22 @@ namespace hades
     std::shared_ptr<ExportBuildState> exportBuildState_;
     std::thread exportBuildThread_;
     std::string exportBuildLog_;
+    std::vector<char> exportBuildLogBuffer_;
     std::string exportBuildError_;
     bool exportBuildSucceeded_ = false;
     bool exportBuildFinished_ = false;
 
     std::filesystem::path pendingWorkspaceDeletePath_;
     std::string workspaceDeleteError_;
+
+    // Workspace filter state.
+    std::array<char, 256> workspaceFilterBuffer_{};
+
+    // Workspace inline rename state.
+    std::filesystem::path workspaceRenamePath_;
+    std::array<char, 256> workspaceRenameBuffer_{};
+    bool workspaceRenameFocusPending_ = false;
+
     std::optional<Entity::EntityId> pendingEntityDeletion_;
     float sceneCameraTargetX_ = 0.0f;
     float sceneCameraTargetY_ = 0.0f;
@@ -218,6 +226,7 @@ namespace hades
     float sceneGizmoDragStartScaleX_ = 1.0f;
     float sceneGizmoDragStartScaleY_ = 1.0f;
     float sceneGizmoDragStartScaleZ_ = 1.0f;
+    bool sceneDrawModelMeshes_ = true;
     bool pendingSavedWorldRestore_ = false;
 
     // Render pipeline integration.
@@ -260,7 +269,7 @@ namespace hades
     void render_debug_console_window();
     void render_about_window();
     void render_export_window(EntityManager &entityManager, ComponentManager &componentManager);
-    void render_workspace_tree_node(const WorkspaceTreeNode &node);
+    void render_workspace_tree_node(const WorkspaceTreeNode &node, int depth, int &rowIndex, const char *filter);
     void render_script_editor(EntityManager &entityManager, ComponentManager &componentManager);
     std::optional<std::size_t> find_script_editor_tab_index(const std::filesystem::path &scriptPath) const;
     ScriptEditorTab *active_script_editor_tab();
@@ -283,6 +292,7 @@ namespace hades
     void request_entity_creation(EditorEntityPreset preset, Entity::EntityId parent);
     void request_model_import(Entity::EntityId parent);
     void request_entity_deletion(Entity::EntityId entity);
+    void select_entity(Entity::EntityId entity);
     void workspace(EntityManager &entityManager, ComponentManager &componentManager);
     void handle_entity_creation_requests(EntityManager &entityManager, ComponentManager &componentManager);
     void handle_entity_deletion_requests(EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime);

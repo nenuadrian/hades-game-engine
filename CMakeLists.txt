@@ -163,10 +163,15 @@ add_custom_command(
   TARGET ${PROJECT_NAME}
   POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>/assets"
+  COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>/assets/fonts"
   COMMAND
     ${CMAKE_COMMAND} -E copy_if_different
     "${CMAKE_SOURCE_DIR}/assets/logo.bmp"
-    "$<TARGET_FILE_DIR:${PROJECT_NAME}>/assets/logo.bmp")
+    "$<TARGET_FILE_DIR:${PROJECT_NAME}>/assets/logo.bmp"
+  COMMAND
+    ${CMAKE_COMMAND} -E copy_if_different
+    "${CMAKE_SOURCE_DIR}/assets/fonts/fa-solid-900.ttf"
+    "$<TARGET_FILE_DIR:${PROJECT_NAME}>/assets/fonts/fa-solid-900.ttf")
 
 if(TARGET SDL2::SDL2main)
   target_link_libraries(${PROJECT_NAME} PRIVATE SDL2::SDL2main)
