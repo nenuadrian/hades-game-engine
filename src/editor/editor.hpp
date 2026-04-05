@@ -67,6 +67,13 @@ namespace hades
       Web,
     };
 
+    struct ExportPlatformSettings
+    {
+      std::array<char, 512> outputPathBuffer{};
+      std::array<char, 256> projectNameBuffer{};
+      bool enableHeadless = false;
+    };
+
     struct ExportBuildState
     {
       std::mutex mutex;
@@ -189,9 +196,7 @@ namespace hades
 #else
     ExportPlatform selectedExportPlatform_ = ExportPlatform::Windows;
 #endif
-    std::array<char, 512> exportOutputPathBuffer_{};
-    std::array<char, 256> exportProjectNameBuffer_{};
-    bool exportEnableHeadless_ = false;
+  std::array<ExportPlatformSettings, 4> exportPlatformSettings_{};
     bool exportBuildInProgress_ = false;
     std::shared_ptr<ExportBuildState> exportBuildState_;
     std::thread exportBuildThread_;
