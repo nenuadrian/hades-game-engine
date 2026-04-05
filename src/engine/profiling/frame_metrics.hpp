@@ -20,6 +20,9 @@ namespace hades
       double totalMs = 0.0;
       std::uint32_t count = 0;
       std::uint32_t frames = 0;
+      std::uint64_t totalCount = 0;
+      double minMs = 0.0;
+      double maxMs = 0.0;
 
       // Accumulator for current frame (not exposed).
       double pendingMs = 0.0;
@@ -52,7 +55,7 @@ namespace hades
       Entry *entry = find_entry(name);
       if (entry == nullptr)
       {
-        entries_.push_back(Entry{name, 0.0, 0.0, 0, 0, 0.0, 0});
+        entries_.push_back(Entry{name, 0.0, 0.0, 0, 0, 0, 0.0, 0.0, 0.0, 0.0, 0});
         entry = &entries_.back();
       }
       entry->pendingMs += ms;
@@ -67,6 +70,23 @@ namespace hades
         entry.totalMs += entry.pendingMs;
         entry.count = entry.pendingCount;
         entry.frames += 1;
+        entry.totalCount += entry.pendingCount;
+        if (entry.frames == 1)
+        {
+          entry.minMs = entry.pendingMs;
+          entry.maxMs = entry.pendingMs;
+        }
+        else
+        {
+          if (entry.pendingMs < entry.minMs)
+          {
+            entry.minMs = entry.pendingMs;
+          }
+          if (entry.pendingMs > entry.maxMs)
+          {
+            entry.maxMs = entry.pendingMs;
+          }
+        }
         entry.pendingMs = 0.0;
         entry.pendingCount = 0;
       }

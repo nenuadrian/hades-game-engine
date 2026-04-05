@@ -1,20 +1,30 @@
 #include "editor.hpp"
 
+#include <algorithm>
+#include <array>
+#include <cctype>
 #include <cstdio>
 #include <filesystem>
 #include <string>
+#include <string_view>
 
+#include "IconsFontAwesome6.h"
 #include "imgui.h"
 #include "../engine/components/audio_listener_component.hpp"
 #include "../engine/components/light_component.hpp"
 #include "../engine/components/audio_source_component.hpp"
 #include "../engine/components/camera_component.hpp"
+#include "../engine/components/collider_component.hpp"
+#include "../engine/components/mesh_renderer_component.hpp"
 #include "../engine/components/model_component.hpp"
 #include "../engine/components/name_component.hpp"
 #include "../engine/components/position_component_2d.hpp"
 #include "../engine/components/position_component_3d.hpp"
 #include "../engine/components/primitive_component.hpp"
 #include "../engine/components/render_component.hpp"
+#include "../engine/components/rigid_body_component.hpp"
+#include "../engine/components/rotation_component_3d.hpp"
+#include "../engine/components/scale_component_3d.hpp"
 #include "../engine/components/script_component.hpp"
 #include "../engine/components/text_component.hpp"
 #include "../engine/components/transform_hierarchy_component.hpp"
@@ -31,7 +41,92 @@ namespace hades
   namespace
   {
     constexpr char ENTITY_WINDOW_TITLE[] = "Entities";
+    constexpr char ADD_ENTITY_POPUP_TITLE[] = "Add Entity";
     constexpr char IMPORT_MODEL_POPUP_TITLE[] = "Import Model";
+
+    struct EntityPickerCategory
+    {
+      const char *id;
+      const char *label;
+      const char *icon;
+    };
+
+    struct EntityPickerOption
+    {
+      const char *label;
+      const char *description;
+      const char *searchTerms;
+      const char *icon;
+      const char *categoryId;
+      EditorEntityPreset preset = EditorEntityPreset::None;
+      bool opensImportDialog = false;
+    };
+
+    constexpr std::array<EntityPickerCategory, 5> ENTITY_PICKER_CATEGORIES{{
+        {"scene", "Scene", ICON_FA_LAYER_GROUP},
+        {"primitives", "Primitives", ICON_FA_SHAPES},
+        {"audio", "Audio", ICON_FA_VOLUME_HIGH},
+        {"lighting", "Lighting", ICON_FA_LIGHTBULB},
+        {"assets", "Assets", ICON_FA_BOX_ARCHIVE},
+    }};
+
+    constexpr std::array<EntityPickerOption, 10> ENTITY_PICKER_OPTIONS{{
+        {"Camera", "Adds a camera and audio listener.", "main view listener", ICON_FA_CAMERA, "scene", EditorEntityPreset::Camera, false},
+        {"Text", "Adds a text entity.", "ui label typography", ICON_FA_FONT, "scene", EditorEntityPreset::Text, false},
+        {"Cube", "Adds a renderable cube.", "box mesh primitive", ICON_FA_CUBE, "primitives", EditorEntityPreset::Cube, false},
+        {"Plane", "Adds a flat plane primitive.", "ground floor quad", ICON_FA_VECTOR_SQUARE, "primitives", EditorEntityPreset::Plane, false},
+        {"Physics Cube", "Adds a cube with rigid body and collider.", "physics rigid body collider", ICON_FA_WAND_MAGIC_SPARKLES, "primitives", EditorEntityPreset::PhysicsCube, false},
+        {"Audio Emitter", "Adds a positional audio source.", "speaker sound music", ICON_FA_VOLUME_HIGH, "audio", EditorEntityPreset::AudioEmitter, false},
+        {"Directional Light", "Adds a sun-style directional light.", "sun light shadow", ICON_FA_SUN, "lighting", EditorEntityPreset::DirectionalLight, false},
+        {"Point Light", "Adds an omni-directional point light.", "bulb omni light", ICON_FA_LIGHTBULB, "lighting", EditorEntityPreset::PointLight, false},
+        {"Spot Light", "Adds a cone-shaped spot light.", "flashlight cone beam", ICON_FA_DRAW_POLYGON, "lighting", EditorEntityPreset::SpotLight, false},
+        {"Import Model...", "Imports a model asset and creates an entity for it.", "mesh asset obj fbx gltf glb", ICON_FA_FILE_IMPORT, "assets", EditorEntityPreset::None, true},
+    }};
+
+    std::string to_lower(std::string_view text)
+    {
+      std::string result(text);
+      std::transform(
+          result.begin(),
+          result.end(),
+          result.begin(),
+          [](const unsigned char character)
+          {
+            return static_cast<char>(std::tolower(character));
+          });
+      return result;
+    }
+
+    bool entity_picker_option_matches(const EntityPickerOption &option, const char *filter)
+    {
+      if (filter == nullptr || filter[0] == '\0')
+      {
+        return true;
+      }
+
+      const std::string lowerFilter = to_lower(filter);
+      const std::string lowerLabel = to_lower(option.label);
+      const std::string lowerDescription = to_lower(option.description);
+      const std::string lowerSearchTerms = to_lower(option.searchTerms);
+
+      return lowerLabel.find(lowerFilter) != std::string::npos ||
+             lowerDescription.find(lowerFilter) != std::string::npos ||
+             lowerSearchTerms.find(lowerFilter) != std::string::npos;
+    }
+
+    bool category_has_matches(const EntityPickerCategory &category, const char *filter)
+    {
+      for (const auto &option : ENTITY_PICKER_OPTIONS)
+      {
+        if (std::string_view(option.categoryId) == category.id &&
+            entity_picker_option_matches(option, filter))
+        {
+          return true;
+        }
+      }
+
+      return false;
+    }
 
     std::string entity_display_label(Entity::EntityId entity, ComponentManager &componentManager)
     {
@@ -39,24 +134,6 @@ namespace hades
       if (componentManager.hasComponent<NameComponent>(entity))
       {
         name = componentManager.getComponent<NameComponent>(entity).value;
-      }
-
-      if (componentManager.hasComponent<CameraComponent>(entity) &&
-          componentManager.getComponent<CameraComponent>(entity).isMainCamera)
-      {
-        name += " [Main]";
-      }
-
-      if (componentManager.hasComponent<LightComponent>(entity))
-      {
-        name += " [Light]";
-      }
-
-      if (componentManager.hasComponent<WorldComponent>(entity))
-      {
-        name += componentManager.getComponent<WorldComponent>(entity).isDefault
-                    ? " [World, Default]"
-                    : " [World]";
       }
 
       return name + " (" + std::to_string(entity) + ")";
@@ -135,6 +212,11 @@ namespace hades
       remove_component_if_present<RenderComponent>(componentManager, entity);
       remove_component_if_present<LightComponent>(componentManager, entity);
       remove_component_if_present<ScriptComponent>(componentManager, entity);
+      remove_component_if_present<MeshRendererComponent>(componentManager, entity);
+      remove_component_if_present<ColliderComponent>(componentManager, entity);
+      remove_component_if_present<RigidBodyComponent>(componentManager, entity);
+      remove_component_if_present<RotationComponent3D>(componentManager, entity);
+      remove_component_if_present<ScaleComponent3D>(componentManager, entity);
 
       entityManager.destroyEntity(entity);
     }
@@ -208,6 +290,15 @@ namespace hades
     state.pendingEntityPreset = preset;
   }
 
+  void Editor::request_add_entity_picker(Entity::EntityId parent)
+  {
+    state.selectedEntity = parent;
+    pendingAddEntityParent_ = parent;
+    addEntitySearchBuffer_[0] = '\0';
+    focusAddEntitySearch_ = true;
+    openAddEntityDialog_ = true;
+  }
+
   void Editor::request_model_import(Entity::EntityId parent)
   {
     state.selectedEntity = parent;
@@ -227,6 +318,178 @@ namespace hades
   void Editor::request_entity_deletion(Entity::EntityId entity)
   {
     pendingEntityDeletion_ = entity;
+  }
+
+  void Editor::render_add_entity_dialog(EntityManager &entityManager, ComponentManager &componentManager)
+  {
+    (void)entityManager;
+
+    auto reset_add_entity_dialog = [this]()
+    {
+      pendingAddEntityParent_.reset();
+      focusAddEntitySearch_ = false;
+      addEntitySearchBuffer_[0] = '\0';
+    };
+
+    if (openAddEntityDialog_)
+    {
+      ImGui::OpenPopup(ADD_ENTITY_POPUP_TITLE);
+      openAddEntityDialog_ = false;
+    }
+    else if (pendingAddEntityParent_.has_value() && !ImGui::IsPopupOpen(ADD_ENTITY_POPUP_TITLE))
+    {
+      reset_add_entity_dialog();
+    }
+
+    ImGui::SetNextWindowSize(ImVec2(440.0f, 420.0f), ImGuiCond_Appearing);
+    if (!ImGui::BeginPopupModal(ADD_ENTITY_POPUP_TITLE, nullptr, ImGuiWindowFlags_NoResize))
+    {
+      return;
+    }
+
+    if (!pendingAddEntityParent_.has_value() ||
+        !componentManager.hasComponent<TransformHierarchyComponent>(*pendingAddEntityParent_))
+    {
+      reset_add_entity_dialog();
+      ImGui::CloseCurrentPopup();
+      ImGui::EndPopup();
+      return;
+    }
+
+    ImGui::TextWrapped("Choose an entity type to add under:");
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.75f, 0.78f, 0.84f, 1.0f));
+    const std::string parentLabel = entity_label(*pendingAddEntityParent_, componentManager);
+    ImGui::TextWrapped("%s", parentLabel.c_str());
+    ImGui::PopStyleColor();
+    ImGui::Spacing();
+
+    if (focusAddEntitySearch_)
+    {
+      ImGui::SetKeyboardFocusHere();
+      focusAddEntitySearch_ = false;
+    }
+
+    ImGui::InputTextWithHint(
+        "##addentityfilter",
+        ICON_FA_MAGNIFYING_GLASS "  Search entities...",
+        addEntitySearchBuffer_.data(),
+        addEntitySearchBuffer_.size());
+
+    ImGui::Spacing();
+    ImGui::BeginChild("AddEntityList", ImVec2(0.0f, -ImGui::GetFrameHeightWithSpacing() - 8.0f), true);
+
+    bool pickedEntity = false;
+    for (const auto &category : ENTITY_PICKER_CATEGORIES)
+    {
+      if (!category_has_matches(category, addEntitySearchBuffer_.data()))
+      {
+        continue;
+      }
+
+      if (addEntitySearchBuffer_[0] != '\0')
+      {
+        ImGui::SetNextItemOpen(true, ImGuiCond_Always);
+      }
+
+      const bool open = ImGui::TreeNodeEx(
+          category.id,
+          ImGuiTreeNodeFlags_OpenOnArrow |
+              ImGuiTreeNodeFlags_OpenOnDoubleClick |
+              ImGuiTreeNodeFlags_SpanAvailWidth |
+              ImGuiTreeNodeFlags_DefaultOpen,
+          "%s %s",
+          category.icon,
+          category.label);
+
+      if (!open)
+      {
+        continue;
+      }
+
+      for (const auto &option : ENTITY_PICKER_OPTIONS)
+      {
+        if (std::string_view(option.categoryId) != category.id ||
+            !entity_picker_option_matches(option, addEntitySearchBuffer_.data()))
+        {
+          continue;
+        }
+
+        ImGui::PushID(option.label);
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 6.0f));
+        ImGui::TreeNodeEx(
+            "entity_option",
+            ImGuiTreeNodeFlags_Leaf |
+                ImGuiTreeNodeFlags_NoTreePushOnOpen |
+                ImGuiTreeNodeFlags_SpanAvailWidth,
+            "%s %s",
+            option.icon,
+            option.label);
+        ImGui::PopStyleVar();
+
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) && option.description[0] != '\0')
+        {
+          ImGui::SetTooltip("%s", option.description);
+        }
+
+        if (ImGui::IsItemClicked())
+        {
+          if (option.opensImportDialog)
+          {
+            request_model_import(*pendingAddEntityParent_);
+          }
+          else
+          {
+            request_entity_creation(option.preset, *pendingAddEntityParent_);
+          }
+
+          reset_add_entity_dialog();
+          ImGui::CloseCurrentPopup();
+          pickedEntity = true;
+        }
+
+        ImGui::PopID();
+
+        if (pickedEntity)
+        {
+          break;
+        }
+      }
+
+      ImGui::TreePop();
+
+      if (pickedEntity)
+      {
+        break;
+      }
+    }
+
+    if (!pickedEntity)
+    {
+      bool hasVisibleOptions = false;
+      for (const auto &category : ENTITY_PICKER_CATEGORIES)
+      {
+        if (category_has_matches(category, addEntitySearchBuffer_.data()))
+        {
+          hasVisibleOptions = true;
+          break;
+        }
+      }
+
+      if (!hasVisibleOptions)
+      {
+        ImGui::TextDisabled("No entity types match that search.");
+      }
+    }
+
+    ImGui::EndChild();
+
+    if (ImGui::Button("Cancel"))
+    {
+      reset_add_entity_dialog();
+      ImGui::CloseCurrentPopup();
+    }
+
+    ImGui::EndPopup();
   }
 
   void Editor::handle_entity_creation_requests(EntityManager &entityManager, ComponentManager &componentManager)
@@ -577,55 +840,14 @@ namespace hades
 
     if (ImGui::BeginPopupContextItem())
     {
-      if (ImGui::BeginMenu("Add Child"))
+      if (ImGui::MenuItem(ICON_FA_CIRCLE_PLUS "  Add Entity"))
       {
-        if (ImGui::MenuItem("Camera"))
-        {
-          request_entity_creation(EditorEntityPreset::Camera, entity);
-        }
-        if (ImGui::MenuItem("Cube"))
-        {
-          request_entity_creation(EditorEntityPreset::Cube, entity);
-        }
-        if (ImGui::MenuItem("Text"))
-        {
-          request_entity_creation(EditorEntityPreset::Text, entity);
-        }
-        if (ImGui::MenuItem("Audio Emitter"))
-        {
-          request_entity_creation(EditorEntityPreset::AudioEmitter, entity);
-        }
-        if (ImGui::MenuItem("Plane"))
-        {
-          request_entity_creation(EditorEntityPreset::Plane, entity);
-        }
-        if (ImGui::MenuItem("Physics Cube"))
-        {
-          request_entity_creation(EditorEntityPreset::PhysicsCube, entity);
-        }
-        ImGui::Separator();
-        if (ImGui::MenuItem("Directional Light"))
-        {
-          request_entity_creation(EditorEntityPreset::DirectionalLight, entity);
-        }
-        if (ImGui::MenuItem("Point Light"))
-        {
-          request_entity_creation(EditorEntityPreset::PointLight, entity);
-        }
-        if (ImGui::MenuItem("Spot Light"))
-        {
-          request_entity_creation(EditorEntityPreset::SpotLight, entity);
-        }
-        ImGui::Separator();
-        if (ImGui::MenuItem("Import Model..."))
-        {
-          request_model_import(entity);
-        }
-        ImGui::EndMenu();
+        request_add_entity_picker(entity);
+        ImGui::CloseCurrentPopup();
       }
 
       ImGui::Separator();
-      if (ImGui::MenuItem("Delete Entity and Children"))
+      if (ImGui::MenuItem(ICON_FA_TRASH "  Delete Entity and Children"))
       {
         request_entity_deletion(entity);
       }

@@ -7,9 +7,13 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <chrono>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <future>
+#include <iomanip>
+#include <sstream>
 #include <string>
 #include <utility>
 
@@ -17,6 +21,8 @@
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "TextEditor.h"
+#include "../engine/components/name_component.hpp"
+#include "../engine/components/position_component_3d.hpp"
 #include "../engine/components/script_component.hpp"
 #include "../engine/core/ecs/component_manager.hpp"
 #include "../engine/core/ecs/entity_manager.hpp"
@@ -129,6 +135,79 @@ namespace hades
     {
       return path.lexically_normal().generic_string();
     }
+
+    bool is_ignored_script_scan_component(std::string_view component)
+    {
+      if (component.empty())
+      {
+        return false;
+      }
+
+      if (component == ".git" ||
+          component == ".vs" ||
+          component == ".idea" ||
+          component == ".vscode" ||
+          component == "bin" ||
+          component == "obj" ||
+          component == "out" ||
+          component == "_deps" ||
+          component == "node_modules")
+      {
+        return true;
+      }
+
+      return component == "build" ||
+             component.rfind("build-", 0) == 0 ||
+             component.rfind("cmake-build-", 0) == 0;
+    }
+
+    bool should_include_workspace_script_file(
+        const std::filesystem::path &workspacePath,
+        const std::filesystem::path &path)
+    {
+      if (path.extension() != ".cs")
+      {
+        return false;
+      }
+
+      if (path.filename() == "AssemblyInfo.cs")
+      {
+        return false;
+      }
+
+      const std::filesystem::path relativePath = path.lexically_relative(workspacePath);
+      if (relativePath.empty())
+      {
+        return true;
+      }
+
+      for (const auto &component : relativePath)
+      {
+        const std::string componentName = component.string();
+        if (is_ignored_script_scan_component(componentName))
+        {
+          return false;
+        }
+      }
+
+      return true;
+    }
+
+        std::string current_local_timestamp()
+        {
+      const auto now = std::chrono::system_clock::now();
+      const std::time_t nowTime = std::chrono::system_clock::to_time_t(now);
+      std::tm localTime{};
+    #if defined(_WIN32)
+      localtime_s(&localTime, &nowTime);
+    #else
+      localtime_r(&nowTime, &localTime);
+    #endif
+
+      std::ostringstream stream;
+      stream << std::put_time(&localTime, "%Y-%m-%d %H:%M:%S");
+      return stream.str();
+        }
 
     std::string normalize_generic_path(const std::string &path)
     {
@@ -427,7 +506,7 @@ namespace hades
 
       if (!node.directory)
       {
-        if (path.extension() == ".cs")
+        if (should_include_workspace_script_file(workspacePath, path))
         {
           scriptFiles.push_back(relative_workspace_path(workspacePath, path));
         }
@@ -1027,21 +1106,21 @@ namespace hades
           node.directory ? node.path : node.path.parent_path();
       const bool isWorkspaceRoot = node.path == activeWorkspacePath_;
 
-      if (ImGui::MenuItem("New Folder"))
+      if (ImGui::MenuItem(ICON_FA_FOLDER_PLUS "  New Folder"))
       {
         request_workspace_item_creation(WorkspaceCreateKind::Folder, destinationDirectory);
       }
-      if (ImGui::MenuItem("New Script"))
+      if (ImGui::MenuItem(ICON_FA_FILE_CODE "  New Script"))
       {
         request_workspace_item_creation(WorkspaceCreateKind::Script, destinationDirectory);
       }
-      if (ImGui::MenuItem("Import"))
+      if (ImGui::MenuItem(ICON_FA_FILE_IMPORT "  Import"))
       {
         request_workspace_item_import(destinationDirectory);
       }
       if (!node.directory && node.path.extension() == ".cs")
       {
-        if (ImGui::MenuItem("Open in Script Editor"))
+        if (ImGui::MenuItem(ICON_FA_FILE_CODE "  Open in Script Editor"))
         {
           request_script_editor_open(node.path, relative_workspace_path(activeWorkspacePath_, node.path));
         }
@@ -1050,13 +1129,14 @@ namespace hades
       if (!isWorkspaceRoot)
       {
         ImGui::Separator();
-        if (ImGui::MenuItem("Rename"))
+        if (ImGui::MenuItem(ICON_FA_PEN "  Rename"))
         {
           workspaceRenamePath_ = node.path;
           std::snprintf(workspaceRenameBuffer_.data(), workspaceRenameBuffer_.size(), "%s", label.c_str());
           workspaceRenameFocusPending_ = true;
         }
-        if (ImGui::MenuItem(workspace_delete_button_label(node.path).c_str()))
+        const std::string deleteLabel = std::string(ICON_FA_TRASH) + "  " + workspace_delete_button_label(node.path);
+        if (ImGui::MenuItem(deleteLabel.c_str()))
         {
           request_workspace_item_deletion(node.path);
         }
@@ -1473,6 +1553,81 @@ namespace hades
 
   void Editor::render_script_editor(EntityManager &entityManager, ComponentManager &componentManager)
   {
+    auto append_script_editor_console_entry = [this](std::string_view level, const std::string &message)
+    {
+      if (message.empty())
+      {
+        return;
+      }
+
+      if (!scriptEditorDebugConsoleText_.empty())
+      {
+        scriptEditorDebugConsoleText_.push_back('\n');
+      }
+
+      scriptEditorDebugConsoleText_ += "[";
+      scriptEditorDebugConsoleText_ += current_local_timestamp();
+      scriptEditorDebugConsoleText_ += "] [";
+      scriptEditorDebugConsoleText_ += level;
+      scriptEditorDebugConsoleText_ += "] ";
+      scriptEditorDebugConsoleText_ += message;
+
+      constexpr std::size_t kMaxConsoleChars = 64000;
+      if (scriptEditorDebugConsoleText_.size() > kMaxConsoleChars)
+      {
+        const std::size_t overflow = scriptEditorDebugConsoleText_.size() - kMaxConsoleChars;
+        const std::size_t trimEnd = scriptEditorDebugConsoleText_.find('\n', overflow);
+        if (trimEnd != std::string::npos)
+        {
+          scriptEditorDebugConsoleText_.erase(0, trimEnd + 1);
+        }
+        else
+        {
+          scriptEditorDebugConsoleText_.erase(0, overflow);
+        }
+      }
+
+      scriptEditorDebugConsoleBufferDirty_ = true;
+      scriptEditorDebugConsoleAutoScrollPending_ = true;
+    };
+
+    if (!scriptEditorStatusMessage_.empty() &&
+        (scriptEditorStatusMessage_ != lastLoggedScriptEditorStatusMessage_ ||
+         scriptEditorStatusIsError_ != lastLoggedScriptEditorStatusIsError_))
+    {
+      append_script_editor_console_entry(scriptEditorStatusIsError_ ? "ERROR" : "INFO", scriptEditorStatusMessage_);
+      lastLoggedScriptEditorStatusMessage_ = scriptEditorStatusMessage_;
+      lastLoggedScriptEditorStatusIsError_ = scriptEditorStatusIsError_;
+    }
+
+    if (backgroundCompileInProgress_ != lastLoggedCompileInProgress_)
+    {
+      if (backgroundCompileInProgress_)
+      {
+        append_script_editor_console_entry("INFO", "Compiling workspace scripts...");
+      }
+      lastLoggedCompileInProgress_ = backgroundCompileInProgress_;
+    }
+
+    if (!backgroundCompileInProgress_)
+    {
+      if (scriptCompileStatus_ == ScriptCompileStatus::Failed &&
+          (scriptCompileStatus_ != lastLoggedCompileStatus_ || lastCompileError_ != lastLoggedCompileError_))
+      {
+        append_script_editor_console_entry("ERROR", lastCompileError_.empty()
+                                                        ? std::string("Workspace script compilation failed.")
+                                                        : lastCompileError_);
+      }
+      else if (scriptCompileStatus_ == ScriptCompileStatus::Succeeded &&
+               scriptCompileStatus_ != lastLoggedCompileStatus_)
+      {
+        append_script_editor_console_entry("INFO", "Workspace scripts compiled successfully.");
+      }
+
+      lastLoggedCompileStatus_ = scriptCompileStatus_;
+      lastLoggedCompileError_ = lastCompileError_;
+    }
+
     if (openScriptEditorUnsavedChangesDialog_)
     {
       ImGui::OpenPopup(SCRIPT_EDITOR_UNSAVED_POPUP_TITLE);
@@ -1566,17 +1721,21 @@ namespace hades
 
       if (ImGui::BeginMenuBar())
       {
-        if (ImGui::BeginMenu("File"))
+        if (ImGui::BeginMenu(ICON_FA_FILE "  File"))
         {
-          saveRequested = ImGui::MenuItem("Save", nullptr, false, canSaveActive);
-          saveAllRequested = ImGui::MenuItem("Save All", nullptr, false, !openScriptEditorTabs_.empty());
-          compileRequested = ImGui::MenuItem("Compile Workspace", nullptr, false, !activeWorkspacePath_.empty());
-          revertRequested = ImGui::MenuItem("Revert", nullptr, false, canSaveActive);
+          saveRequested = ImGui::MenuItem(ICON_FA_FLOPPY_DISK "  Save", nullptr, false, canSaveActive);
+          saveAllRequested = ImGui::MenuItem(ICON_FA_COPY "  Save All", nullptr, false, !openScriptEditorTabs_.empty());
+          revertRequested = ImGui::MenuItem(ICON_FA_ROTATE_LEFT "  Revert", nullptr, false, canSaveActive);
           ImGui::Separator();
-          closeRequested = ImGui::MenuItem("Close", nullptr, false, hasActiveTab);
-          closeAllRequested = ImGui::MenuItem("Close All", nullptr, false, !openScriptEditorTabs_.empty());
+          closeRequested = ImGui::MenuItem(ICON_FA_XMARK "  Close", nullptr, false, hasActiveTab);
+          closeAllRequested = ImGui::MenuItem(ICON_FA_CIRCLE_XMARK "  Close All", nullptr, false, !openScriptEditorTabs_.empty());
           ImGui::Separator();
-          closeScriptEditorRequested = ImGui::MenuItem("Close Script Editor");
+          closeScriptEditorRequested = ImGui::MenuItem(ICON_FA_CIRCLE_XMARK "  Close Script Editor");
+          ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu(ICON_FA_HAMMER "  Build"))
+        {
+          compileRequested = ImGui::MenuItem(ICON_FA_HAMMER "  Compile Workspace", nullptr, false, !activeWorkspacePath_.empty());
           ImGui::EndMenu();
         }
         ImGui::EndMenuBar();
@@ -1723,15 +1882,15 @@ namespace hades
         {
           ImGui::BeginDisabled();
         }
-        if (ImGui::MenuItem("New Folder"))
+        if (ImGui::MenuItem(ICON_FA_FOLDER_PLUS "  New Folder"))
         {
           request_workspace_item_creation(WorkspaceCreateKind::Folder, activeWorkspacePath_);
         }
-        if (ImGui::MenuItem("New Script"))
+        if (ImGui::MenuItem(ICON_FA_FILE_CODE "  New Script"))
         {
           request_workspace_item_creation(WorkspaceCreateKind::Script, activeWorkspacePath_);
         }
-        if (ImGui::MenuItem("Import"))
+        if (ImGui::MenuItem(ICON_FA_FILE_IMPORT "  Import"))
         {
           request_workspace_item_import(activeWorkspacePath_);
         }
@@ -1746,34 +1905,14 @@ namespace hades
       // --- Middle column: tabs + code editor ---
       ImGui::TableNextColumn();
 
+      const float availableHeight = ImGui::GetContentRegionAvail().y;
+      const float consoleHeight = availableHeight > 300.0f ? 180.0f : std::max(110.0f, availableHeight * 0.45f);
+      const float topPaneHeight = std::max(80.0f, availableHeight - consoleHeight - ImGui::GetStyle().ItemSpacing.y);
+
+      ImGui::BeginChild("ScriptEditorMainPane", ImVec2(0.0f, topPaneHeight), false);
       if (openScriptEditorTabs_.empty())
       {
         ImGui::TextDisabled("Open a .cs file from the file tree to start editing.");
-        if (!scriptEditorStatusMessage_.empty())
-        {
-          const ImVec4 color = scriptEditorStatusIsError_
-                                   ? ImVec4(0.88f, 0.42f, 0.42f, 1.0f)
-                                   : ImVec4(0.42f, 0.88f, 0.42f, 1.0f);
-          ImGui::TextColored(color, "%s", scriptEditorStatusMessage_.c_str());
-        }
-
-        if (backgroundCompileInProgress_)
-        {
-          ImGui::TextDisabled("Compiling scripts...");
-        }
-        else if (scriptCompileStatus_ == ScriptCompileStatus::Failed)
-        {
-          ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "%s", lastCompileError_.c_str());
-        }
-        else if (scriptCompileStatus_ == ScriptCompileStatus::Succeeded &&
-                 !workspaceScriptFiles_.empty())
-        {
-          ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.3f, 1.0f), "Workspace scripts compiled successfully.");
-        }
-        else if (!workspaceScriptFiles_.empty())
-        {
-          ImGui::TextDisabled("Workspace scripts have not been compiled yet.");
-        }
       }
       else
       {
@@ -1829,32 +1968,6 @@ namespace hades
         ScriptEditorTab *activeTab = active_script_editor_tab();
         if (activeTab != nullptr)
         {
-          if (!scriptEditorStatusMessage_.empty())
-          {
-            const ImVec4 color = scriptEditorStatusIsError_
-                                     ? ImVec4(0.88f, 0.42f, 0.42f, 1.0f)
-                                     : ImVec4(0.42f, 0.88f, 0.42f, 1.0f);
-            ImGui::TextColored(color, "%s", scriptEditorStatusMessage_.c_str());
-          }
-
-          if (backgroundCompileInProgress_)
-          {
-            ImGui::TextDisabled("Compiling scripts...");
-          }
-          else if (scriptCompileStatus_ == ScriptCompileStatus::Failed)
-          {
-            ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "%s", lastCompileError_.c_str());
-          }
-          else if (scriptCompileStatus_ == ScriptCompileStatus::Succeeded &&
-                   !workspaceScriptFiles_.empty())
-          {
-            ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.3f, 1.0f), "Workspace scripts compiled successfully.");
-          }
-          else if (!workspaceScriptFiles_.empty())
-          {
-            ImGui::TextDisabled("Workspace scripts have not been compiled yet.");
-          }
-
           ImVec2 editorSize = ImGui::GetContentRegionAvail();
           editorSize.y = std::max(editorSize.y, 200.0f);
           if (activeTab->textEditor == nullptr)
@@ -1888,6 +2001,40 @@ namespace hades
           ImGui::PopID();
         }
       }
+      ImGui::EndChild();
+
+      ImGui::Separator();
+      ImGui::TextUnformatted("Debug Console");
+      ImGui::BeginChild("ScriptEditorDebugConsolePane", ImVec2(0.0f, 0.0f), true);
+      if (scriptEditorDebugConsoleText_.empty())
+      {
+        ImGui::TextDisabled("No messages yet.");
+      }
+      else
+      {
+        if (scriptEditorDebugConsoleBufferDirty_)
+        {
+          scriptEditorDebugConsoleBuffer_.assign(
+              scriptEditorDebugConsoleText_.begin(),
+              scriptEditorDebugConsoleText_.end());
+          scriptEditorDebugConsoleBuffer_.push_back('\0');
+          scriptEditorDebugConsoleBufferDirty_ = false;
+        }
+
+        ImGui::InputTextMultiline(
+            "##ScriptEditorDebugConsoleText",
+            scriptEditorDebugConsoleBuffer_.data(),
+            scriptEditorDebugConsoleBuffer_.size(),
+            ImVec2(-1.0f, -1.0f),
+            ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_NoHorizontalScroll);
+
+        if (scriptEditorDebugConsoleAutoScrollPending_)
+        {
+          ImGui::SetScrollHereY(1.0f);
+          scriptEditorDebugConsoleAutoScrollPending_ = false;
+        }
+      }
+      ImGui::EndChild();
 
       ImGui::TableNextColumn();
       ImGui::TextUnformatted("Entities");
@@ -1937,13 +2084,25 @@ namespace hades
           for (const Entity::EntityId entity : matchingEntities)
           {
             const bool selected = state.selectedEntity.has_value() && *state.selectedEntity == entity;
-            if (ImGui::Selectable(entity_label(entity, componentManager).c_str(), selected))
+            const std::string entityTitle = entity_label(entity, componentManager) + "##ScriptEntity" + std::to_string(entity);
+            if (ImGui::CollapsingHeader(entityTitle.c_str()))
             {
-              if (const auto world = world_for_entity(entity, componentManager); world.has_value())
+              ImGui::TextDisabled("Script-accessible components");
+              ImGui::BulletText("PositionComponent3D (context.Position, read/write)");
+              if (componentManager.hasComponent<NameComponent>(entity))
               {
-                load_world(*world, componentManager);
+                ImGui::BulletText("NameComponent (context.Name, read-only)");
               }
-              select_entity(entity);
+              else
+              {
+                ImGui::BulletText("NameComponent (not present; context.Name uses fallback)");
+              }
+            }
+
+            if (selected)
+            {
+              ImGui::SameLine();
+              ImGui::TextDisabled("(selected)");
             }
           }
         }
@@ -2003,15 +2162,15 @@ namespace hades
 
     if (ImGui::BeginPopupContextWindow("WorkspaceRootContext", ImGuiPopupFlags_NoOpenOverItems))
     {
-      if (ImGui::MenuItem("New Folder"))
+      if (ImGui::MenuItem(ICON_FA_FOLDER_PLUS "  New Folder"))
       {
         request_workspace_item_creation(WorkspaceCreateKind::Folder, activeWorkspacePath_);
       }
-      if (ImGui::MenuItem("New Script"))
+      if (ImGui::MenuItem(ICON_FA_FILE_CODE "  New Script"))
       {
         request_workspace_item_creation(WorkspaceCreateKind::Script, activeWorkspacePath_);
       }
-      if (ImGui::MenuItem("Import"))
+      if (ImGui::MenuItem(ICON_FA_FILE_IMPORT "  Import"))
       {
         request_workspace_item_import(activeWorkspacePath_);
       }

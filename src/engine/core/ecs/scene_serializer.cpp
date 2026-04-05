@@ -401,6 +401,7 @@ namespace hades
     // Destroy in reverse order (children before parents).
     for (auto it = toDestroy.rbegin(); it != toDestroy.rend(); ++it)
     {
+      componentManager.removeAllComponents(*it);
       entityManager.destroyEntity(*it);
     }
   }

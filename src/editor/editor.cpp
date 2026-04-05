@@ -9,6 +9,7 @@
 
 #include "imgui.h"
 #include "imgui_internal.h"
+#include "IconsFontAwesome6.h"
 #include "../engine/components/name_component.hpp"
 #include "../engine/core/ecs/component_manager.hpp"
 #include "../engine/core/ecs/entity_manager.hpp"
@@ -53,6 +54,10 @@ namespace hades
     state.activeCamera.reset();
     state.playModeMessage.clear();
     pendingEntityDeletion_.reset();
+    openAddEntityDialog_ = false;
+    focusAddEntitySearch_ = false;
+    pendingAddEntityParent_.reset();
+    addEntitySearchBuffer_[0] = '\0';
     reset_scene_camera();
     activeSceneGizmoAxis_ = SceneGizmoAxis::None;
     activeSceneGizmoEntity_ = Entity::INVALID;
@@ -93,6 +98,9 @@ namespace hades
     nextCompileRequestId_ = 0;
     selectedSettingsCategory_ = SettingsCategory::Editor;
     state.debugConsoleMessages.clear();
+    debugConsoleWindowText_.clear();
+    debugConsoleWindowBuffer_.clear();
+    debugConsoleWindowBufferDirty_ = true;
     openDebugConsoleWindow_ = false;
     focusDebugConsoleWindow_ = false;
     openAboutWindow_ = false;
@@ -125,7 +133,8 @@ namespace hades
     std::fprintf(stderr, "[%s] %s\n", prefix, text.c_str());
 
     state.debugConsoleMessages.push_front(
-        DebugMessage{level, text, std::chrono::steady_clock::now()});
+      DebugMessage{level, text, std::chrono::steady_clock::now(), std::chrono::system_clock::now()});
+    debugConsoleWindowBufferDirty_ = true;
 
     constexpr std::size_t MAX_DEBUG_MESSAGES = 500;
     while (state.debugConsoleMessages.size() > MAX_DEBUG_MESSAGES)
@@ -205,6 +214,7 @@ namespace hades
       }
     }
 
+    render_add_entity_dialog(entityManager, componentManager);
     handle_entity_creation_requests(entityManager, componentManager);
     import_model(entityManager, componentManager);
     handle_play_mode_requests(entityManager, componentManager, scriptRuntime);
@@ -250,31 +260,31 @@ namespace hades
     };
 
     MenuBarItem file;
-    file.title = "File";
+    file.title = ICON_FA_FILE "  File";
 
     MenuBarItem newWorld;
-    newWorld.title = "New World";
+    newWorld.title = ICON_FA_PLUS "  New World";
     newWorld.on_activate = [this, &entityManager, &componentManager]()
     {
       create_world(entityManager, componentManager);
     };
 
     MenuBarItem exit;
-    exit.title = "Exit";
+    exit.title = ICON_FA_DOOR_OPEN "  Exit";
     exit.on_activate = [this]()
     {
       state.events.push(EDITOR_QUIT);
     };
 
     MenuBarItem save;
-    save.title = "Save";
+    save.title = ICON_FA_FLOPPY_DISK "  Save";
     save.on_activate = [this, &entityManager, &componentManager]()
     {
       save_worlds(entityManager, componentManager);
     };
 
     MenuBarItem exportItem;
-    exportItem.title = "Export...";
+    exportItem.title = ICON_FA_FILE_EXPORT "  Export...";
     exportItem.on_activate = [this]()
     {
       show_plugin("export");
@@ -284,24 +294,8 @@ namespace hades
     file.children_menu_items.push_back(save);
     file.children_menu_items.push_back(exportItem);
 
-    MenuBarItem editorWindow;
-    editorWindow.title = "Editor";
-    editorWindow.selected = is_script_editor_window_open();
-    editorWindow.on_activate = [this]()
-    {
-      if (is_script_editor_window_open())
-      {
-        set_script_editor_window_open(false);
-      }
-      else
-      {
-        show_plugin("script-editor-window");
-      }
-    };
-    file.children_menu_items.push_back(std::move(editorWindow));
-
     MenuBarItem settingsWindow;
-    settingsWindow.title = "Settings";
+    settingsWindow.title = ICON_FA_GEAR "  Settings";
     settingsWindow.selected = is_plugin_visible("settings");
     settingsWindow.on_activate = [this]()
     {
@@ -319,30 +313,11 @@ namespace hades
     };
     file.children_menu_items.push_back(std::move(settingsWindow));
 
-    MenuBarItem debugConsoleWindow;
-    debugConsoleWindow.title = "Debug Console";
-    debugConsoleWindow.selected = is_plugin_visible("debug-console");
-    debugConsoleWindow.on_activate = [this]()
-    {
-      if (is_plugin_visible("debug-console"))
-      {
-        if (EditorPlugin *plugin = find_plugin("debug-console"))
-        {
-          plugin->set_visible(*this, false);
-        }
-      }
-      else
-      {
-        show_plugin("debug-console");
-      }
-    };
-    file.children_menu_items.push_back(std::move(debugConsoleWindow));
-
     file.children_menu_items.push_back(exit);
     gui->menu_bar_items.push_back(file);
 
     MenuBarItem worlds;
-    worlds.title = "Worlds";
+    worlds.title = ICON_FA_LAYER_GROUP "  Worlds";
 
     // Collect in-memory world entities keyed by their plain name.
     const auto memoryWorlds = find_world_entities(entityManager, componentManager);
@@ -372,7 +347,7 @@ namespace hades
     if (allWorldNames.empty())
     {
       MenuBarItem emptyWorlds;
-      emptyWorlds.title = "No Worlds Available";
+      emptyWorlds.title = ICON_FA_CIRCLE_INFO "  No Worlds Available";
       emptyWorlds.enabled = false;
       worlds.children_menu_items.push_back(emptyWorlds);
     }
@@ -394,7 +369,7 @@ namespace hades
 
         // Build a submenu for each world.
         MenuBarItem worldItem;
-        std::string displayName = worldName;
+        std::string displayName = std::string(ICON_FA_FILE) + "  " + worldName;
         if (isLoaded)
         {
           displayName += " (loaded)";
@@ -407,7 +382,7 @@ namespace hades
 
         // "Load" action
         MenuBarItem loadItem;
-        loadItem.title = "Load";
+        loadItem.title = ICON_FA_FOLDER_OPEN "  Load";
         loadItem.selected = false;
         if (onDisk)
         {
@@ -430,7 +405,7 @@ namespace hades
         if (inMemory)
         {
           MenuBarItem setDefaultItem;
-          setDefaultItem.title = "Set as Default";
+          setDefaultItem.title = ICON_FA_STAR "  Set as Default";
           setDefaultItem.selected = isDefault;
           Entity::EntityId worldId = memIt->second;
           setDefaultItem.on_activate = [this, worldId, &entityManager, &componentManager]()
@@ -445,7 +420,7 @@ namespace hades
         {
           Entity::EntityId worldId = memIt->second;
           MenuBarItem deleteItem;
-          deleteItem.title = "Delete";
+          deleteItem.title = ICON_FA_TRASH "  Delete";
           deleteItem.enabled = !isDefault;
           deleteItem.on_activate = [this, worldId]()
           {
@@ -461,17 +436,17 @@ namespace hades
     gui->menu_bar_items.push_back(worlds);
 
     MenuBarItem game;
-    game.title = "Game";
+    game.title = ICON_FA_GAMEPAD "  Game";
 
     MenuBarItem play;
-    play.title = "Play";
+    play.title = ICON_FA_PLAY "  Play";
     play.on_activate = [this]()
     {
       state.pendingPlayAction = EditorPlayAction::Start;
     };
 
     MenuBarItem stop;
-    stop.title = "Stop";
+    stop.title = ICON_FA_STOP "  Stop";
     stop.on_activate = [this]()
     {
       state.pendingPlayAction = EditorPlayAction::Stop;
@@ -485,19 +460,36 @@ namespace hades
     gui->menu_bar_items.push_back(game);
 
     MenuBarItem windows;
-    windows.title = "Windows";
-    add_plugin_toggle_item(windows, "Workspace", "workspace");
-    add_plugin_toggle_item(windows, "Entities", "entities");
-    add_plugin_toggle_item(windows, "Properties", "properties");
-    add_plugin_toggle_item(windows, "World", "world");
-    add_plugin_toggle_item(windows, "Debug Console", "debug-console");
+    windows.title = ICON_FA_WINDOW_MAXIMIZE "  Windows";
+
+    MenuBarItem codeEditorWindow;
+    codeEditorWindow.title = ICON_FA_CODE "  Code Editor";
+    codeEditorWindow.selected = is_script_editor_window_open();
+    codeEditorWindow.on_activate = [this]()
+    {
+      if (is_script_editor_window_open())
+      {
+        set_script_editor_window_open(false);
+      }
+      else
+      {
+        show_plugin("script-editor-window");
+      }
+    };
+    windows.children_menu_items.push_back(std::move(codeEditorWindow));
+
+    add_plugin_toggle_item(windows, ICON_FA_FOLDER_OPEN "  Workspace", "workspace");
+    add_plugin_toggle_item(windows, ICON_FA_LAYER_GROUP "  Entities", "entities");
+    add_plugin_toggle_item(windows, ICON_FA_GEAR "  Properties", "properties");
+    add_plugin_toggle_item(windows, ICON_FA_FILE "  World", "world");
+    add_plugin_toggle_item(windows, ICON_FA_CHART_LINE "  Debug Console", "debug-console");
     gui->menu_bar_items.push_back(std::move(windows));
 
     MenuBarItem help;
-    help.title = "Help";
+    help.title = ICON_FA_CIRCLE_QUESTION "  Help";
 
     MenuBarItem about;
-    about.title = "About";
+    about.title = ICON_FA_CIRCLE_INFO "  About";
     about.on_activate = [this]()
     {
       openAboutWindow_ = true;
@@ -506,7 +498,7 @@ namespace hades
     help.children_menu_items.push_back(std::move(about));
 
     MenuBarItem statsForNerds;
-    statsForNerds.title = "Stats for Nerds";
+    statsForNerds.title = ICON_FA_CHART_LINE "  Stats for Nerds";
     statsForNerds.selected = state.showDebugInfo;
     statsForNerds.on_activate = [this]()
     {

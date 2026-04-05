@@ -7,8 +7,16 @@
 
 namespace hades
 {
+  class IComponentArray
+  {
+  public:
+    virtual ~IComponentArray() = default;
+    virtual bool has(Entity::EntityId entity) = 0;
+    virtual void removeIfPresent(Entity::EntityId entity) = 0;
+  };
+
   template <typename T>
-  class ComponentArray
+  class ComponentArray : public IComponentArray
   {
   private:
     std::vector<T> components;
@@ -18,6 +26,12 @@ namespace hades
   public:
     void insert(Entity::EntityId entity, T component)
     {
+      if (entityToIndex.find(entity) != entityToIndex.end())
+      {
+        components[entityToIndex[entity]] = component;
+        return;
+      }
+
       entityToIndex[entity] = components.size();
       indexToEntity[components.size()] = entity;
       components.push_back(component);
@@ -41,12 +55,20 @@ namespace hades
       components.pop_back();
     }
 
+    void removeIfPresent(Entity::EntityId entity) override
+    {
+      if (entityToIndex.find(entity) != entityToIndex.end())
+      {
+        remove(entity);
+      }
+    }
+
     T &get(Entity::EntityId entity)
     {
       return components[entityToIndex[entity]];
     }
 
-    bool has(Entity::EntityId entity)
+    bool has(Entity::EntityId entity) override
     {
       return entityToIndex.find(entity) != entityToIndex.end();
     }

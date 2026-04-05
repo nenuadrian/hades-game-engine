@@ -570,6 +570,7 @@ namespace hades
           if (previousScriptPath != attachment.scriptPath)
           {
             attachment.className.clear();
+            attachment.publicFieldValues.clear();
           }
 
           if (scriptOptions.empty())

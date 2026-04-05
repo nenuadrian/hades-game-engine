@@ -66,6 +66,7 @@ namespace hades
     DebugMessageLevel level = DebugMessageLevel::Info;
     std::string text;
     std::chrono::steady_clock::time_point timestamp;
+    std::chrono::system_clock::time_point wallClockTimestamp;
   };
 
   struct EditorState

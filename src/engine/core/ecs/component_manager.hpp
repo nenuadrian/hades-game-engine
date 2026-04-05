@@ -13,7 +13,7 @@ namespace hades
   class ComponentManager
   {
   private:
-    std::unordered_map<ComponentId, std::shared_ptr<void>> componentArrays;
+    std::unordered_map<ComponentId, std::shared_ptr<IComponentArray>> componentArrays;
     EntityManager *entityManager_ = nullptr;
 
   public:
@@ -65,6 +65,18 @@ namespace hades
     bool hasComponent(Entity::EntityId entity)
     {
       return getComponentArray<T>()->has(entity);
+    }
+
+    void removeAllComponents(Entity::EntityId entity)
+    {
+      for (auto &[typeId, array] : componentArrays)
+      {
+        array->removeIfPresent(entity);
+      }
+      if (entityManager_ != nullptr)
+      {
+        entityManager_->setComponentSignature(entity, {});
+      }
     }
   };
 }

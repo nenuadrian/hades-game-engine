@@ -142,6 +142,15 @@ namespace hades
     std::optional<std::size_t> pendingScriptEditorTabSelectionIndex_;
     std::string scriptEditorStatusMessage_;
     bool scriptEditorStatusIsError_ = false;
+    std::string scriptEditorDebugConsoleText_;
+    std::vector<char> scriptEditorDebugConsoleBuffer_;
+    bool scriptEditorDebugConsoleBufferDirty_ = true;
+    bool scriptEditorDebugConsoleAutoScrollPending_ = false;
+    std::string lastLoggedScriptEditorStatusMessage_;
+    bool lastLoggedScriptEditorStatusIsError_ = false;
+    bool lastLoggedCompileInProgress_ = false;
+    ScriptCompileStatus lastLoggedCompileStatus_ = ScriptCompileStatus::Unknown;
+    std::string lastLoggedCompileError_;
     bool openScriptEditorWindow_ = false;
     bool focusScriptEditorWindow_ = false;
     bool openScriptEditorUnsavedChangesDialog_ = false;
@@ -165,6 +174,9 @@ namespace hades
     SettingsCategory selectedSettingsCategory_ = SettingsCategory::Editor;
     bool openDebugConsoleWindow_ = false;
     bool focusDebugConsoleWindow_ = false;
+    std::string debugConsoleWindowText_;
+    std::vector<char> debugConsoleWindowBuffer_;
+    bool debugConsoleWindowBufferDirty_ = true;
     bool openAboutWindow_ = false;
     bool focusAboutWindow_ = false;
 
@@ -202,6 +214,10 @@ namespace hades
     bool workspaceRenameFocusPending_ = false;
 
     std::optional<Entity::EntityId> pendingEntityDeletion_;
+    bool openAddEntityDialog_ = false;
+    bool focusAddEntitySearch_ = false;
+    std::optional<Entity::EntityId> pendingAddEntityParent_;
+    std::array<char, 256> addEntitySearchBuffer_{};
     float sceneCameraTargetX_ = 0.0f;
     float sceneCameraTargetY_ = 0.0f;
     float sceneCameraTargetZ_ = 0.0f;
@@ -245,6 +261,8 @@ namespace hades
     std::unordered_map<std::string, std::vector<ParsedScriptClass>> parsedScriptCache_;
     std::unordered_map<std::string, std::filesystem::file_time_type> parsedScriptModTimes_;
     std::vector<std::unique_ptr<EditorPlugin>> plugins_;
+    std::deque<float> debugFrameTimeHistory_;
+    double debugFrameTimeHistoryTotal_ = 0.0;
 
     void register_builtin_plugins();
     void register_plugin(std::unique_ptr<EditorPlugin> plugin);
@@ -290,12 +308,14 @@ namespace hades
     void load_world(Entity::EntityId world, ComponentManager &componentManager);
     void set_default_world(Entity::EntityId world, EntityManager &entityManager, ComponentManager &componentManager);
     void request_entity_creation(EditorEntityPreset preset, Entity::EntityId parent);
+    void request_add_entity_picker(Entity::EntityId parent);
     void request_model_import(Entity::EntityId parent);
     void request_entity_deletion(Entity::EntityId entity);
     void select_entity(Entity::EntityId entity);
     void workspace(EntityManager &entityManager, ComponentManager &componentManager);
     void handle_entity_creation_requests(EntityManager &entityManager, ComponentManager &componentManager);
     void handle_entity_deletion_requests(EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime);
+    void render_add_entity_dialog(EntityManager &entityManager, ComponentManager &componentManager);
     void import_model(EntityManager &entityManager, ComponentManager &componentManager);
     void handle_play_mode_requests(EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime);
     void start_play_mode(EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime);
@@ -308,7 +328,7 @@ namespace hades
     void properties(EntityManager &entityManager, ComponentManager &componentManager);
     void render_hierarchy(Entity::EntityId entity, EntityManager &entityManager, ComponentManager &componentManager);
     void render_hierarchies(EntityManager &entityManager, ComponentManager &componentManager);
-    void debug(float deltaTime);
+    void debug(float deltaTime, EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime);
     void save_worlds(EntityManager &entityManager, ComponentManager &componentManager);
     void open_world_from_disk(const std::string &worldName, EntityManager &entityManager, ComponentManager &componentManager);
   };

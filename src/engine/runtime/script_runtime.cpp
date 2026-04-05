@@ -776,7 +776,9 @@ namespace Hades.Scripting
               << "    <LangVersion>latest</LangVersion>\n"
               << "    <AssemblyName>HadesScriptHost</AssemblyName>\n"
               << "    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>\n"
+              << "    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>\n"
               << "    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>\n"
+              << "    <Deterministic>false</Deterministic>\n"
               << "  </PropertyGroup>\n"
               << "  <ItemGroup>\n"
               << "    <Compile Include=\"" << xml_escape(hostSourcePath.generic_string()) << "\" />\n";
