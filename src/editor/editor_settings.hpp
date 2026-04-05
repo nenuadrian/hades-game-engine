@@ -7,6 +7,13 @@
 
 namespace hades
 {
+  struct WorkspaceExportSettings
+  {
+    std::string projectName;
+    std::string outputPath;
+    bool enableHeadless = false;
+  };
+
   struct WorkspaceEditorSettings
   {
     bool showDebugInfo = false;
@@ -17,6 +24,11 @@ namespace hades
     float sceneCameraYawDegrees = 0.0f;
     float sceneCameraPitchDegrees = 0.0f;
     std::unordered_map<std::string, bool> pluginVisibility;
+    int selectedExportPlatform = 0;
+    WorkspaceExportSettings exportMacOS;
+    WorkspaceExportSettings exportLinux;
+    WorkspaceExportSettings exportWindows;
+    WorkspaceExportSettings exportWeb;
   };
 
   std::filesystem::path workspace_settings_path(const std::filesystem::path &workspacePath);

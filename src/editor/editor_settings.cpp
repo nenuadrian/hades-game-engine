@@ -11,7 +11,7 @@ namespace hades
 {
   namespace
   {
-    constexpr int WORKSPACE_SETTINGS_FORMAT_VERSION = 1;
+    constexpr int WORKSPACE_SETTINGS_FORMAT_VERSION = 2;
     constexpr char WORKSPACE_SETTINGS_FILENAME[] = "settings.json";
 
     void set_error_message(std::string *errorMessage, const std::string &message)
@@ -44,6 +44,43 @@ namespace hades
       {
         target = value[key].get<float>();
       }
+    }
+
+    void read_optional_int(const json &value, const char *key, int &target)
+    {
+      if (value.contains(key) && value[key].is_number_integer())
+      {
+        target = value[key].get<int>();
+      }
+    }
+
+    void read_optional_string(const json &value, const char *key, std::string &target)
+    {
+      if (value.contains(key) && value[key].is_string())
+      {
+        target = value[key].get<std::string>();
+      }
+    }
+
+    void read_export_settings(const json &value, WorkspaceExportSettings &target)
+    {
+      if (!value.is_object())
+      {
+        return;
+      }
+
+      read_optional_string(value, "projectName", target.projectName);
+      read_optional_string(value, "outputPath", target.outputPath);
+      read_optional_bool(value, "enableHeadless", target.enableHeadless);
+    }
+
+    json write_export_settings(const WorkspaceExportSettings &value)
+    {
+      return {
+          {"projectName", value.projectName},
+          {"outputPath", value.outputPath},
+          {"enableHeadless", value.enableHeadless},
+      };
     }
   }
 
@@ -120,6 +157,29 @@ namespace hades
           settings.pluginVisibility[it.key()] = it.value().get<bool>();
         }
       }
+
+      if (document.contains("export") && document["export"].is_object())
+      {
+        const json &exportSettings = document["export"];
+        read_optional_int(exportSettings, "selectedPlatform", settings.selectedExportPlatform);
+
+        if (exportSettings.contains("macOS"))
+        {
+          read_export_settings(exportSettings["macOS"], settings.exportMacOS);
+        }
+        if (exportSettings.contains("linux"))
+        {
+          read_export_settings(exportSettings["linux"], settings.exportLinux);
+        }
+        if (exportSettings.contains("windows"))
+        {
+          read_export_settings(exportSettings["windows"], settings.exportWindows);
+        }
+        if (exportSettings.contains("web"))
+        {
+          read_export_settings(exportSettings["web"], settings.exportWeb);
+        }
+      }
     }
     catch (const std::exception &exception)
     {
@@ -173,6 +233,13 @@ namespace hades
     {
       document["plugins"][pluginId] = visible;
     }
+    document["export"] = {
+        {"selectedPlatform", settings.selectedExportPlatform},
+        {"macOS", write_export_settings(settings.exportMacOS)},
+        {"linux", write_export_settings(settings.exportLinux)},
+        {"windows", write_export_settings(settings.exportWindows)},
+        {"web", write_export_settings(settings.exportWeb)},
+    };
 
     std::ofstream output(settingsPath, std::ios::trunc);
     if (!output.is_open())

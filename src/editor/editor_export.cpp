@@ -21,6 +21,11 @@ namespace
 {
   constexpr char EXPORT_WINDOW_TITLE[] = "Export";
 
+  constexpr int export_platform_index(hades::Editor::ExportPlatform platform)
+  {
+    return static_cast<int>(platform);
+  }
+
   template <std::size_t Size>
   void set_buffer_text(std::array<char, Size> &buffer, const std::string &value)
   {
@@ -658,10 +663,17 @@ namespace hades
       return;
     }
 
-    // Pre-populate project name from workspace folder on first open.
-    if (exportProjectNameBuffer_[0] == '\0' && !activeWorkspacePath_.empty())
+    // Pre-populate project names from workspace folder on first open.
+    if (!activeWorkspacePath_.empty())
     {
-      set_buffer_text(exportProjectNameBuffer_, activeWorkspacePath_.filename().string());
+      const std::string defaultProjectName = activeWorkspacePath_.filename().string();
+      for (auto &platformSettings : exportPlatformSettings_)
+      {
+        if (platformSettings.projectNameBuffer[0] == '\0')
+        {
+          set_buffer_text(platformSettings.projectNameBuffer, defaultProjectName);
+        }
+      }
     }
 
     // Poll the shared build state for updates.
@@ -684,182 +696,208 @@ namespace hades
       }
     }
 
-    // --- Platform selector ---
-    ImGui::Text("Target Platform");
-    ImGui::Separator();
-    ImGui::Spacing();
-
+    bool exportSettingsDirty = false;
     const ExportPlatform platforms[] = {ExportPlatform::macOS, ExportPlatform::Linux, ExportPlatform::Windows, ExportPlatform::Web};
-    for (const auto &platform : platforms)
+
+    if (ImGui::BeginTable(
+            "ExportLayout",
+            2,
+            ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp))
     {
-      const bool isCurrent = is_current_platform(platform);
-      if (!isCurrent)
+      ImGui::TableSetupColumn("Targets", ImGuiTableColumnFlags_WidthFixed, 210.0f);
+      ImGui::TableSetupColumn("Values", ImGuiTableColumnFlags_WidthStretch);
+
+      ImGui::TableNextColumn();
+      ImGui::BeginChild("ExportTargets", ImVec2(0.0f, 0.0f), true);
+      for (const auto &platform : platforms)
       {
-        ImGui::BeginDisabled();
-      }
-      if (ImGui::RadioButton(platform_label(platform), selectedExportPlatform_ == platform))
-      {
-        selectedExportPlatform_ = platform;
-      }
-      if (!isCurrent)
-      {
-        ImGui::EndDisabled();
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        if (ImGui::Selectable(platform_label(platform), selectedExportPlatform_ == platform))
         {
-          ImGui::SetTooltip("Cross-compilation is not supported. Build on %s to export for this platform.",
-                            platform_label(platform));
+          selectedExportPlatform_ = platform;
+          exportSettingsDirty = true;
         }
-      }
-      else if (platform == ExportPlatform::Web)
-      {
-        ImGui::SameLine();
-        ImGui::TextDisabled("(requires Emscripten SDK)");
-      }
-      else
-      {
-        ImGui::SameLine();
-        ImGui::TextDisabled("(current)");
-      }
-    }
 
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
-
-    // --- Project Name ---
-    ImGui::Text("Project Name");
-    ImGui::SetNextItemWidth(-1.0f);
-    ImGui::InputText("##ProjectName", exportProjectNameBuffer_.data(), exportProjectNameBuffer_.size());
-
-    ImGui::Spacing();
-
-    // --- Output Directory ---
-    ImGui::Text("Output Directory");
-    const float browseButtonWidth = ImGui::CalcTextSize("Browse...").x + ImGui::GetStyle().FramePadding.x * 2.0f + 8.0f;
-    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - browseButtonWidth - ImGui::GetStyle().ItemSpacing.x);
-    ImGui::InputText("##OutputPath", exportOutputPathBuffer_.data(), exportOutputPathBuffer_.size());
-    ImGui::SameLine();
-    if (ImGui::Button("Browse..."))
-    {
-      std::string pickerError;
-      const auto pickedFolder = pick_folder_with_native_dialog("Select export output directory", &pickerError);
-      if (pickedFolder.has_value())
-      {
-        set_buffer_text(exportOutputPathBuffer_, pickedFolder->string());
-      }
-    }
-
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
-
-    // --- Headless mode (not applicable to Web) ---
-    if (selectedExportPlatform_ != ExportPlatform::Web)
-    {
-      ImGui::Checkbox("Enable headless mode (--headless)", &exportEnableHeadless_);
-      if (ImGui::IsItemHovered())
-      {
-        ImGui::SetTooltip("When enabled, the exported game accepts --headless to run\n"
-                           "without a window or rendering (e.g. for ML training).");
-      }
-    }
-
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
-
-    // --- Build & Export button ---
-    const bool hasProjectName = exportProjectNameBuffer_[0] != '\0';
-    const bool hasOutputPath = exportOutputPathBuffer_[0] != '\0';
-    const bool canBuild = hasProjectName && hasOutputPath && !exportBuildInProgress_;
-
-    if (!canBuild)
-    {
-      ImGui::BeginDisabled();
-    }
-    if (ImGui::Button("Build & Export", ImVec2(140.0f, 0.0f)))
-    {
-      // Save all worlds before building.
-      save_worlds(entityManager, componentManager);
-
-      exportBuildLog_.clear();
-      sync_log_buffer(exportBuildLog_, exportBuildLogBuffer_);
-      exportBuildError_.clear();
-      exportBuildSucceeded_ = false;
-      exportBuildFinished_ = false;
-      exportBuildInProgress_ = true;
-
-      exportBuildState_ = std::make_shared<ExportBuildState>();
-
-      const std::filesystem::path outputDir = exportOutputPathBuffer_.data();
-      const std::filesystem::path workspacePath = activeWorkspacePath_;
-      const std::string projectName = exportProjectNameBuffer_.data();
-      const ExportPlatform platform = selectedExportPlatform_;
-      const bool enableHeadless = exportEnableHeadless_;
-
-      auto buildState = exportBuildState_;
-      if (exportBuildThread_.joinable())
-      {
-        exportBuildThread_.join();
-      }
-      exportBuildThread_ = std::thread(
-          [buildState, outputDir, workspacePath, projectName, platform, enableHeadless]()
-          {
-            run_export_build(buildState, outputDir, workspacePath, projectName, platform, enableHeadless);
-          });
-    }
-    if (!canBuild)
-    {
-      ImGui::EndDisabled();
-    }
-
-    // --- Status ---
-    if (exportBuildInProgress_)
-    {
-      ImGui::SameLine();
-      ImGui::TextDisabled("Building...");
-    }
-    else if (exportBuildFinished_)
-    {
-      ImGui::SameLine();
-      if (exportBuildSucceeded_)
-      {
-        ImGui::TextColored(ImVec4(0.4f, 0.85f, 0.4f, 1.0f), "Export succeeded.");
-      }
-      else
-      {
-        ImGui::TextColored(ImVec4(0.88f, 0.42f, 0.42f, 1.0f), "%s", exportBuildError_.c_str());
-      }
-    }
-
-    ImGui::Spacing();
-
-    // --- Build Log ---
-    if (!exportBuildLog_.empty() || exportBuildInProgress_)
-    {
-      ImGui::Text("Build Output");
-      ImGui::BeginChild("BuildLog", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders);
-      if (exportBuildInProgress_ && exportBuildLog_.empty())
-      {
-        ImGui::TextDisabled("Starting build...");
-      }
-      else
-      {
-        if (exportBuildLogBuffer_.empty())
+        if (platform == ExportPlatform::Web)
         {
-          sync_log_buffer(exportBuildLog_, exportBuildLogBuffer_);
+          ImGui::SameLine();
+          ImGui::TextDisabled("(Emscripten)");
         }
-        ImGui::InputTextMultiline("##BuildOutputText",
-                                  exportBuildLogBuffer_.data(),
-                                  exportBuildLogBuffer_.size(),
-                                  ImVec2(-1.0f, -1.0f),
-                                  ImGuiInputTextFlags_ReadOnly);
-        if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
+        else if (is_current_platform(platform))
         {
-          ImGui::SetScrollHereY(1.0f);
+          ImGui::SameLine();
+          ImGui::TextDisabled("(current host)");
         }
       }
       ImGui::EndChild();
+
+      ImGui::TableNextColumn();
+      ImGui::BeginChild("ExportValues", ImVec2(0.0f, 0.0f), false);
+
+      auto &platformSettings = exportPlatformSettings_[export_platform_index(selectedExportPlatform_)];
+
+      ImGui::TextDisabled("%s", platform_label(selectedExportPlatform_));
+      ImGui::Separator();
+
+      if (!is_current_platform(selectedExportPlatform_))
+      {
+        ImGui::TextColored(
+            ImVec4(0.88f, 0.72f, 0.34f, 1.0f),
+            "Cross-compilation is not supported. Build on %s to export this target.",
+            platform_label(selectedExportPlatform_));
+        ImGui::Spacing();
+      }
+
+      ImGui::Text("Project Name");
+      ImGui::SetNextItemWidth(-1.0f);
+      if (ImGui::InputText("##ProjectName", platformSettings.projectNameBuffer.data(), platformSettings.projectNameBuffer.size()))
+      {
+        exportSettingsDirty = true;
+      }
+
+      ImGui::Spacing();
+
+      ImGui::Text("Output Directory");
+      const float browseButtonWidth = ImGui::CalcTextSize("Browse...").x + ImGui::GetStyle().FramePadding.x * 2.0f + 8.0f;
+      ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - browseButtonWidth - ImGui::GetStyle().ItemSpacing.x);
+      if (ImGui::InputText("##OutputPath", platformSettings.outputPathBuffer.data(), platformSettings.outputPathBuffer.size()))
+      {
+        exportSettingsDirty = true;
+      }
+      ImGui::SameLine();
+      if (ImGui::Button("Browse..."))
+      {
+        std::string pickerError;
+        const auto pickedFolder = pick_folder_with_native_dialog("Select export output directory", &pickerError);
+        if (pickedFolder.has_value())
+        {
+          set_buffer_text(platformSettings.outputPathBuffer, pickedFolder->string());
+          exportSettingsDirty = true;
+        }
+      }
+
+      ImGui::Spacing();
+      ImGui::Separator();
+      ImGui::Spacing();
+
+      if (selectedExportPlatform_ != ExportPlatform::Web)
+      {
+        if (ImGui::Checkbox("Enable headless mode (--headless)", &platformSettings.enableHeadless))
+        {
+          exportSettingsDirty = true;
+        }
+        if (ImGui::IsItemHovered())
+        {
+          ImGui::SetTooltip("When enabled, the exported game accepts --headless to run\n"
+                            "without a window or rendering (e.g. for ML training).");
+        }
+      }
+
+      ImGui::Spacing();
+      ImGui::Separator();
+      ImGui::Spacing();
+
+      const bool hasProjectName = platformSettings.projectNameBuffer[0] != '\0';
+      const bool hasOutputPath = platformSettings.outputPathBuffer[0] != '\0';
+      const bool canBuildOnHost = is_current_platform(selectedExportPlatform_);
+      const bool canBuild = hasProjectName && hasOutputPath && canBuildOnHost && !exportBuildInProgress_;
+
+      if (!canBuild)
+      {
+        ImGui::BeginDisabled();
+      }
+      if (ImGui::Button("Build & Export", ImVec2(140.0f, 0.0f)))
+      {
+        save_worlds(entityManager, componentManager);
+
+        exportBuildLog_.clear();
+        sync_log_buffer(exportBuildLog_, exportBuildLogBuffer_);
+        exportBuildError_.clear();
+        exportBuildSucceeded_ = false;
+        exportBuildFinished_ = false;
+        exportBuildInProgress_ = true;
+
+        exportBuildState_ = std::make_shared<ExportBuildState>();
+
+        const std::filesystem::path outputDir = platformSettings.outputPathBuffer.data();
+        const std::filesystem::path workspacePath = activeWorkspacePath_;
+        const std::string projectName = platformSettings.projectNameBuffer.data();
+        const ExportPlatform platform = selectedExportPlatform_;
+        const bool enableHeadless = platformSettings.enableHeadless;
+
+        auto buildState = exportBuildState_;
+        if (exportBuildThread_.joinable())
+        {
+          exportBuildThread_.join();
+        }
+        exportBuildThread_ = std::thread(
+            [buildState, outputDir, workspacePath, projectName, platform, enableHeadless]()
+            {
+              run_export_build(buildState, outputDir, workspacePath, projectName, platform, enableHeadless);
+            });
+      }
+      if (!canBuild)
+      {
+        ImGui::EndDisabled();
+      }
+
+      if (exportBuildInProgress_)
+      {
+        ImGui::SameLine();
+        ImGui::TextDisabled("Building...");
+      }
+      else if (exportBuildFinished_)
+      {
+        ImGui::SameLine();
+        if (exportBuildSucceeded_)
+        {
+          ImGui::TextColored(ImVec4(0.4f, 0.85f, 0.4f, 1.0f), "Export succeeded.");
+        }
+        else
+        {
+          ImGui::TextColored(ImVec4(0.88f, 0.42f, 0.42f, 1.0f), "%s", exportBuildError_.c_str());
+        }
+      }
+
+      ImGui::Spacing();
+
+      if (!exportBuildLog_.empty() || exportBuildInProgress_)
+      {
+        ImGui::Text("Build Output");
+        ImGui::BeginChild("BuildLog", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders);
+        if (exportBuildInProgress_ && exportBuildLog_.empty())
+        {
+          ImGui::TextDisabled("Starting build...");
+        }
+        else
+        {
+          if (exportBuildLogBuffer_.empty())
+          {
+            sync_log_buffer(exportBuildLog_, exportBuildLogBuffer_);
+          }
+          ImGui::InputTextMultiline("##BuildOutputText",
+                                    exportBuildLogBuffer_.data(),
+                                    exportBuildLogBuffer_.size(),
+                                    ImVec2(-1.0f, -1.0f),
+                                    ImGuiInputTextFlags_ReadOnly);
+          if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
+          {
+            ImGui::SetScrollHereY(1.0f);
+          }
+        }
+        ImGui::EndChild();
+      }
+
+      ImGui::EndChild();
+      ImGui::EndTable();
+    }
+
+    if (exportSettingsDirty && !activeWorkspacePath_.empty())
+    {
+      std::string settingsError;
+      if (!save_workspace_settings(activeWorkspacePath_, &settingsError) && !settingsError.empty())
+      {
+        log_warning("Failed to save workspace settings: " + settingsError);
+      }
     }
 
     ImGui::End();

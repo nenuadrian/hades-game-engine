@@ -27,6 +27,34 @@ namespace hades
     constexpr char WORKSPACE_WINDOW_TITLE[] = "Workspace";
     constexpr char PROPERTIES_WINDOW_TITLE[] = "Properties";
     constexpr char SCENE_WINDOW_TITLE[] = "World";
+
+    constexpr int export_platform_index(Editor::ExportPlatform platform)
+    {
+      return static_cast<int>(platform);
+    }
+
+    Editor::ExportPlatform export_platform_from_index(int value)
+    {
+      switch (value)
+      {
+      case export_platform_index(Editor::ExportPlatform::macOS):
+        return Editor::ExportPlatform::macOS;
+      case export_platform_index(Editor::ExportPlatform::Linux):
+        return Editor::ExportPlatform::Linux;
+      case export_platform_index(Editor::ExportPlatform::Windows):
+        return Editor::ExportPlatform::Windows;
+      case export_platform_index(Editor::ExportPlatform::Web):
+        return Editor::ExportPlatform::Web;
+      default:
+#ifdef __APPLE__
+        return Editor::ExportPlatform::macOS;
+#elif defined(__linux__)
+        return Editor::ExportPlatform::Linux;
+#else
+        return Editor::ExportPlatform::Windows;
+#endif
+      }
+    }
   }
 
   Editor::Editor() : gui(std::make_unique<ImGui_GUI>())
@@ -108,6 +136,14 @@ namespace hades
     focusAboutWindow_ = false;
     openExportWindow_ = false;
     focusExportWindow_ = false;
+  #ifdef __APPLE__
+    selectedExportPlatform_ = ExportPlatform::macOS;
+  #elif defined(__linux__)
+    selectedExportPlatform_ = ExportPlatform::Linux;
+  #else
+    selectedExportPlatform_ = ExportPlatform::Windows;
+  #endif
+    exportPlatformSettings_ = {};
     if (exportBuildThread_.joinable())
     {
       exportBuildThread_.join();
@@ -638,6 +674,15 @@ namespace hades
 
   WorkspaceEditorSettings Editor::capture_workspace_settings() const
   {
+    const auto to_workspace_export = [](const ExportPlatformSettings &source)
+    {
+      WorkspaceExportSettings target;
+      target.projectName = source.projectNameBuffer.data();
+      target.outputPath = source.outputPathBuffer.data();
+      target.enableHeadless = source.enableHeadless;
+      return target;
+    };
+
     WorkspaceEditorSettings settings;
     settings.showDebugInfo = state.showDebugInfo;
     settings.sceneCameraTargetX = sceneCameraTargetX_;
@@ -646,6 +691,11 @@ namespace hades
     settings.sceneCameraDistance = sceneCameraDistance_;
     settings.sceneCameraYawDegrees = sceneCameraYawDegrees_;
     settings.sceneCameraPitchDegrees = sceneCameraPitchDegrees_;
+    settings.selectedExportPlatform = export_platform_index(selectedExportPlatform_);
+    settings.exportMacOS = to_workspace_export(exportPlatformSettings_[export_platform_index(ExportPlatform::macOS)]);
+    settings.exportLinux = to_workspace_export(exportPlatformSettings_[export_platform_index(ExportPlatform::Linux)]);
+    settings.exportWindows = to_workspace_export(exportPlatformSettings_[export_platform_index(ExportPlatform::Windows)]);
+    settings.exportWeb = to_workspace_export(exportPlatformSettings_[export_platform_index(ExportPlatform::Web)]);
 
     for (const auto &plugin : plugins_)
     {
@@ -662,6 +712,21 @@ namespace hades
 
   void Editor::apply_workspace_settings(const WorkspaceEditorSettings &settings)
   {
+    const auto copy_to_buffer = [](const std::string &value, auto &buffer)
+    {
+      buffer.fill('\0');
+      const std::size_t copyLength = std::min(value.size(), buffer.size() - 1);
+      std::copy_n(value.data(), copyLength, buffer.data());
+      buffer[copyLength] = '\0';
+    };
+
+    const auto from_workspace_export = [&](const WorkspaceExportSettings &source, ExportPlatformSettings &target)
+    {
+      copy_to_buffer(source.projectName, target.projectNameBuffer);
+      copy_to_buffer(source.outputPath, target.outputPathBuffer);
+      target.enableHeadless = source.enableHeadless;
+    };
+
     state.showDebugInfo = settings.showDebugInfo;
     sceneCameraTargetX_ = settings.sceneCameraTargetX;
     sceneCameraTargetY_ = settings.sceneCameraTargetY;
@@ -669,6 +734,11 @@ namespace hades
     sceneCameraDistance_ = settings.sceneCameraDistance;
     sceneCameraYawDegrees_ = settings.sceneCameraYawDegrees;
     sceneCameraPitchDegrees_ = settings.sceneCameraPitchDegrees;
+    selectedExportPlatform_ = export_platform_from_index(settings.selectedExportPlatform);
+    from_workspace_export(settings.exportMacOS, exportPlatformSettings_[export_platform_index(ExportPlatform::macOS)]);
+    from_workspace_export(settings.exportLinux, exportPlatformSettings_[export_platform_index(ExportPlatform::Linux)]);
+    from_workspace_export(settings.exportWindows, exportPlatformSettings_[export_platform_index(ExportPlatform::Windows)]);
+    from_workspace_export(settings.exportWeb, exportPlatformSettings_[export_platform_index(ExportPlatform::Web)]);
 
     for (const auto &plugin : plugins_)
     {
