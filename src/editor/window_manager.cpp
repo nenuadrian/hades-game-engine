@@ -1129,8 +1129,7 @@ namespace hades
     playWindow.close();
     scriptEditorWindow.close();
     entityManager = EntityManager();
-    componentManager = ComponentManager();
-    componentManager.setEntityManager(&entityManager);
+    componentManager = ComponentManager(&entityManager);
     eventBus.clear();
     editor.reset_workspace_session();
     wasPlayingLastFrame = false;
@@ -1314,7 +1313,7 @@ namespace hades
       physics_world.reset();
     }
 
-    componentManager.setEntityManager(&entityManager);
+    componentManager = ComponentManager(&entityManager);
 
     physicsSystem = systemManager.registerSystem<PhysicsSystem>(SystemPhase::Physics);
     physicsSystem->setPhysicsWorld(physics_world.get());

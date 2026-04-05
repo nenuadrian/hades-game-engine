@@ -17,10 +17,8 @@ namespace hades
     EntityManager *entityManager_ = nullptr;
 
   public:
-    void setEntityManager(EntityManager *entityManager)
-    {
-      entityManager_ = entityManager;
-    }
+    ComponentManager() = default;
+    explicit ComponentManager(EntityManager *entityManager) : entityManager_(entityManager) {}
 
     template <typename T>
     std::shared_ptr<ComponentArray<T>> getComponentArray()

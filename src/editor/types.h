@@ -2,7 +2,6 @@
 #define EDITOR_TYPES_H
 
 #include <chrono>
-#include <deque>
 #include <optional>
 #include <queue>
 #include <string>
@@ -81,7 +80,6 @@ namespace hades
     std::optional<Entity::EntityId> activeWorld;
     std::optional<Entity::EntityId> activeCamera;
     std::string playModeMessage;
-    std::deque<DebugMessage> debugConsoleMessages;
   };
 }
 

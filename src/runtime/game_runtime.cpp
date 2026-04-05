@@ -182,7 +182,7 @@ namespace hades
       physicsWorld_.reset();
     }
 
-    componentManager_.setEntityManager(&entityManager_);
+    componentManager_ = ComponentManager(&entityManager_);
 
     physicsSystem_ = systemManager_.registerSystem<PhysicsSystem>(SystemPhase::Physics);
     physicsSystem_->setPhysicsWorld(physicsWorld_.get());

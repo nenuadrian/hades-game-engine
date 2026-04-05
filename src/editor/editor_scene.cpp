@@ -2,10 +2,8 @@
 
 #include <algorithm>
 #include <array>
-#include <ctime>
 #include <cmath>
 #include <cstdint>
-#include <iomanip>
 #include <limits>
 #include <sstream>
 #include <string>
@@ -144,21 +142,6 @@ namespace hades
       stream << static_cast<int>(x) << ", " << static_cast<int>(y);
       return stream.str();
     }
-
-        std::string format_wall_clock_timestamp(const std::chrono::system_clock::time_point &timestamp)
-        {
-      const std::time_t clockTime = std::chrono::system_clock::to_time_t(timestamp);
-      std::tm localTime{};
-    #if defined(_WIN32)
-      localtime_s(&localTime, &clockTime);
-    #else
-      localtime_r(&clockTime, &localTime);
-    #endif
-
-      std::ostringstream stream;
-      stream << std::put_time(&localTime, "%Y-%m-%d %H:%M:%S");
-      return stream.str();
-        }
 
     std::string format_pair(int x, int y)
     {
@@ -2341,6 +2324,32 @@ namespace hades
         ImGui::SetTooltip(sceneDrawModelMeshes_ ? "Shaded" : "Bounds");
       }
 
+      ImGui::SameLine();
+      if (!state.isPlaying)
+      {
+        if (ImGui::SmallButton(ICON_FA_PLAY "##ScenePlayModeStart"))
+        {
+          state.pendingPlayAction = EditorPlayAction::Start;
+        }
+        if (ImGui::IsItemHovered())
+        {
+          ImGui::SetTooltip("Play");
+        }
+      }
+      else
+      {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.26f, 0.59f, 0.98f, 1.00f));
+        if (ImGui::SmallButton(ICON_FA_STOP "##ScenePlayModeStop"))
+        {
+          state.pendingPlayAction = EditorPlayAction::Stop;
+        }
+        if (ImGui::IsItemHovered())
+        {
+          ImGui::SetTooltip("Stop");
+        }
+        ImGui::PopStyleColor();
+      }
+
       ImGui::PopStyleColor(3);
       ImGui::PopStyleVar();
 
@@ -2963,56 +2972,7 @@ namespace hades
       return;
     }
 
-    if (ImGui::Button("Clear"))
-    {
-      state.debugConsoleMessages.clear();
-      debugConsoleWindowBufferDirty_ = true;
-    }
-
-    ImGui::Separator();
-
-    if (debugConsoleWindowBufferDirty_)
-    {
-      std::ostringstream textStream;
-      for (const auto &message : state.debugConsoleMessages)
-      {
-        const char *prefix = "INFO";
-        if (message.level == DebugMessageLevel::Error)
-        {
-          prefix = "ERROR";
-        }
-        else if (message.level == DebugMessageLevel::Warning)
-        {
-          prefix = "WARNING";
-        }
-
-        textStream << '[' << format_wall_clock_timestamp(message.wallClockTimestamp) << "] "
-                   << '[' << prefix << "] "
-                   << message.text
-                   << '\n';
-      }
-
-      debugConsoleWindowText_ = textStream.str();
-      debugConsoleWindowBuffer_.assign(debugConsoleWindowText_.begin(), debugConsoleWindowText_.end());
-      debugConsoleWindowBuffer_.push_back('\0');
-      debugConsoleWindowBufferDirty_ = false;
-    }
-
-    ImGui::BeginChild("DebugConsoleMessages", ImVec2(0.0f, 0.0f), false);
-    if (debugConsoleWindowBuffer_.empty())
-    {
-      ImGui::TextDisabled("No messages yet.");
-    }
-    else
-    {
-      ImGui::InputTextMultiline(
-          "##DebugConsoleText",
-          debugConsoleWindowBuffer_.data(),
-          debugConsoleWindowBuffer_.size(),
-          ImVec2(-1.0f, -1.0f),
-          ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_NoHorizontalScroll);
-    }
-    ImGui::EndChild();
+    mainDebugConsole_.render("##DebugConsoleText");
 
     ImGui::End();
   }
@@ -3066,7 +3026,7 @@ namespace hades
 
     std::size_t warningCount = 0;
     std::size_t errorCount = 0;
-    for (const auto &message : state.debugConsoleMessages)
+    for (const auto &message : mainDebugConsole_.messages())
     {
       if (message.level == DebugMessageLevel::Warning)
       {
@@ -3079,10 +3039,10 @@ namespace hades
     }
 
     double newestMessageAgeSeconds = 0.0;
-    if (!state.debugConsoleMessages.empty())
+    if (!mainDebugConsole_.empty())
     {
       newestMessageAgeSeconds = std::chrono::duration<double>(
-                                    std::chrono::steady_clock::now() - state.debugConsoleMessages.front().timestamp)
+                                    std::chrono::steady_clock::now() - mainDebugConsole_.messages().back().timestamp)
                                     .count();
     }
 
@@ -3205,7 +3165,7 @@ namespace hades
       add_stat_row_label_value("Render vertices", drawData != nullptr ? static_cast<std::size_t>(drawData->TotalVtxCount) : 0);
       add_stat_row_label_value("Render indices", drawData != nullptr ? static_cast<std::size_t>(drawData->TotalIdxCount) : 0);
       add_stat_row_label_value("Command lists", drawData != nullptr ? static_cast<std::size_t>(drawData->CmdListsCount) : 0);
-      add_stat_row_label_value("Debug console messages", state.debugConsoleMessages.size());
+      add_stat_row_label_value("Debug console messages", mainDebugConsole_.size());
       add_stat_row_label_value("Warnings", warningCount);
       add_stat_row_label_value("Errors", errorCount);
       add_stat_row_label_value("Newest log age", newestMessageAgeSeconds, " s");

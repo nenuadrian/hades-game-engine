@@ -24,7 +24,7 @@ namespace hades
     std::unordered_map<size_t, Entity::EntityId> indexToEntity;
 
   public:
-    void insert(Entity::EntityId entity, T component)
+    void insert(Entity::EntityId entity, const T &component)
     {
       if (entityToIndex.find(entity) != entityToIndex.end())
       {

@@ -527,7 +527,8 @@ namespace hades
         ImGui::PushID(static_cast<int>(index));
 
         const std::string label = script_component_label(attachment, index);
-        if (ImGui::CollapsingHeader(label.c_str()))
+        const std::string collapsingHeaderId = label + "##script_component_panel";
+        if (ImGui::CollapsingHeader(collapsingHeaderId.c_str()))
         {
           ImGui::Checkbox("Enabled", &attachment.enabled);
           std::vector<std::string> scriptOptions = workspaceScriptFiles_;

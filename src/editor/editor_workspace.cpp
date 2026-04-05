@@ -7,13 +7,9 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
-#include <chrono>
-#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <future>
-#include <iomanip>
-#include <sstream>
 #include <string>
 #include <utility>
 
@@ -192,22 +188,6 @@ namespace hades
 
       return true;
     }
-
-        std::string current_local_timestamp()
-        {
-      const auto now = std::chrono::system_clock::now();
-      const std::time_t nowTime = std::chrono::system_clock::to_time_t(now);
-      std::tm localTime{};
-    #if defined(_WIN32)
-      localtime_s(&localTime, &nowTime);
-    #else
-      localtime_r(&nowTime, &localTime);
-    #endif
-
-      std::ostringstream stream;
-      stream << std::put_time(&localTime, "%Y-%m-%d %H:%M:%S");
-      return stream.str();
-        }
 
     std::string normalize_generic_path(const std::string &path)
     {
@@ -559,6 +539,20 @@ namespace hades
 
       return true;
     }
+
+    void script_context_button(TextEditor *editor, const char *text, const char *idSuffix,
+                               const char *typeHint, Entity::EntityId entity)
+    {
+      const std::string buttonId = std::string(text) + "##" + idSuffix + std::to_string(entity);
+      if (ImGui::SmallButton(buttonId.c_str()))
+      {
+        if (editor)
+          editor->InsertText(text);
+      }
+      ImGui::SameLine();
+      ImGui::TextDisabled("%s", typeHint);
+    }
+
   }
 
   void Editor::refresh_workspace_cache(const std::filesystem::path &workspacePath)
@@ -871,6 +865,22 @@ namespace hades
     ImGui::EndPopup();
   }
 
+  void Editor::render_workspace_create_menu(const std::filesystem::path &destination)
+  {
+    if (ImGui::MenuItem(ICON_FA_FOLDER_PLUS "  New Folder"))
+    {
+      request_workspace_item_creation(WorkspaceCreateKind::Folder, destination);
+    }
+    if (ImGui::MenuItem(ICON_FA_FILE_CODE "  New Script"))
+    {
+      request_workspace_item_creation(WorkspaceCreateKind::Script, destination);
+    }
+    if (ImGui::MenuItem(ICON_FA_FILE_IMPORT "  Import"))
+    {
+      request_workspace_item_import(destination);
+    }
+  }
+
   void Editor::render_workspace_tree_node(const WorkspaceTreeNode &node, int depth, int &rowIndex, const char *filter)
   {
     const std::string label = path_display_name(node.path);
@@ -1106,18 +1116,7 @@ namespace hades
           node.directory ? node.path : node.path.parent_path();
       const bool isWorkspaceRoot = node.path == activeWorkspacePath_;
 
-      if (ImGui::MenuItem(ICON_FA_FOLDER_PLUS "  New Folder"))
-      {
-        request_workspace_item_creation(WorkspaceCreateKind::Folder, destinationDirectory);
-      }
-      if (ImGui::MenuItem(ICON_FA_FILE_CODE "  New Script"))
-      {
-        request_workspace_item_creation(WorkspaceCreateKind::Script, destinationDirectory);
-      }
-      if (ImGui::MenuItem(ICON_FA_FILE_IMPORT "  Import"))
-      {
-        request_workspace_item_import(destinationDirectory);
-      }
+      render_workspace_create_menu(destinationDirectory);
       if (!node.directory && node.path.extension() == ".cs")
       {
         if (ImGui::MenuItem(ICON_FA_FILE_CODE "  Open in Script Editor"))
@@ -1553,49 +1552,13 @@ namespace hades
 
   void Editor::render_script_editor(EntityManager &entityManager, ComponentManager &componentManager)
   {
-    auto append_script_editor_console_entry = [this](std::string_view level, const std::string &message)
-    {
-      if (message.empty())
-      {
-        return;
-      }
-
-      if (!scriptEditorDebugConsoleText_.empty())
-      {
-        scriptEditorDebugConsoleText_.push_back('\n');
-      }
-
-      scriptEditorDebugConsoleText_ += "[";
-      scriptEditorDebugConsoleText_ += current_local_timestamp();
-      scriptEditorDebugConsoleText_ += "] [";
-      scriptEditorDebugConsoleText_ += level;
-      scriptEditorDebugConsoleText_ += "] ";
-      scriptEditorDebugConsoleText_ += message;
-
-      constexpr std::size_t kMaxConsoleChars = 64000;
-      if (scriptEditorDebugConsoleText_.size() > kMaxConsoleChars)
-      {
-        const std::size_t overflow = scriptEditorDebugConsoleText_.size() - kMaxConsoleChars;
-        const std::size_t trimEnd = scriptEditorDebugConsoleText_.find('\n', overflow);
-        if (trimEnd != std::string::npos)
-        {
-          scriptEditorDebugConsoleText_.erase(0, trimEnd + 1);
-        }
-        else
-        {
-          scriptEditorDebugConsoleText_.erase(0, overflow);
-        }
-      }
-
-      scriptEditorDebugConsoleBufferDirty_ = true;
-      scriptEditorDebugConsoleAutoScrollPending_ = true;
-    };
-
     if (!scriptEditorStatusMessage_.empty() &&
         (scriptEditorStatusMessage_ != lastLoggedScriptEditorStatusMessage_ ||
          scriptEditorStatusIsError_ != lastLoggedScriptEditorStatusIsError_))
     {
-      append_script_editor_console_entry(scriptEditorStatusIsError_ ? "ERROR" : "INFO", scriptEditorStatusMessage_);
+      scriptEditorDebugConsole_.add_message(
+          scriptEditorStatusIsError_ ? DebugMessageLevel::Error : DebugMessageLevel::Info,
+          scriptEditorStatusMessage_);
       lastLoggedScriptEditorStatusMessage_ = scriptEditorStatusMessage_;
       lastLoggedScriptEditorStatusIsError_ = scriptEditorStatusIsError_;
     }
@@ -1604,7 +1567,7 @@ namespace hades
     {
       if (backgroundCompileInProgress_)
       {
-        append_script_editor_console_entry("INFO", "Compiling workspace scripts...");
+        scriptEditorDebugConsole_.add_info("Compiling workspace scripts...");
       }
       lastLoggedCompileInProgress_ = backgroundCompileInProgress_;
     }
@@ -1614,14 +1577,14 @@ namespace hades
       if (scriptCompileStatus_ == ScriptCompileStatus::Failed &&
           (scriptCompileStatus_ != lastLoggedCompileStatus_ || lastCompileError_ != lastLoggedCompileError_))
       {
-        append_script_editor_console_entry("ERROR", lastCompileError_.empty()
-                                                        ? std::string("Workspace script compilation failed.")
-                                                        : lastCompileError_);
+        scriptEditorDebugConsole_.add_error(lastCompileError_.empty()
+                                                ? std::string("Workspace script compilation failed.")
+                                                : lastCompileError_);
       }
       else if (scriptCompileStatus_ == ScriptCompileStatus::Succeeded &&
                scriptCompileStatus_ != lastLoggedCompileStatus_)
       {
-        append_script_editor_console_entry("INFO", "Workspace scripts compiled successfully.");
+        scriptEditorDebugConsole_.add_info("Workspace scripts compiled successfully.");
       }
 
       lastLoggedCompileStatus_ = scriptCompileStatus_;
@@ -1882,18 +1845,7 @@ namespace hades
         {
           ImGui::BeginDisabled();
         }
-        if (ImGui::MenuItem(ICON_FA_FOLDER_PLUS "  New Folder"))
-        {
-          request_workspace_item_creation(WorkspaceCreateKind::Folder, activeWorkspacePath_);
-        }
-        if (ImGui::MenuItem(ICON_FA_FILE_CODE "  New Script"))
-        {
-          request_workspace_item_creation(WorkspaceCreateKind::Script, activeWorkspacePath_);
-        }
-        if (ImGui::MenuItem(ICON_FA_FILE_IMPORT "  Import"))
-        {
-          request_workspace_item_import(activeWorkspacePath_);
-        }
+        render_workspace_create_menu(activeWorkspacePath_);
         if (!canModifyWorkspace)
         {
           ImGui::EndDisabled();
@@ -2006,34 +1958,7 @@ namespace hades
       ImGui::Separator();
       ImGui::TextUnformatted("Debug Console");
       ImGui::BeginChild("ScriptEditorDebugConsolePane", ImVec2(0.0f, 0.0f), true);
-      if (scriptEditorDebugConsoleText_.empty())
-      {
-        ImGui::TextDisabled("No messages yet.");
-      }
-      else
-      {
-        if (scriptEditorDebugConsoleBufferDirty_)
-        {
-          scriptEditorDebugConsoleBuffer_.assign(
-              scriptEditorDebugConsoleText_.begin(),
-              scriptEditorDebugConsoleText_.end());
-          scriptEditorDebugConsoleBuffer_.push_back('\0');
-          scriptEditorDebugConsoleBufferDirty_ = false;
-        }
-
-        ImGui::InputTextMultiline(
-            "##ScriptEditorDebugConsoleText",
-            scriptEditorDebugConsoleBuffer_.data(),
-            scriptEditorDebugConsoleBuffer_.size(),
-            ImVec2(-1.0f, -1.0f),
-            ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_NoHorizontalScroll);
-
-        if (scriptEditorDebugConsoleAutoScrollPending_)
-        {
-          ImGui::SetScrollHereY(1.0f);
-          scriptEditorDebugConsoleAutoScrollPending_ = false;
-        }
-      }
+      scriptEditorDebugConsole_.render("##ScriptEditorDebugConsoleText");
       ImGui::EndChild();
 
       ImGui::TableNextColumn();
@@ -2087,16 +2012,25 @@ namespace hades
             const std::string entityTitle = entity_label(entity, componentManager) + "##ScriptEntity" + std::to_string(entity);
             if (ImGui::CollapsingHeader(entityTitle.c_str()))
             {
-              ImGui::TextDisabled("Script-accessible components");
-              ImGui::BulletText("PositionComponent3D (context.Position, read/write)");
-              if (componentManager.hasComponent<NameComponent>(entity))
-              {
-                ImGui::BulletText("NameComponent (context.Name, read-only)");
-              }
-              else
-              {
-                ImGui::BulletText("NameComponent (not present; context.Name uses fallback)");
-              }
+              ImGui::TextDisabled("Click to insert at cursor");
+              ImGui::Indent(8.0f);
+
+              TextEditor *editor = activeTab->textEditor.get();
+              script_context_button(editor, "context.EntityId", "eid", "uint, read-only", entity);
+
+              const char *nameHint = componentManager.hasComponent<NameComponent>(entity)
+                                         ? "string, read-only"
+                                         : "string, read-only (fallback)";
+              script_context_button(editor, "context.Name", "name", nameHint, entity);
+
+              script_context_button(editor, "context.Position", "pos", "Vector3, read/write", entity);
+              ImGui::Indent(12.0f);
+              script_context_button(editor, "context.Position.X", "px", "float", entity);
+              script_context_button(editor, "context.Position.Y", "py", "float", entity);
+              script_context_button(editor, "context.Position.Z", "pz", "float", entity);
+              ImGui::Unindent(12.0f);
+
+              ImGui::Unindent(8.0f);
             }
 
             if (selected)
@@ -2162,18 +2096,7 @@ namespace hades
 
     if (ImGui::BeginPopupContextWindow("WorkspaceRootContext", ImGuiPopupFlags_NoOpenOverItems))
     {
-      if (ImGui::MenuItem(ICON_FA_FOLDER_PLUS "  New Folder"))
-      {
-        request_workspace_item_creation(WorkspaceCreateKind::Folder, activeWorkspacePath_);
-      }
-      if (ImGui::MenuItem(ICON_FA_FILE_CODE "  New Script"))
-      {
-        request_workspace_item_creation(WorkspaceCreateKind::Script, activeWorkspacePath_);
-      }
-      if (ImGui::MenuItem(ICON_FA_FILE_IMPORT "  Import"))
-      {
-        request_workspace_item_import(activeWorkspacePath_);
-      }
+      render_workspace_create_menu(activeWorkspacePath_);
       ImGui::EndPopup();
     }
     ImGui::End();

@@ -45,7 +45,7 @@ namespace hades
     return entityComponentSignatures.at(entity);
   }
 
-  std::vector<Entity::EntityId> EntityManager::getAllEntities()
+  const std::vector<Entity::EntityId> &EntityManager::getAllEntities() const
   {
     return activeEntities;
   }

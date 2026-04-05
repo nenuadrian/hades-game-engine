@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "types.h"
+#include "debug_console_panel.hpp"
 #include "editor_settings.hpp"
 #include "script_analysis.hpp"
 #include "script_autocomplete.hpp"
@@ -142,10 +143,7 @@ namespace hades
     std::optional<std::size_t> pendingScriptEditorTabSelectionIndex_;
     std::string scriptEditorStatusMessage_;
     bool scriptEditorStatusIsError_ = false;
-    std::string scriptEditorDebugConsoleText_;
-    std::vector<char> scriptEditorDebugConsoleBuffer_;
-    bool scriptEditorDebugConsoleBufferDirty_ = true;
-    bool scriptEditorDebugConsoleAutoScrollPending_ = false;
+    DebugConsolePanel scriptEditorDebugConsole_{500};
     std::string lastLoggedScriptEditorStatusMessage_;
     bool lastLoggedScriptEditorStatusIsError_ = false;
     bool lastLoggedCompileInProgress_ = false;
@@ -174,9 +172,7 @@ namespace hades
     SettingsCategory selectedSettingsCategory_ = SettingsCategory::Editor;
     bool openDebugConsoleWindow_ = false;
     bool focusDebugConsoleWindow_ = false;
-    std::string debugConsoleWindowText_;
-    std::vector<char> debugConsoleWindowBuffer_;
-    bool debugConsoleWindowBufferDirty_ = true;
+    DebugConsolePanel mainDebugConsole_{500};
     bool openAboutWindow_ = false;
     bool focusAboutWindow_ = false;
 
@@ -288,6 +284,7 @@ namespace hades
     void render_about_window();
     void render_export_window(EntityManager &entityManager, ComponentManager &componentManager);
     void render_workspace_tree_node(const WorkspaceTreeNode &node, int depth, int &rowIndex, const char *filter);
+    void render_workspace_create_menu(const std::filesystem::path &destination);
     void render_script_editor(EntityManager &entityManager, ComponentManager &componentManager);
     std::optional<std::size_t> find_script_editor_tab_index(const std::filesystem::path &scriptPath) const;
     ScriptEditorTab *active_script_editor_tab();

@@ -22,7 +22,7 @@ namespace hades
     void destroyEntity(Entity::EntityId entity);
     void setComponentSignature(Entity::EntityId entity, std::bitset<MAX_COMPONENTS> signature);
     const std::bitset<MAX_COMPONENTS> &getComponentSignature(Entity::EntityId entity) const;
-    std::vector<Entity::EntityId> getAllEntities();
+    const std::vector<Entity::EntityId> &getAllEntities() const;
     const std::vector<Entity::EntityId> &getActiveEntities() const;
     void setComponentBit(Entity::EntityId entity, uint32_t bit, bool value);
   };

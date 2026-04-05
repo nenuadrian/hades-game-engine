@@ -97,10 +97,8 @@ namespace hades
     currentCompileRequestId_ = 0;
     nextCompileRequestId_ = 0;
     selectedSettingsCategory_ = SettingsCategory::Editor;
-    state.debugConsoleMessages.clear();
-    debugConsoleWindowText_.clear();
-    debugConsoleWindowBuffer_.clear();
-    debugConsoleWindowBufferDirty_ = true;
+    mainDebugConsole_.clear();
+    scriptEditorDebugConsole_.clear();
     openDebugConsoleWindow_ = false;
     focusDebugConsoleWindow_ = false;
     openAboutWindow_ = false;
@@ -132,15 +130,7 @@ namespace hades
     }
     std::fprintf(stderr, "[%s] %s\n", prefix, text.c_str());
 
-    state.debugConsoleMessages.push_front(
-      DebugMessage{level, text, std::chrono::steady_clock::now(), std::chrono::system_clock::now()});
-    debugConsoleWindowBufferDirty_ = true;
-
-    constexpr std::size_t MAX_DEBUG_MESSAGES = 500;
-    while (state.debugConsoleMessages.size() > MAX_DEBUG_MESSAGES)
-    {
-      state.debugConsoleMessages.pop_back();
-    }
+    mainDebugConsole_.add_message(level, text);
 
     if (level == DebugMessageLevel::Error)
     {
@@ -434,30 +424,6 @@ namespace hades
     }
 
     gui->menu_bar_items.push_back(worlds);
-
-    MenuBarItem game;
-    game.title = ICON_FA_GAMEPAD "  Game";
-
-    MenuBarItem play;
-    play.title = ICON_FA_PLAY "  Play";
-    play.on_activate = [this]()
-    {
-      state.pendingPlayAction = EditorPlayAction::Start;
-    };
-
-    MenuBarItem stop;
-    stop.title = ICON_FA_STOP "  Stop";
-    stop.on_activate = [this]()
-    {
-      state.pendingPlayAction = EditorPlayAction::Stop;
-    };
-
-    game.children_menu_items.push_back(play);
-    if (state.isPlaying)
-    {
-      game.children_menu_items.push_back(stop);
-    }
-    gui->menu_bar_items.push_back(game);
 
     MenuBarItem windows;
     windows.title = ICON_FA_WINDOW_MAXIMIZE "  Windows";
