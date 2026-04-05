@@ -1142,11 +1142,8 @@ namespace hades
 
   void WindowManager::stop_active_play_mode(const std::string &message)
   {
-    scriptRuntime.stop();
+    editor.stop_play_mode(entityManager, componentManager, scriptRuntime);
     editor.state.pendingPlayAction = EditorPlayAction::None;
-    editor.state.isPlaying = false;
-    editor.state.activeWorld.reset();
-    editor.state.activeCamera.reset();
     editor.state.playModeMessage = message;
     if (!message.empty())
     {

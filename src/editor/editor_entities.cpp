@@ -32,6 +32,7 @@
 #include "../engine/core/ecs/component_manager.hpp"
 #include "../engine/core/ecs/entity_factory.hpp"
 #include "../engine/core/ecs/entity_manager.hpp"
+#include "../engine/core/ecs/scene_serializer.hpp"
 #include "../engine/core/ecs/world_utils.hpp"
 #include "../engine/runtime/main_camera_selection.hpp"
 #include "../engine/runtime/script_runtime.hpp"
@@ -564,7 +565,7 @@ namespace hades
 
     if (state.isPlaying)
     {
-      stop_play_mode(scriptRuntime);
+      stop_play_mode(entityManager, componentManager, scriptRuntime);
       state.playModeMessage = "Play mode stopped because an entity hierarchy was deleted.";
       log_warning(state.playModeMessage);
     }
@@ -680,7 +681,7 @@ namespace hades
       start_play_mode(entityManager, componentManager, scriptRuntime);
       break;
     case EditorPlayAction::Stop:
-      stop_play_mode(scriptRuntime);
+      stop_play_mode(entityManager, componentManager, scriptRuntime);
       break;
     }
 
@@ -692,6 +693,10 @@ namespace hades
       ComponentManager &componentManager,
       ScriptRuntime &scriptRuntime)
   {
+    playModeSnapshot_ = snapshot_all_worlds(entityManager, componentManager);
+    prePlaySelectedEntity_ = state.selectedEntity;
+    prePlayLoadedWorld_ = state.loadedWorld;
+
     if (!activeWorkspacePath_.empty() && !workspaceScriptFiles_.empty())
     {
       queue_workspace_script_compile();
@@ -736,9 +741,43 @@ namespace hades
     state.playModeMessage.clear();
   }
 
-  void Editor::stop_play_mode(ScriptRuntime &scriptRuntime)
+  void Editor::stop_play_mode(
+      EntityManager &entityManager,
+      ComponentManager &componentManager,
+      ScriptRuntime &scriptRuntime)
   {
     scriptRuntime.stop();
+
+    if (!playModeSnapshot_.empty())
+    {
+      std::unordered_map<Entity::EntityId, Entity::EntityId> idMap;
+      restore_all_worlds_from_snapshot(playModeSnapshot_, entityManager, componentManager, &idMap);
+
+      if (prePlayLoadedWorld_.has_value())
+      {
+        auto it = idMap.find(*prePlayLoadedWorld_);
+        state.loadedWorld = (it != idMap.end()) ? it->second : std::optional<Entity::EntityId>{};
+      }
+      else
+      {
+        state.loadedWorld.reset();
+      }
+
+      if (prePlaySelectedEntity_.has_value())
+      {
+        auto it = idMap.find(*prePlaySelectedEntity_);
+        state.selectedEntity = (it != idMap.end()) ? it->second : state.loadedWorld;
+      }
+      else
+      {
+        state.selectedEntity = state.loadedWorld;
+      }
+
+      playModeSnapshot_ = nlohmann::json();
+      prePlaySelectedEntity_.reset();
+      prePlayLoadedWorld_.reset();
+    }
+
     state.isPlaying = false;
     state.activeWorld.reset();
     state.activeCamera.reset();

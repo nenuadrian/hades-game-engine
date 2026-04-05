@@ -53,6 +53,9 @@ namespace hades
     state.activeWorld.reset();
     state.activeCamera.reset();
     state.playModeMessage.clear();
+    playModeSnapshot_ = nlohmann::json();
+    prePlaySelectedEntity_.reset();
+    prePlayLoadedWorld_.reset();
     pendingEntityDeletion_.reset();
     openAddEntityDialog_ = false;
     focusAddEntitySearch_ = false;

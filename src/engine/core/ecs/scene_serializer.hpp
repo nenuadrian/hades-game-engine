@@ -4,7 +4,10 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
+
+#include <nlohmann/json.hpp>
 
 #include "entity.hpp"
 
@@ -45,6 +48,16 @@ namespace hades
       Entity::EntityId worldEntity,
       EntityManager &entityManager,
       ComponentManager &componentManager);
+
+  nlohmann::json snapshot_all_worlds(
+      EntityManager &entityManager,
+      ComponentManager &componentManager);
+
+  void restore_all_worlds_from_snapshot(
+      const nlohmann::json &snapshot,
+      EntityManager &entityManager,
+      ComponentManager &componentManager,
+      std::unordered_map<Entity::EntityId, Entity::EntityId> *outIdMap = nullptr);
 }
 
 #endif

@@ -16,6 +16,8 @@
 #include <utility>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 #include "types.h"
 #include "debug_console_panel.hpp"
 #include "editor_settings.hpp"
@@ -102,6 +104,7 @@ namespace hades
     void log_error(const std::string &text);
     bool load_workspace_settings(const std::filesystem::path &workspacePath, std::string *errorMessage = nullptr);
     bool save_workspace_settings(const std::filesystem::path &workspacePath, std::string *errorMessage = nullptr) const;
+    void stop_play_mode(EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime);
 
   private:
     enum class ScriptCompileStatus
@@ -208,6 +211,11 @@ namespace hades
     std::filesystem::path workspaceRenamePath_;
     std::array<char, 256> workspaceRenameBuffer_{};
     bool workspaceRenameFocusPending_ = false;
+
+    // Play-mode state snapshot for restoring ECS state on stop.
+    nlohmann::json playModeSnapshot_;
+    std::optional<Entity::EntityId> prePlaySelectedEntity_;
+    std::optional<Entity::EntityId> prePlayLoadedWorld_;
 
     std::optional<Entity::EntityId> pendingEntityDeletion_;
     bool openAddEntityDialog_ = false;
@@ -316,7 +324,6 @@ namespace hades
     void import_model(EntityManager &entityManager, ComponentManager &componentManager);
     void handle_play_mode_requests(EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime);
     void start_play_mode(EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime);
-    void stop_play_mode(ScriptRuntime &scriptRuntime);
     void set_main_camera(Entity::EntityId entity, EntityManager &entityManager, ComponentManager &componentManager);
     std::optional<Entity::EntityId> get_selected_parent(EntityManager &entityManager, ComponentManager &componentManager) const;
     std::string entity_label(Entity::EntityId entity, ComponentManager &componentManager) const;

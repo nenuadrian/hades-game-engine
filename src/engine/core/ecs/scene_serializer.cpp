@@ -405,4 +405,92 @@ namespace hades
       entityManager.destroyEntity(*it);
     }
   }
+
+  json snapshot_all_worlds(
+      EntityManager &entityManager,
+      ComponentManager &componentManager)
+  {
+    json worlds = json::array();
+
+    for (Entity::EntityId entity : entityManager.getAllEntities())
+    {
+      if (!componentManager.hasComponent<WorldComponent>(entity))
+      {
+        continue;
+      }
+
+      std::vector<Entity::EntityId> worldEntities;
+      collect_entities_recursive(entity, componentManager, worldEntities);
+
+      json worldJson;
+      worldJson["version"] = WORLD_FORMAT_VERSION;
+      json entities = json::array();
+      for (Entity::EntityId e : worldEntities)
+      {
+        entities.push_back(serialize_entity(e, componentManager));
+      }
+      worldJson["entities"] = entities;
+      worlds.push_back(worldJson);
+    }
+
+    return worlds;
+  }
+
+  void restore_all_worlds_from_snapshot(
+      const json &snapshot,
+      EntityManager &entityManager,
+      ComponentManager &componentManager,
+      std::unordered_map<Entity::EntityId, Entity::EntityId> *outIdMap)
+  {
+    // Destroy all current world trees.
+    std::vector<Entity::EntityId> currentWorlds;
+    for (Entity::EntityId entity : entityManager.getAllEntities())
+    {
+      if (componentManager.hasComponent<WorldComponent>(entity))
+      {
+        currentWorlds.push_back(entity);
+      }
+    }
+    for (Entity::EntityId world : currentWorlds)
+    {
+      destroy_world_tree(world, entityManager, componentManager);
+    }
+
+    std::unordered_map<Entity::EntityId, Entity::EntityId> combinedIdMap;
+
+    for (const auto &worldJson : snapshot)
+    {
+      if (!worldJson.contains("entities"))
+      {
+        continue;
+      }
+
+      const auto &entitiesJson = worldJson["entities"];
+
+      // First pass: create entities and build ID map.
+      std::unordered_map<Entity::EntityId, Entity::EntityId> idMap;
+      std::vector<std::pair<Entity::EntityId, json>> entitiesToLoad;
+
+      for (const auto &entityJson : entitiesJson)
+      {
+        Entity::EntityId oldId = entityJson["id"].get<Entity::EntityId>();
+        Entity::EntityId newId = entityManager.createEntity();
+        idMap[oldId] = newId;
+        entitiesToLoad.emplace_back(newId, entityJson);
+      }
+
+      // Second pass: deserialize components with remapped IDs.
+      for (const auto &[newId, entityJson] : entitiesToLoad)
+      {
+        deserialize_entity(entityJson, newId, componentManager, idMap);
+      }
+
+      combinedIdMap.insert(idMap.begin(), idMap.end());
+    }
+
+    if (outIdMap != nullptr)
+    {
+      *outIdMap = std::move(combinedIdMap);
+    }
+  }
 }
