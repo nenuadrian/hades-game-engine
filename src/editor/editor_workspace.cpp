@@ -36,6 +36,12 @@ namespace hades
     constexpr char WORKSPACE_IMPORT_POPUP_TITLE[] = "Import Into Workspace";
     constexpr char WORKSPACE_DELETE_POPUP_TITLE[] = "Delete Workspace Item";
     constexpr char SCRIPT_EDITOR_UNSAVED_POPUP_TITLE[] = "Unsaved Script Changes";
+    constexpr char SCRIPT_EDITOR_HOST_WINDOW_TITLE[] = "Detached Script Editor Host";
+    constexpr char SCRIPT_EDITOR_DOCKSPACE_ID[] = "DetachedScriptEditorDockspace";
+    constexpr char SCRIPT_EDITOR_PANEL_TITLE[] = "Script Editor##DetachedScriptEditorMainPanel";
+    constexpr char SCRIPT_EDITOR_FILE_TREE_PANEL_TITLE[] = "File Tree##ScriptEditorFileTreePanel";
+    constexpr char SCRIPT_EDITOR_DEBUG_PANEL_TITLE[] = "Debug Console##ScriptEditorDebugConsolePanel";
+    constexpr char SCRIPT_EDITOR_ENTITIES_PANEL_TITLE[] = "Entities##ScriptEditorEntitiesPanel";
 
     TextEditor::LanguageDefinition create_csharp_language_definition()
     {
@@ -568,6 +574,11 @@ namespace hades
       activeScriptEditorTabIndex_.reset();
       scriptEditorStatusMessage_.clear();
       scriptEditorStatusIsError_ = false;
+      scriptEditorDockLayoutInitialized_ = false;
+      scriptEditorShowCodePanel_ = true;
+      scriptEditorShowFileTreePanel_ = true;
+      scriptEditorShowDebugPanel_ = true;
+      scriptEditorShowEntitiesPanel_ = true;
       focusScriptEditorWindow_ = false;
       openScriptEditorUnsavedChangesDialog_ = false;
       pendingScriptEditorClosePath_.reset();
@@ -1167,11 +1178,20 @@ namespace hades
     openScriptEditorWindow_ = open;
     if (open)
     {
+      scriptEditorShowCodePanel_ = true;
+      scriptEditorShowFileTreePanel_ = true;
+      scriptEditorShowDebugPanel_ = true;
+      scriptEditorShowEntitiesPanel_ = true;
       focusScriptEditorWindow_ = true;
     }
     else
     {
       focusScriptEditorWindow_ = false;
+      scriptEditorDockLayoutInitialized_ = false;
+      scriptEditorShowCodePanel_ = true;
+      scriptEditorShowFileTreePanel_ = true;
+      scriptEditorShowDebugPanel_ = true;
+      scriptEditorShowEntitiesPanel_ = true;
       openScriptEditorUnsavedChangesDialog_ = false;
       pendingScriptEditorClosePath_.reset();
       pendingCloseAllScriptEditorTabs_ = false;
@@ -1214,16 +1234,196 @@ namespace hades
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
     const ImGuiWindowFlags windowFlags =
         ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
-        ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings |
-        ImGuiWindowFlags_MenuBar;
-    if (!ImGui::Begin("Detached Script Editor Host", nullptr, windowFlags))
+      ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_MenuBar;
+    if (!ImGui::Begin(SCRIPT_EDITOR_HOST_WINDOW_TITLE, nullptr, windowFlags))
     {
       ImGui::End();
       ImGui::PopStyleVar(2);
       return;
     }
 
-    render_script_editor(entityManager, componentManager);
+    const ImGuiID dockspaceId = ImGui::GetID(SCRIPT_EDITOR_DOCKSPACE_ID);
+    ImGui::DockSpace(dockspaceId, ImVec2(0.0f, 0.0f));
+
+    render_script_editor_menu(entityManager, componentManager);
+
+    if (!scriptEditorDockLayoutInitialized_ && dockspaceId != 0)
+    {
+      const ImVec2 hostSize = ImGui::GetWindowSize();
+      if (hostSize.x <= 0.0f || hostSize.y <= 0.0f)
+      {
+        ImGui::End();
+        ImGui::PopStyleVar(2);
+        return;
+      }
+
+      ImGui::DockBuilderRemoveNode(dockspaceId);
+      ImGui::DockBuilderAddNode(dockspaceId, ImGuiDockNodeFlags_DockSpace);
+      ImGui::DockBuilderSetNodeSize(dockspaceId, hostSize);
+
+      ImGuiID mainDockId = dockspaceId;
+      ImGuiID fileTreeDockId = ImGui::DockBuilderSplitNode(mainDockId, ImGuiDir_Left, 0.24f, nullptr, &mainDockId);
+      const ImGuiID entitiesDockId = ImGui::DockBuilderSplitNode(mainDockId, ImGuiDir_Right, 0.28f, nullptr, &mainDockId);
+      const ImGuiID debugDockId = ImGui::DockBuilderSplitNode(mainDockId, ImGuiDir_Down, 0.25f, nullptr, &mainDockId);
+
+      ImGui::DockBuilderDockWindow(SCRIPT_EDITOR_FILE_TREE_PANEL_TITLE, fileTreeDockId);
+      ImGui::DockBuilderDockWindow(SCRIPT_EDITOR_PANEL_TITLE, mainDockId);
+      ImGui::DockBuilderDockWindow(SCRIPT_EDITOR_DEBUG_PANEL_TITLE, debugDockId);
+      ImGui::DockBuilderDockWindow(SCRIPT_EDITOR_ENTITIES_PANEL_TITLE, entitiesDockId);
+      ImGui::DockBuilderFinish(dockspaceId);
+      scriptEditorDockLayoutInitialized_ = true;
+    }
+
+    bool scriptFileTreePanelVisible = scriptEditorShowFileTreePanel_;
+    if (scriptFileTreePanelVisible)
+    {
+      if (ImGui::Begin(SCRIPT_EDITOR_FILE_TREE_PANEL_TITLE, &scriptEditorShowFileTreePanel_))
+      {
+      if (!workspaceScanError_.empty())
+      {
+        ImGui::TextColored(ImVec4(0.88f, 0.42f, 0.42f, 1.0f), "%s", workspaceScanError_.c_str());
+        ImGui::Separator();
+      }
+
+      if (!workspaceTreeRoot_.has_value())
+      {
+        ImGui::TextDisabled(activeWorkspacePath_.empty() ? "Open a workspace to browse scripts." : "No files.");
+      }
+      else
+      {
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 3.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
+        int scriptTreeRowIndex = 0;
+        ImGui::SetNextItemOpen(true, ImGuiCond_Once);
+        render_workspace_tree_node(*workspaceTreeRoot_, 0, scriptTreeRowIndex, "");
+        ImGui::PopStyleVar(2);
+      }
+
+      if (ImGui::BeginPopupContextWindow("ScriptEditorRootContext", ImGuiPopupFlags_NoOpenOverItems))
+      {
+        const bool canModifyWorkspace = !activeWorkspacePath_.empty();
+        if (!canModifyWorkspace)
+        {
+          ImGui::BeginDisabled();
+        }
+        render_workspace_create_menu(activeWorkspacePath_);
+        if (!canModifyWorkspace)
+        {
+          ImGui::EndDisabled();
+        }
+        ImGui::EndPopup();
+      }
+      }
+      ImGui::End();
+    }
+
+    bool scriptCodePanelVisible = scriptEditorShowCodePanel_;
+    if (scriptCodePanelVisible)
+    {
+      if (ImGui::Begin(SCRIPT_EDITOR_PANEL_TITLE, &scriptEditorShowCodePanel_))
+      {
+        render_script_editor(entityManager, componentManager);
+      }
+      ImGui::End();
+    }
+
+    bool scriptDebugPanelVisible = scriptEditorShowDebugPanel_;
+    if (scriptDebugPanelVisible)
+    {
+      if (ImGui::Begin(SCRIPT_EDITOR_DEBUG_PANEL_TITLE, &scriptEditorShowDebugPanel_))
+      {
+        scriptEditorDebugConsole_.render("##ScriptEditorDebugConsoleText");
+      }
+      ImGui::End();
+    }
+
+    bool scriptEntitiesPanelVisible = scriptEditorShowEntitiesPanel_;
+    if (scriptEntitiesPanelVisible)
+    {
+      if (ImGui::Begin(SCRIPT_EDITOR_ENTITIES_PANEL_TITLE, &scriptEditorShowEntitiesPanel_))
+      {
+      ScriptEditorTab *activeTab = active_script_editor_tab();
+      if (activeTab != nullptr)
+      {
+        const std::string activeScriptRelativePath =
+            activeWorkspacePath_.empty()
+                ? normalize_generic_path(activeTab->path)
+                : normalize_generic_path(relative_workspace_path(activeWorkspacePath_, activeTab->path));
+
+        std::vector<Entity::EntityId> matchingEntities;
+        for (const Entity::EntityId entity : entityManager.getAllEntities())
+        {
+          if (!componentManager.hasComponent<ScriptComponent>(entity))
+          {
+            continue;
+          }
+
+          const auto &scriptComponent = componentManager.getComponent<ScriptComponent>(entity);
+          const bool usesScript = std::any_of(
+              scriptComponent.attachments.begin(),
+              scriptComponent.attachments.end(),
+              [&activeScriptRelativePath](const ScriptAttachment &attachment)
+              {
+                return !attachment.scriptPath.empty() &&
+                       normalize_generic_path(attachment.scriptPath) == activeScriptRelativePath;
+              });
+          if (usesScript)
+          {
+            matchingEntities.push_back(entity);
+          }
+        }
+
+        if (matchingEntities.empty())
+        {
+          ImGui::TextDisabled("No entities use this script.");
+        }
+        else
+        {
+          ImGui::TextDisabled("%zu matching %s", matchingEntities.size(), matchingEntities.size() == 1 ? "entity" : "entities");
+          ImGui::Separator();
+
+          for (const Entity::EntityId entity : matchingEntities)
+          {
+            const bool selected = state.selectedEntity.has_value() && *state.selectedEntity == entity;
+            const std::string entityTitle = entity_label(entity, componentManager) + "##ScriptEntity" + std::to_string(entity);
+            if (ImGui::CollapsingHeader(entityTitle.c_str()))
+            {
+              ImGui::TextDisabled("Click to insert at cursor");
+              ImGui::Indent(8.0f);
+
+              TextEditor *editor = activeTab->textEditor.get();
+              script_context_button(editor, "context.EntityId", "eid", "uint, read-only", entity);
+
+              const char *nameHint = componentManager.hasComponent<NameComponent>(entity)
+                                         ? "string, read-only"
+                                         : "string, read-only (fallback)";
+              script_context_button(editor, "context.Name", "name", nameHint, entity);
+
+              script_context_button(editor, "context.Position", "pos", "Vector3, read/write", entity);
+              ImGui::Indent(12.0f);
+              script_context_button(editor, "context.Position.X", "px", "float", entity);
+              script_context_button(editor, "context.Position.Y", "py", "float", entity);
+              script_context_button(editor, "context.Position.Z", "pz", "float", entity);
+              ImGui::Unindent(12.0f);
+
+              ImGui::Unindent(8.0f);
+            }
+
+            if (selected)
+            {
+              ImGui::SameLine();
+              ImGui::TextDisabled("(selected)");
+            }
+          }
+        }
+      }
+      else
+      {
+        ImGui::TextDisabled("No script selected.");
+      }
+      }
+      ImGui::End();
+    }
 
     ImGui::End();
     ImGui::PopStyleVar(2);
@@ -1550,8 +1750,158 @@ namespace hades
         });
   }
 
+  void Editor::render_script_editor_menu(EntityManager &entityManager, ComponentManager &componentManager)
+  {
+    bool saveRequested = false;
+    bool saveAllRequested = false;
+    bool compileRequested = false;
+    bool revertRequested = false;
+    bool closeRequested = false;
+    bool closeAllRequested = false;
+    bool closeScriptEditorRequested = false;
+
+    {
+      const bool hasActiveTab = activeScriptEditorTabIndex_.has_value() &&
+                                *activeScriptEditorTabIndex_ < openScriptEditorTabs_.size();
+      const bool canSaveActive = hasActiveTab && openScriptEditorTabs_[*activeScriptEditorTabIndex_].dirty;
+
+      if (ImGui::BeginMenuBar())
+      {
+        if (ImGui::BeginMenu(ICON_FA_FILE "  File"))
+        {
+          saveRequested = ImGui::MenuItem(ICON_FA_FLOPPY_DISK "  Save", nullptr, false, canSaveActive);
+          saveAllRequested = ImGui::MenuItem(ICON_FA_COPY "  Save All", nullptr, false, !openScriptEditorTabs_.empty());
+          revertRequested = ImGui::MenuItem(ICON_FA_ROTATE_LEFT "  Revert", nullptr, false, canSaveActive);
+          ImGui::Separator();
+          closeRequested = ImGui::MenuItem(ICON_FA_XMARK "  Close", nullptr, false, hasActiveTab);
+          closeAllRequested = ImGui::MenuItem(ICON_FA_CIRCLE_XMARK "  Close All", nullptr, false, !openScriptEditorTabs_.empty());
+          ImGui::Separator();
+          closeScriptEditorRequested = ImGui::MenuItem(ICON_FA_CIRCLE_XMARK "  Close Script Editor");
+          ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu(ICON_FA_HAMMER "  Build"))
+        {
+          compileRequested = ImGui::MenuItem(ICON_FA_HAMMER "  Compile Workspace", nullptr, false, !activeWorkspacePath_.empty());
+          ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu(ICON_FA_WINDOW_MAXIMIZE "  Windows"))
+        {
+          ImGui::MenuItem(ICON_FA_CODE "  Script Editor", nullptr, &scriptEditorShowCodePanel_);
+          ImGui::MenuItem(ICON_FA_FOLDER_OPEN "  File Tree", nullptr, &scriptEditorShowFileTreePanel_);
+          ImGui::MenuItem(ICON_FA_CHART_LINE "  Debug Console", nullptr, &scriptEditorShowDebugPanel_);
+          ImGui::MenuItem(ICON_FA_LAYER_GROUP "  Entities", nullptr, &scriptEditorShowEntitiesPanel_);
+          ImGui::EndMenu();
+        }
+        ImGui::EndMenuBar();
+      }
+    }
+
+    // --- Handle menu actions ---
+    if (saveRequested)
+    {
+      std::string errorMessage;
+      if (!save_active_script_document(true, &errorMessage))
+      {
+        scriptEditorStatusMessage_ = std::move(errorMessage);
+        scriptEditorStatusIsError_ = true;
+      }
+    }
+
+    if (saveAllRequested)
+    {
+      std::string errorMessage;
+      if (!save_all_script_documents(false, &errorMessage))
+      {
+        scriptEditorStatusMessage_ = std::move(errorMessage);
+        scriptEditorStatusIsError_ = true;
+      }
+    }
+
+    if (compileRequested)
+    {
+      std::string errorMessage;
+      if (!save_all_script_documents(false, &errorMessage))
+      {
+        scriptEditorStatusMessage_ = std::move(errorMessage);
+        scriptEditorStatusIsError_ = true;
+      }
+      else
+      {
+        queue_workspace_script_compile();
+      }
+    }
+
+    if (revertRequested)
+    {
+      ScriptEditorTab *revertTab = active_script_editor_tab();
+      if (revertTab != nullptr)
+      {
+        ScriptDocumentSnapshot snapshot;
+        std::string errorMessage;
+        if (!load_script_document(revertTab->path, snapshot, &errorMessage))
+        {
+          scriptEditorStatusMessage_ = std::move(errorMessage);
+          scriptEditorStatusIsError_ = true;
+        }
+        else
+        {
+          revertTab->contents = std::move(snapshot.contents);
+          revertTab->savedContents = revertTab->contents;
+          if (revertTab->textEditor == nullptr)
+          {
+            revertTab->textEditor = create_script_text_editor(revertTab->contents);
+          }
+          else
+          {
+            revertTab->textEditor->SetText(revertTab->contents);
+          }
+          revertTab->savedWriteTime = snapshot.hasLastWriteTime
+                                          ? std::optional<std::filesystem::file_time_type>(snapshot.lastWriteTime)
+                                          : std::nullopt;
+          revertTab->dirty = false;
+          scriptEditorStatusMessage_ = "Reverted unsaved changes.";
+          scriptEditorStatusIsError_ = false;
+        }
+      }
+    }
+
+    if (closeRequested)
+    {
+      pendingCloseScriptEditorWindow_ = false;
+      pendingCloseAllScriptEditorTabs_ = false;
+      if (activeScriptEditorTabIndex_.has_value() && *activeScriptEditorTabIndex_ < openScriptEditorTabs_.size())
+      {
+        const std::size_t closeIndex = *activeScriptEditorTabIndex_;
+        if (openScriptEditorTabs_[closeIndex].dirty)
+        {
+          pendingScriptEditorClosePath_ = openScriptEditorTabs_[closeIndex].path;
+          openScriptEditorUnsavedChangesDialog_ = true;
+        }
+        else
+        {
+          close_script_editor_tab(closeIndex);
+        }
+      }
+    }
+
+    if (closeAllRequested)
+    {
+      pendingCloseScriptEditorWindow_ = false;
+      pendingCloseAllScriptEditorTabs_ = true;
+      continue_close_all_script_editor_tabs();
+    }
+
+    if (closeScriptEditorRequested)
+    {
+      request_close_script_editor_window();
+    }
+  }
+
   void Editor::render_script_editor(EntityManager &entityManager, ComponentManager &componentManager)
   {
+    (void)entityManager;
+    (void)componentManager;
+
     if (!scriptEditorStatusMessage_.empty() &&
         (scriptEditorStatusMessage_ != lastLoggedScriptEditorStatusMessage_ ||
          scriptEditorStatusIsError_ != lastLoggedScriptEditorStatusIsError_))
@@ -1668,386 +2018,95 @@ namespace hades
       ImGui::EndPopup();
     }
 
-    // --- Menu bar on the host window itself ---
-    bool saveRequested = false;
-    bool saveAllRequested = false;
-    bool compileRequested = false;
-    bool revertRequested = false;
-    bool closeRequested = false;
-    bool closeAllRequested = false;
-    bool closeScriptEditorRequested = false;
-
+    if (openScriptEditorTabs_.empty())
     {
-      const bool hasActiveTab = activeScriptEditorTabIndex_.has_value() &&
-                                *activeScriptEditorTabIndex_ < openScriptEditorTabs_.size();
-      const bool canSaveActive = hasActiveTab && openScriptEditorTabs_[*activeScriptEditorTabIndex_].dirty;
+      ImGui::TextDisabled("Open a .cs file from the file tree to start editing.");
+      return;
+    }
 
-      if (ImGui::BeginMenuBar())
+    if (!activeScriptEditorTabIndex_.has_value() || *activeScriptEditorTabIndex_ >= openScriptEditorTabs_.size())
+    {
+      activeScriptEditorTabIndex_ = 0;
+    }
+
+    std::optional<std::size_t> closeTabIndex;
+    if (ImGui::BeginTabBar("ScriptEditorTabs", ImGuiTabBarFlags_AutoSelectNewTabs))
+    {
+      for (std::size_t index = 0; index < openScriptEditorTabs_.size(); ++index)
       {
-        if (ImGui::BeginMenu(ICON_FA_FILE "  File"))
+        ScriptEditorTab &tab = openScriptEditorTabs_[index];
+        bool keepTabOpen = true;
+        ImGuiTabItemFlags itemFlags = tab.dirty ? ImGuiTabItemFlags_UnsavedDocument : ImGuiTabItemFlags_None;
+        if (pendingScriptEditorTabSelectionIndex_.has_value() &&
+            *pendingScriptEditorTabSelectionIndex_ == index)
         {
-          saveRequested = ImGui::MenuItem(ICON_FA_FLOPPY_DISK "  Save", nullptr, false, canSaveActive);
-          saveAllRequested = ImGui::MenuItem(ICON_FA_COPY "  Save All", nullptr, false, !openScriptEditorTabs_.empty());
-          revertRequested = ImGui::MenuItem(ICON_FA_ROTATE_LEFT "  Revert", nullptr, false, canSaveActive);
-          ImGui::Separator();
-          closeRequested = ImGui::MenuItem(ICON_FA_XMARK "  Close", nullptr, false, hasActiveTab);
-          closeAllRequested = ImGui::MenuItem(ICON_FA_CIRCLE_XMARK "  Close All", nullptr, false, !openScriptEditorTabs_.empty());
-          ImGui::Separator();
-          closeScriptEditorRequested = ImGui::MenuItem(ICON_FA_CIRCLE_XMARK "  Close Script Editor");
-          ImGui::EndMenu();
+          itemFlags |= ImGuiTabItemFlags_SetSelected;
         }
-        if (ImGui::BeginMenu(ICON_FA_HAMMER "  Build"))
+
+        const std::string tabLabel = path_display_name(tab.path) + "##" + tab.path.string();
+        if (ImGui::BeginTabItem(tabLabel.c_str(), &keepTabOpen, itemFlags))
         {
-          compileRequested = ImGui::MenuItem(ICON_FA_HAMMER "  Compile Workspace", nullptr, false, !activeWorkspacePath_.empty());
-          ImGui::EndMenu();
+          activeScriptEditorTabIndex_ = index;
+          ImGui::EndTabItem();
         }
-        ImGui::EndMenuBar();
-      }
-    }
 
-    // --- Handle menu actions ---
-    if (saveRequested)
-    {
-      std::string errorMessage;
-      if (!save_active_script_document(true, &errorMessage))
-      {
-        scriptEditorStatusMessage_ = std::move(errorMessage);
-        scriptEditorStatusIsError_ = true;
-      }
-    }
-
-    if (saveAllRequested)
-    {
-      std::string errorMessage;
-      if (!save_all_script_documents(false, &errorMessage))
-      {
-        scriptEditorStatusMessage_ = std::move(errorMessage);
-        scriptEditorStatusIsError_ = true;
-      }
-    }
-
-    if (compileRequested)
-    {
-      std::string errorMessage;
-      if (!save_all_script_documents(false, &errorMessage))
-      {
-        scriptEditorStatusMessage_ = std::move(errorMessage);
-        scriptEditorStatusIsError_ = true;
-      }
-      else
-      {
-        queue_workspace_script_compile();
-      }
-    }
-
-    if (revertRequested)
-    {
-      ScriptEditorTab *revertTab = active_script_editor_tab();
-      if (revertTab != nullptr)
-      {
-        ScriptDocumentSnapshot snapshot;
-        std::string errorMessage;
-        if (!load_script_document(revertTab->path, snapshot, &errorMessage))
+        if (!keepTabOpen)
         {
-          scriptEditorStatusMessage_ = std::move(errorMessage);
-          scriptEditorStatusIsError_ = true;
-        }
-        else
-        {
-          revertTab->contents = std::move(snapshot.contents);
-          revertTab->savedContents = revertTab->contents;
-          if (revertTab->textEditor == nullptr)
-          {
-            revertTab->textEditor = create_script_text_editor(revertTab->contents);
-          }
-          else
-          {
-            revertTab->textEditor->SetText(revertTab->contents);
-          }
-          revertTab->savedWriteTime = snapshot.hasLastWriteTime
-                                          ? std::optional<std::filesystem::file_time_type>(snapshot.lastWriteTime)
-                                          : std::nullopt;
-          revertTab->dirty = false;
-          scriptEditorStatusMessage_ = "Reverted unsaved changes.";
-          scriptEditorStatusIsError_ = false;
+          closeTabIndex = index;
         }
       }
+      ImGui::EndTabBar();
+      pendingScriptEditorTabSelectionIndex_.reset();
     }
 
-    if (closeRequested)
+    if (closeTabIndex.has_value())
     {
-      pendingCloseScriptEditorWindow_ = false;
       pendingCloseAllScriptEditorTabs_ = false;
-      if (activeScriptEditorTabIndex_.has_value() && *activeScriptEditorTabIndex_ < openScriptEditorTabs_.size())
+      if (openScriptEditorTabs_[*closeTabIndex].dirty)
       {
-        const std::size_t closeIndex = *activeScriptEditorTabIndex_;
-        if (openScriptEditorTabs_[closeIndex].dirty)
-        {
-          pendingScriptEditorClosePath_ = openScriptEditorTabs_[closeIndex].path;
-          openScriptEditorUnsavedChangesDialog_ = true;
-        }
-        else
-        {
-          close_script_editor_tab(closeIndex);
-        }
-      }
-    }
-
-    if (closeAllRequested)
-    {
-      pendingCloseScriptEditorWindow_ = false;
-      pendingCloseAllScriptEditorTabs_ = true;
-      continue_close_all_script_editor_tabs();
-    }
-
-    if (closeScriptEditorRequested)
-    {
-      request_close_script_editor_window();
-    }
-
-    // --- Three-column layout below the menu bar ---
-    if (ImGui::BeginTable(
-            "ScriptEditorLayout",
-            3,
-            ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp))
-    {
-      ImGui::TableSetupColumn("Files", ImGuiTableColumnFlags_WidthFixed, 280.0f);
-      ImGui::TableSetupColumn("Editor", ImGuiTableColumnFlags_WidthStretch);
-      ImGui::TableSetupColumn("Entities", ImGuiTableColumnFlags_WidthFixed, 300.0f);
-
-      // --- Left column: file tree ---
-      ImGui::TableNextColumn();
-      if (!workspaceScanError_.empty())
-      {
-        ImGui::TextColored(ImVec4(0.88f, 0.42f, 0.42f, 1.0f), "%s", workspaceScanError_.c_str());
-        ImGui::Separator();
-      }
-
-      ImGui::BeginChild("ScriptEditorTree");
-      if (!workspaceTreeRoot_.has_value())
-      {
-        ImGui::TextDisabled(activeWorkspacePath_.empty() ? "Open a workspace to browse scripts." : "No files.");
+        pendingScriptEditorClosePath_ = openScriptEditorTabs_[*closeTabIndex].path;
+        openScriptEditorUnsavedChangesDialog_ = true;
       }
       else
       {
-        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 3.0f));
-        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
-        int scriptTreeRowIndex = 0;
-        ImGui::SetNextItemOpen(true, ImGuiCond_Once);
-        render_workspace_tree_node(*workspaceTreeRoot_, 0, scriptTreeRowIndex, "");
-        ImGui::PopStyleVar(2);
+        close_script_editor_tab(*closeTabIndex);
       }
+    }
 
-      if (ImGui::BeginPopupContextWindow("ScriptEditorRootContext", ImGuiPopupFlags_NoOpenOverItems))
+    ScriptEditorTab *activeTab = active_script_editor_tab();
+    if (activeTab != nullptr)
+    {
+      ImVec2 editorSize = ImGui::GetContentRegionAvail();
+      editorSize.y = std::max(editorSize.y, 200.0f);
+      if (activeTab->textEditor == nullptr)
       {
-        const bool canModifyWorkspace = !activeWorkspacePath_.empty();
-        if (!canModifyWorkspace)
-        {
-          ImGui::BeginDisabled();
-        }
-        render_workspace_create_menu(activeWorkspacePath_);
-        if (!canModifyWorkspace)
-        {
-          ImGui::EndDisabled();
-        }
-        ImGui::EndPopup();
+        activeTab->textEditor = create_script_text_editor(activeTab->contents);
       }
-      ImGui::EndChild();
+      ImGui::PushID(activeTab->path.string().c_str());
 
-      // --- Middle column: tabs + code editor ---
-      ImGui::TableNextColumn();
+      // Handle autocomplete keys before TextEditor processes input.
+      const bool autocompleteConsumedKey = scriptAutoComplete_.handleKeys(*activeTab->textEditor);
+      if (autocompleteConsumedKey)
+        activeTab->textEditor->SetHandleKeyboardInputs(false);
 
-      const float availableHeight = ImGui::GetContentRegionAvail().y;
-      const float consoleHeight = availableHeight > 300.0f ? 180.0f : std::max(110.0f, availableHeight * 0.45f);
-      const float topPaneHeight = std::max(80.0f, availableHeight - consoleHeight - ImGui::GetStyle().ItemSpacing.y);
+      activeTab->textEditor->Render("##ScriptEditorContents", editorSize, true);
 
-      ImGui::BeginChild("ScriptEditorMainPane", ImVec2(0.0f, topPaneHeight), false);
-      if (openScriptEditorTabs_.empty())
+      activeTab->textEditor->SetHandleKeyboardInputs(true);
+
+      if (activeTab->textEditor->IsTextChanged())
       {
-        ImGui::TextDisabled("Open a .cs file from the file tree to start editing.");
-      }
-      else
-      {
-        if (!activeScriptEditorTabIndex_.has_value() || *activeScriptEditorTabIndex_ >= openScriptEditorTabs_.size())
+        activeTab->contents = activeTab->textEditor->GetText();
+        activeTab->dirty = activeTab->contents != activeTab->savedContents;
+        if (!scriptEditorStatusIsError_)
         {
-          activeScriptEditorTabIndex_ = 0;
-        }
-
-        std::optional<std::size_t> closeTabIndex;
-        if (ImGui::BeginTabBar("ScriptEditorTabs", ImGuiTabBarFlags_AutoSelectNewTabs))
-        {
-          for (std::size_t index = 0; index < openScriptEditorTabs_.size(); ++index)
-          {
-            ScriptEditorTab &tab = openScriptEditorTabs_[index];
-            bool keepTabOpen = true;
-            ImGuiTabItemFlags itemFlags = tab.dirty ? ImGuiTabItemFlags_UnsavedDocument : ImGuiTabItemFlags_None;
-            if (pendingScriptEditorTabSelectionIndex_.has_value() &&
-                *pendingScriptEditorTabSelectionIndex_ == index)
-            {
-              itemFlags |= ImGuiTabItemFlags_SetSelected;
-            }
-
-            const std::string tabLabel = path_display_name(tab.path) + "##" + tab.path.string();
-            if (ImGui::BeginTabItem(tabLabel.c_str(), &keepTabOpen, itemFlags))
-            {
-              activeScriptEditorTabIndex_ = index;
-              ImGui::EndTabItem();
-            }
-
-            if (!keepTabOpen)
-            {
-              closeTabIndex = index;
-            }
-          }
-          ImGui::EndTabBar();
-          pendingScriptEditorTabSelectionIndex_.reset();
-        }
-
-        if (closeTabIndex.has_value())
-        {
-          pendingCloseAllScriptEditorTabs_ = false;
-          if (openScriptEditorTabs_[*closeTabIndex].dirty)
-          {
-            pendingScriptEditorClosePath_ = openScriptEditorTabs_[*closeTabIndex].path;
-            openScriptEditorUnsavedChangesDialog_ = true;
-          }
-          else
-          {
-            close_script_editor_tab(*closeTabIndex);
-          }
-        }
-
-        ScriptEditorTab *activeTab = active_script_editor_tab();
-        if (activeTab != nullptr)
-        {
-          ImVec2 editorSize = ImGui::GetContentRegionAvail();
-          editorSize.y = std::max(editorSize.y, 200.0f);
-          if (activeTab->textEditor == nullptr)
-          {
-            activeTab->textEditor = create_script_text_editor(activeTab->contents);
-          }
-          ImGui::PushID(activeTab->path.string().c_str());
-
-          // Handle autocomplete keys before TextEditor processes input.
-          const bool autocompleteConsumedKey = scriptAutoComplete_.handleKeys(*activeTab->textEditor);
-          if (autocompleteConsumedKey)
-            activeTab->textEditor->SetHandleKeyboardInputs(false);
-
-          activeTab->textEditor->Render("##ScriptEditorContents", editorSize, true);
-
-          activeTab->textEditor->SetHandleKeyboardInputs(true);
-
-          if (activeTab->textEditor->IsTextChanged())
-          {
-            activeTab->contents = activeTab->textEditor->GetText();
-            activeTab->dirty = activeTab->contents != activeTab->savedContents;
-            if (!scriptEditorStatusIsError_)
-            {
-              scriptEditorStatusMessage_.clear();
-            }
-          }
-
-          scriptAutoComplete_.update(*activeTab->textEditor, parsedScriptCache_);
-          scriptAutoComplete_.renderPopup(*activeTab->textEditor);
-
-          ImGui::PopID();
+          scriptEditorStatusMessage_.clear();
         }
       }
-      ImGui::EndChild();
 
-      ImGui::Separator();
-      ImGui::TextUnformatted("Debug Console");
-      ImGui::BeginChild("ScriptEditorDebugConsolePane", ImVec2(0.0f, 0.0f), true);
-      scriptEditorDebugConsole_.render("##ScriptEditorDebugConsoleText");
-      ImGui::EndChild();
+      scriptAutoComplete_.update(*activeTab->textEditor, parsedScriptCache_);
+      scriptAutoComplete_.renderPopup(*activeTab->textEditor);
 
-      ImGui::TableNextColumn();
-      ImGui::TextUnformatted("Entities");
-      ImGui::Separator();
-
-      ScriptEditorTab *activeTab = active_script_editor_tab();
-      if (activeTab != nullptr)
-      {
-        const std::string activeScriptRelativePath =
-            activeWorkspacePath_.empty()
-                ? normalize_generic_path(activeTab->path)
-                : normalize_generic_path(relative_workspace_path(activeWorkspacePath_, activeTab->path));
-
-        std::vector<Entity::EntityId> matchingEntities;
-        for (const Entity::EntityId entity : entityManager.getAllEntities())
-        {
-          if (!componentManager.hasComponent<ScriptComponent>(entity))
-          {
-            continue;
-          }
-
-          const auto &scriptComponent = componentManager.getComponent<ScriptComponent>(entity);
-          const bool usesScript = std::any_of(
-              scriptComponent.attachments.begin(),
-              scriptComponent.attachments.end(),
-              [&activeScriptRelativePath](const ScriptAttachment &attachment)
-              {
-                return !attachment.scriptPath.empty() &&
-                       normalize_generic_path(attachment.scriptPath) == activeScriptRelativePath;
-              });
-          if (usesScript)
-          {
-            matchingEntities.push_back(entity);
-          }
-        }
-
-        ImGui::BeginChild("ScriptEditorEntityUsers");
-        if (matchingEntities.empty())
-        {
-          ImGui::TextDisabled("No entities use this script.");
-        }
-        else
-        {
-          ImGui::TextDisabled("%zu matching %s", matchingEntities.size(), matchingEntities.size() == 1 ? "entity" : "entities");
-          ImGui::Separator();
-
-          for (const Entity::EntityId entity : matchingEntities)
-          {
-            const bool selected = state.selectedEntity.has_value() && *state.selectedEntity == entity;
-            const std::string entityTitle = entity_label(entity, componentManager) + "##ScriptEntity" + std::to_string(entity);
-            if (ImGui::CollapsingHeader(entityTitle.c_str()))
-            {
-              ImGui::TextDisabled("Click to insert at cursor");
-              ImGui::Indent(8.0f);
-
-              TextEditor *editor = activeTab->textEditor.get();
-              script_context_button(editor, "context.EntityId", "eid", "uint, read-only", entity);
-
-              const char *nameHint = componentManager.hasComponent<NameComponent>(entity)
-                                         ? "string, read-only"
-                                         : "string, read-only (fallback)";
-              script_context_button(editor, "context.Name", "name", nameHint, entity);
-
-              script_context_button(editor, "context.Position", "pos", "Vector3, read/write", entity);
-              ImGui::Indent(12.0f);
-              script_context_button(editor, "context.Position.X", "px", "float", entity);
-              script_context_button(editor, "context.Position.Y", "py", "float", entity);
-              script_context_button(editor, "context.Position.Z", "pz", "float", entity);
-              ImGui::Unindent(12.0f);
-
-              ImGui::Unindent(8.0f);
-            }
-
-            if (selected)
-            {
-              ImGui::SameLine();
-              ImGui::TextDisabled("(selected)");
-            }
-          }
-        }
-        ImGui::EndChild();
-      }
-      else
-      {
-        ImGui::TextDisabled("No script selected.");
-      }
-
-      ImGui::EndTable();
+      ImGui::PopID();
     }
   }
 

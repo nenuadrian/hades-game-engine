@@ -361,6 +361,11 @@ namespace hades
     return currentWorkspace_.has_value();
   }
 
+  void WorkspaceManager::close_current_workspace()
+  {
+    currentWorkspace_ = std::nullopt;
+  }
+
   const std::optional<WorkspaceEntry> &WorkspaceManager::current_workspace() const
   {
     return currentWorkspace_;

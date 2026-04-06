@@ -72,6 +72,7 @@ namespace hades
       std::array<char, 512> outputPathBuffer{};
       std::array<char, 256> projectNameBuffer{};
       bool enableHeadless = false;
+      bool enableHadesAPI = false;
     };
 
     struct ExportBuildState
@@ -160,6 +161,11 @@ namespace hades
     ScriptCompileStatus lastLoggedCompileStatus_ = ScriptCompileStatus::Unknown;
     std::string lastLoggedCompileError_;
     bool openScriptEditorWindow_ = false;
+    bool scriptEditorDockLayoutInitialized_ = false;
+    bool scriptEditorShowCodePanel_ = true;
+    bool scriptEditorShowFileTreePanel_ = true;
+    bool scriptEditorShowDebugPanel_ = true;
+    bool scriptEditorShowEntitiesPanel_ = true;
     bool focusScriptEditorWindow_ = false;
     bool openScriptEditorUnsavedChangesDialog_ = false;
     std::optional<std::filesystem::path> pendingScriptEditorClosePath_;
@@ -298,6 +304,7 @@ namespace hades
     void render_export_window(EntityManager &entityManager, ComponentManager &componentManager);
     void render_workspace_tree_node(const WorkspaceTreeNode &node, int depth, int &rowIndex, const char *filter);
     void render_workspace_create_menu(const std::filesystem::path &destination);
+    void render_script_editor_menu(EntityManager &entityManager, ComponentManager &componentManager);
     void render_script_editor(EntityManager &entityManager, ComponentManager &componentManager);
     std::optional<std::size_t> find_script_editor_tab_index(const std::filesystem::path &scriptPath) const;
     ScriptEditorTab *active_script_editor_tab();

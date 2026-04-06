@@ -50,6 +50,10 @@ namespace hades
     void on_key_down(int keyCode);
     void on_key_up(int keyCode);
 
+    /// Collect observed variables set by scripts via HadesAPI.Observe().
+    /// Returns a JSON object string, e.g. {"score":10,"health":100}.
+    std::string collect_observations() const;
+
     /// Compile the given .cs source files without loading or running them.
     /// Returns true on success. On failure, sets errorMessage with build output.
     static bool compile(

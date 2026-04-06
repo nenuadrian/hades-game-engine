@@ -12,6 +12,7 @@ namespace hades
     std::string projectName;
     std::string outputPath;
     bool enableHeadless = false;
+    bool enableHadesAPI = false;
   };
 
   struct WorkspaceEditorSettings

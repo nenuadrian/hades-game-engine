@@ -72,6 +72,7 @@ namespace hades
       read_optional_string(value, "projectName", target.projectName);
       read_optional_string(value, "outputPath", target.outputPath);
       read_optional_bool(value, "enableHeadless", target.enableHeadless);
+      read_optional_bool(value, "enableHadesAPI", target.enableHadesAPI);
     }
 
     json write_export_settings(const WorkspaceExportSettings &value)
@@ -80,6 +81,7 @@ namespace hades
           {"projectName", value.projectName},
           {"outputPath", value.outputPath},
           {"enableHeadless", value.enableHeadless},
+          {"enableHadesAPI", value.enableHadesAPI},
       };
     }
   }

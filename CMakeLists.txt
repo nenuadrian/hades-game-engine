@@ -113,6 +113,7 @@ file(GLOB_RECURSE RUNTIME_HEADER_FILES CONFIGURE_DEPENDS "${SRC_DIR}/runtime/*.h
 file(GLOB_RECURSE TEST_SOURCE_FILES CONFIGURE_DEPENDS "${SRC_DIR}/tests/*.cpp")
 
 option(HADES_FRAME_METRICS "Enable frame metrics profiling" OFF)
+option(HADES_ENABLE_API "Enable HadesAPI REST server for ML training" OFF)
 
 # ---------------------------------------------------------------------------
 # HadesEngine static library (engine core, shared by editor and runtime)
@@ -121,6 +122,11 @@ add_library(HadesEngine STATIC ${ENGINE_SOURCE_FILES} ${ENGINE_HEADER_FILES})
 target_include_directories(HadesEngine PUBLIC "${SRC_DIR}" "${CMAKE_BINARY_DIR}/generated")
 if(HADES_FRAME_METRICS)
   target_compile_definitions(HadesEngine PUBLIC HADES_ENABLE_FRAME_METRICS)
+endif()
+if(HADES_ENABLE_API AND NOT EMSCRIPTEN)
+  target_compile_definitions(HadesEngine PUBLIC HADES_ENABLE_API)
+  FetchContent_GetProperties(httplib)
+  target_include_directories(HadesEngine PUBLIC "${httplib_SOURCE_DIR}")
 endif()
 if(EMSCRIPTEN)
   target_link_libraries(

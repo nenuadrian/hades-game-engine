@@ -114,6 +114,11 @@ namespace hades
     scriptEditorStatusMessage_.clear();
     scriptEditorStatusIsError_ = false;
     openScriptEditorWindow_ = false;
+    scriptEditorDockLayoutInitialized_ = false;
+    scriptEditorShowCodePanel_ = true;
+    scriptEditorShowFileTreePanel_ = true;
+    scriptEditorShowDebugPanel_ = true;
+    scriptEditorShowEntitiesPanel_ = true;
     focusScriptEditorWindow_ = false;
     openScriptEditorUnsavedChangesDialog_ = false;
     pendingScriptEditorClosePath_.reset();
@@ -151,6 +156,7 @@ namespace hades
     exportBuildInProgress_ = false;
     exportBuildState_.reset();
     exportBuildLog_.clear();
+    exportBuildLogBuffer_.clear();
     exportBuildError_.clear();
     exportBuildSucceeded_ = false;
     exportBuildFinished_ = false;
@@ -680,6 +686,7 @@ namespace hades
       target.projectName = source.projectNameBuffer.data();
       target.outputPath = source.outputPathBuffer.data();
       target.enableHeadless = source.enableHeadless;
+      target.enableHadesAPI = source.enableHadesAPI;
       return target;
     };
 
@@ -725,6 +732,7 @@ namespace hades
       copy_to_buffer(source.projectName, target.projectNameBuffer);
       copy_to_buffer(source.outputPath, target.outputPathBuffer);
       target.enableHeadless = source.enableHeadless;
+      target.enableHadesAPI = source.enableHadesAPI;
     };
 
     state.showDebugInfo = settings.showDebugInfo;
@@ -739,6 +747,15 @@ namespace hades
     from_workspace_export(settings.exportLinux, exportPlatformSettings_[export_platform_index(ExportPlatform::Linux)]);
     from_workspace_export(settings.exportWindows, exportPlatformSettings_[export_platform_index(ExportPlatform::Windows)]);
     from_workspace_export(settings.exportWeb, exportPlatformSettings_[export_platform_index(ExportPlatform::Web)]);
+
+    // Export build output is runtime-only; never keep it across workspace restore.
+    exportBuildInProgress_ = false;
+    exportBuildState_.reset();
+    exportBuildLog_.clear();
+    exportBuildLogBuffer_.clear();
+    exportBuildError_.clear();
+    exportBuildSucceeded_ = false;
+    exportBuildFinished_ = false;
 
     for (const auto &plugin : plugins_)
     {

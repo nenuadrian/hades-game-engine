@@ -147,7 +147,8 @@ namespace
       const std::filesystem::path &workspacePath,
       const std::string &projectName,
       hades::Editor::ExportPlatform platform,
-      bool enableHeadless)
+      bool enableHeadless,
+      bool enableHadesAPI)
   {
     const std::string sourceDir = hades::build_config::cmake_source_dir;
     const std::string cmakeCommand = hades::build_config::cmake_command;
@@ -323,12 +324,17 @@ namespace
     // dylib/so dependencies that would need to be bundled alongside it.
     append_log(*state, "=== Configuring (cmake) ===\n");
     {
-      auto result = hades::Subprocess::run_capture(
-          {cmakeCommand,
-           "-S", sourceDir,
-           "-B", buildDir.string(),
-           "-DCMAKE_BUILD_TYPE=Release",
-           "-DBUILD_SHARED_LIBS=OFF"});
+      std::vector<std::string> configureArgs = {
+          cmakeCommand,
+          "-S", sourceDir,
+          "-B", buildDir.string(),
+          "-DCMAKE_BUILD_TYPE=Release",
+          "-DBUILD_SHARED_LIBS=OFF"};
+      if (enableHadesAPI)
+      {
+        configureArgs.push_back("-DHADES_ENABLE_API=ON");
+      }
+      auto result = hades::Subprocess::run_capture(configureArgs);
       append_log(*state, result.output);
       if (!result.launched || result.exitCode != 0)
       {
@@ -501,6 +507,27 @@ namespace
         append_log(*state, "Created headless launcher script.\n");
       }
 
+      // Create a HadesAPI launcher script if enabled.
+      if (enableHadesAPI)
+      {
+        const std::filesystem::path apiPath = stageDir / ("Run " + projectName + " API.command");
+        FILE *apiLauncher = std::fopen(apiPath.string().c_str(), "w");
+        if (apiLauncher != nullptr)
+        {
+          std::fprintf(apiLauncher,
+                       "#!/bin/bash\n"
+                       "cd \"$(dirname \"$0\")/%s.app/Contents/MacOS\"\n"
+                       "./%s --project . --api --api-port 7777\n",
+                       projectName.c_str(), binaryName.c_str());
+          std::fclose(apiLauncher);
+          std::filesystem::permissions(apiPath,
+                                       std::filesystem::perms::owner_exec |
+                                           std::filesystem::perms::group_exec,
+                                       std::filesystem::perm_options::add, ec);
+        }
+        append_log(*state, "Created HadesAPI launcher script.\n");
+      }
+
       append_log(*state, "Created macOS app bundle: " + appBundle.string() + "\n");
     }
     else
@@ -589,6 +616,21 @@ namespace
         }
         append_log(*state, "Created headless launcher script.\n");
       }
+      if (enableHadesAPI)
+      {
+        const std::filesystem::path apiPath = stageDir / (projectName + "_api.bat");
+        FILE *apiLauncher = std::fopen(apiPath.string().c_str(), "w");
+        if (apiLauncher != nullptr)
+        {
+          std::fprintf(apiLauncher,
+                       "@echo off\r\n"
+                       "cd /d \"%%~dp0\"\r\n"
+                       "%s --project . --api --api-port 7777\r\n",
+                       binaryName.c_str());
+          std::fclose(apiLauncher);
+        }
+        append_log(*state, "Created HadesAPI launcher script.\n");
+      }
 #else
       {
         const std::filesystem::path launcherPath = stageDir / ("run_" + projectName + ".sh");
@@ -625,6 +667,25 @@ namespace
                                        std::filesystem::perm_options::add, ec);
         }
         append_log(*state, "Created headless launcher script.\n");
+      }
+      if (enableHadesAPI)
+      {
+        const std::filesystem::path apiPath = stageDir / ("run_" + projectName + "_api.sh");
+        FILE *apiLauncher = std::fopen(apiPath.string().c_str(), "w");
+        if (apiLauncher != nullptr)
+        {
+          std::fprintf(apiLauncher,
+                       "#!/bin/bash\n"
+                       "cd \"$(dirname \"$0\")\"\n"
+                       "./%s --project . --api --api-port 7777\n",
+                       binaryName.c_str());
+          std::fclose(apiLauncher);
+          std::filesystem::permissions(apiPath,
+                                       std::filesystem::perms::owner_exec |
+                                           std::filesystem::perms::group_exec,
+                                       std::filesystem::perm_options::add, ec);
+        }
+        append_log(*state, "Created HadesAPI launcher script.\n");
       }
 #endif
 
@@ -790,6 +851,23 @@ namespace hades
           ImGui::SetTooltip("When enabled, the exported game accepts --headless to run\n"
                             "without a window or rendering (e.g. for ML training).");
         }
+
+        if (ImGui::Checkbox("Enable HadesAPI (--api)", &platformSettings.enableHadesAPI))
+        {
+          exportSettingsDirty = true;
+        }
+        if (ImGui::IsItemHovered())
+        {
+          ImGui::SetTooltip("When enabled, the exported game includes a REST API server\n"
+                            "for ML training. Use --api to start in API mode.\n\n"
+                            "Endpoints:\n"
+                            "  POST /api/step   - Advance N ticks with optional inputs\n"
+                            "  GET  /api/state  - Read observed variables and entity state\n"
+                            "  POST /api/reset  - Reset the game to its initial state\n"
+                            "  POST /api/input  - Queue key events\n"
+                            "  GET  /api/status - Check server status\n\n"
+                            "Scripts expose variables via HadesAPI.Observe(key, value).");
+        }
       }
 
       ImGui::Spacing();
@@ -823,6 +901,7 @@ namespace hades
         const std::string projectName = platformSettings.projectNameBuffer.data();
         const ExportPlatform platform = selectedExportPlatform_;
         const bool enableHeadless = platformSettings.enableHeadless;
+        const bool enableHadesAPI = platformSettings.enableHadesAPI;
 
         auto buildState = exportBuildState_;
         if (exportBuildThread_.joinable())
@@ -830,9 +909,9 @@ namespace hades
           exportBuildThread_.join();
         }
         exportBuildThread_ = std::thread(
-            [buildState, outputDir, workspacePath, projectName, platform, enableHeadless]()
+            [buildState, outputDir, workspacePath, projectName, platform, enableHeadless, enableHadesAPI]()
             {
-              run_export_build(buildState, outputDir, workspacePath, projectName, platform, enableHeadless);
+              run_export_build(buildState, outputDir, workspacePath, projectName, platform, enableHeadless, enableHadesAPI);
             });
       }
       if (!canBuild)

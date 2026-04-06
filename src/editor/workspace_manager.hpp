@@ -36,6 +36,7 @@ namespace hades
     bool prune_missing_recent_workspaces(std::string *errorMessage = nullptr);
 
     bool has_current_workspace() const;
+    void close_current_workspace();
     const std::optional<WorkspaceEntry> &current_workspace() const;
     const std::vector<WorkspaceEntry> &recent_workspaces() const;
 

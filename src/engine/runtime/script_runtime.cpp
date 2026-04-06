@@ -80,6 +80,15 @@ namespace hades
       const char *errorMessage;
       int32_t errorLength;
     };
+
+    struct InteropObservationResult
+    {
+      int32_t success;
+      const char *jsonData;
+      int32_t jsonLength;
+      const char *errorMessage;
+      int32_t errorLength;
+    };
 #pragma pack(pop)
 
     // Function pointer types for managed entry points.
@@ -97,6 +106,9 @@ namespace hades
     using KeyEventFn = void (*)(
         int32_t keyCode,
         InteropEventResult *result);
+
+    using CollectObservationsFn = void (*)(
+        InteropObservationResult *result);
 
     using ShutdownFn = void (*)();
 
@@ -412,6 +424,41 @@ namespace Hades.Scripting
         public virtual void OnKeyUp(EntityContext context, int keyCode) { }
     }
 
+    public static class HadesAPI
+    {
+        private static readonly Dictionary<string, string> _observed = new();
+
+        public static void Observe(string key, int value) => _observed[key] = value.ToString(CultureInfo.InvariantCulture);
+        public static void Observe(string key, float value) => _observed[key] = value.ToString(CultureInfo.InvariantCulture);
+        public static void Observe(string key, double value) => _observed[key] = value.ToString(CultureInfo.InvariantCulture);
+        public static void Observe(string key, bool value) => _observed[key] = value ? "true" : "false";
+        public static void Observe(string key, string value) => _observed[key] = "\"" + EscapeJson(value ?? "") + "\"";
+
+        public static void Clear() => _observed.Clear();
+
+        internal static string SerializeJson()
+        {
+            if (_observed.Count == 0) return "{}";
+            var sb = new System.Text.StringBuilder("{");
+            bool first = true;
+            foreach (var kvp in _observed)
+            {
+                if (!first) sb.Append(',');
+                sb.Append('"').Append(EscapeJson(kvp.Key)).Append("\":");
+                sb.Append(kvp.Value);
+                first = false;
+            }
+            sb.Append('}');
+            return sb.ToString();
+        }
+
+        private static string EscapeJson(string s)
+        {
+            return s.Replace("\\", "\\\\").Replace("\"", "\\\"")
+                    .Replace("\n", "\\n").Replace("\r", "\\r").Replace("\t", "\\t");
+        }
+    }
+
     // Interop structures matching the C++ side (packed, blittable).
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     internal struct InteropEntityData
@@ -467,6 +514,16 @@ namespace Hades.Scripting
     internal struct InteropEventResult
     {
         public int Success;
+        public IntPtr ErrorMessage;
+        public int ErrorLength;
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    internal struct InteropObservationResult
+    {
+        public int Success;
+        public IntPtr JsonData;
+        public int JsonLength;
         public IntPtr ErrorMessage;
         public int ErrorLength;
     }
@@ -748,12 +805,57 @@ namespace Hades.Scripting
             }
         }
 
+        private static IntPtr _lastObsPtr = IntPtr.Zero;
+
+        [UnmanagedCallersOnly]
+        public static unsafe void CollectObservations(IntPtr resultPtr)
+        {
+            ref var result = ref Unsafe.AsRef<InteropObservationResult>((void*)resultPtr);
+            result.Success = 1;
+            result.JsonData = IntPtr.Zero;
+            result.JsonLength = 0;
+            result.ErrorMessage = IntPtr.Zero;
+            result.ErrorLength = 0;
+
+            try
+            {
+                if (_lastObsPtr != IntPtr.Zero)
+                {
+                    Marshal.FreeCoTaskMem(_lastObsPtr);
+                    _lastObsPtr = IntPtr.Zero;
+                }
+
+                string json = HadesAPI.SerializeJson();
+                _lastObsPtr = Marshal.StringToCoTaskMemUTF8(json);
+                result.JsonData = _lastObsPtr;
+                result.JsonLength = System.Text.Encoding.UTF8.GetByteCount(json);
+            }
+            catch (Exception ex)
+            {
+                SetError(ref result, ex.Message);
+            }
+        }
+
+        private static void SetError(ref InteropObservationResult result, string message)
+        {
+            FreeLastError();
+            _lastErrorPtr = Marshal.StringToCoTaskMemUTF8(message);
+            result.ErrorMessage = _lastErrorPtr;
+            result.ErrorLength = System.Text.Encoding.UTF8.GetByteCount(message);
+            result.Success = 0;
+        }
+
         [UnmanagedCallersOnly]
         public static void Shutdown()
         {
             InstancesByEntity.Clear();
             EntityOrder.Clear();
             FreeLastError();
+            if (_lastObsPtr != IntPtr.Zero)
+            {
+                Marshal.FreeCoTaskMem(_lastObsPtr);
+                _lastObsPtr = IntPtr.Zero;
+            }
         }
     }
 }
@@ -995,6 +1097,7 @@ namespace Hades.Scripting
     UpdateFrameFn updateFrameFn = nullptr;
     KeyEventFn keyDownFn = nullptr;
     KeyEventFn keyUpFn = nullptr;
+    CollectObservationsFn collectObservationsFn = nullptr;
     ShutdownFn shutdownFn = nullptr;
   };
 
@@ -1095,12 +1198,14 @@ namespace Hades.Scripting
     void *updateFramePtr = nullptr;
     void *keyDownPtr = nullptr;
     void *keyUpPtr = nullptr;
+    void *collectObsPtr = nullptr;
     void *shutdownPtr = nullptr;
 
     if (!impl_->clrHost.get_managed_function(assemblyPath, typeName, "LoadScene", &loadScenePtr, &localError) ||
         !impl_->clrHost.get_managed_function(assemblyPath, typeName, "UpdateFrame", &updateFramePtr, &localError) ||
         !impl_->clrHost.get_managed_function(assemblyPath, typeName, "OnKeyDown", &keyDownPtr, &localError) ||
         !impl_->clrHost.get_managed_function(assemblyPath, typeName, "OnKeyUp", &keyUpPtr, &localError) ||
+        !impl_->clrHost.get_managed_function(assemblyPath, typeName, "CollectObservations", &collectObsPtr, &localError) ||
         !impl_->clrHost.get_managed_function(assemblyPath, typeName, "Shutdown", &shutdownPtr, &localError))
     {
       impl_->clrHost.close();
@@ -1117,6 +1222,7 @@ namespace Hades.Scripting
     impl_->updateFrameFn = reinterpret_cast<UpdateFrameFn>(updateFramePtr);
     impl_->keyDownFn = reinterpret_cast<KeyEventFn>(keyDownPtr);
     impl_->keyUpFn = reinterpret_cast<KeyEventFn>(keyUpPtr);
+    impl_->collectObservationsFn = reinterpret_cast<CollectObservationsFn>(collectObsPtr);
     impl_->shutdownFn = reinterpret_cast<ShutdownFn>(shutdownPtr);
 
     // Prepare interop data for LoadScene.
@@ -1296,6 +1402,7 @@ namespace Hades.Scripting
     impl_->updateFrameFn = nullptr;
     impl_->keyDownFn = nullptr;
     impl_->keyUpFn = nullptr;
+    impl_->collectObservationsFn = nullptr;
     impl_->shutdownFn = nullptr;
     impl_->trackedEntities.clear();
     impl_->running = false;
@@ -1376,6 +1483,26 @@ namespace Hades.Scripting
 
     impl_->faulted = true;
     impl_->running = false;
+  }
+
+  std::string ScriptRuntime::collect_observations() const
+  {
+    if (!impl_->running || impl_->collectObservationsFn == nullptr)
+    {
+      return "{}";
+    }
+
+    InteropObservationResult result{};
+    impl_->collectObservationsFn(&result);
+
+    if (result.success == 0 || result.jsonData == nullptr || result.jsonLength <= 0)
+    {
+      return "{}";
+    }
+
+    return std::string(
+        reinterpret_cast<const char *>(result.jsonData),
+        static_cast<std::size_t>(result.jsonLength));
   }
 
   bool ScriptRuntime::compile(

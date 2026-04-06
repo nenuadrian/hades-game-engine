@@ -20,6 +20,9 @@
 #include "engine/rendering/vulkan.hpp"
 #endif
 #include "engine/runtime/main_camera_selection.hpp"
+#include "engine/components/name_component.hpp"
+#include "engine/components/position_component_3d.hpp"
+#include "engine/core/ecs/query.hpp"
 #include "engine/systems/audio_system.hpp"
 #include "engine/systems/movement_system.hpp"
 #include "engine/systems/physics_system.hpp"
@@ -112,7 +115,7 @@ namespace hades
     return projectPath_.filename().string();
   }
 
-  bool GameRuntime::init(const std::filesystem::path &projectPath, bool headless)
+  bool GameRuntime::init(const std::filesystem::path &projectPath, bool headless, bool apiMode, int apiPort)
   {
     if (initialized_)
     {
@@ -121,6 +124,17 @@ namespace hades
 
     projectPath_ = projectPath;
     headless_ = headless;
+    apiMode_ = apiMode;
+#ifdef HADES_ENABLE_API
+    apiPort_ = apiPort;
+#else
+    (void)apiPort;
+    if (apiMode)
+    {
+      std::fprintf(stderr, "Warning: HadesAPI was requested but the build does not include API support.\n");
+      apiMode_ = false;
+    }
+#endif
 
     const std::uint32_t sdlFlags = headless_
                                        ? (SDL_INIT_TIMER | SDL_INIT_GAMECONTROLLER)
@@ -318,6 +332,28 @@ namespace hades
     }
   }
 
+  void GameRuntime::tick_frame(float deltaTime)
+  {
+#ifndef HADES_PLATFORM_WEB
+    // Update scripts.
+    if (scriptRuntime_.is_running())
+    {
+      scriptRuntime_.update(deltaTime, componentManager_, entityManager_);
+      if (scriptRuntime_.faulted())
+      {
+        std::fprintf(stderr, "Script error: %s\n", scriptRuntime_.last_error().c_str());
+        running_ = false;
+        return;
+      }
+    }
+#endif
+
+    // Dispatch pending events, then update all engine systems.
+    eventBus_.dispatch();
+    SystemContext context{componentManager_, entityManager_, eventBus_};
+    systemManager_.updateSystems(deltaTime, context);
+  }
+
   int GameRuntime::run()
   {
     if (!initialized_)
@@ -326,6 +362,19 @@ namespace hades
     }
 
     running_ = true;
+
+#ifdef HADES_ENABLE_API
+    if (apiMode_)
+    {
+      run_api_loop();
+      scriptRuntime_.stop();
+      if (audioEngine_ != nullptr)
+      {
+        audioEngine_->stop_all();
+      }
+      return EXIT_SUCCESS;
+    }
+#endif
 
 #ifdef __EMSCRIPTEN__
     // Emscripten requires a non-blocking main loop. The callback is invoked
@@ -358,4 +407,184 @@ namespace hades
 
     return EXIT_SUCCESS;
   }
+
+#ifdef HADES_ENABLE_API
+  std::string GameRuntime::collect_entity_state_json()
+  {
+    auto entities = query<PositionComponent3D>(entityManager_, componentManager_, activeWorld_);
+
+    nlohmann::json arr = nlohmann::json::array();
+    for (auto entityId : entities)
+    {
+      nlohmann::json obj;
+      obj["id"] = entityId;
+
+      if (componentManager_.hasComponent<NameComponent>(entityId))
+      {
+        obj["name"] = componentManager_.getComponent<NameComponent>(entityId).value;
+      }
+
+      const auto &pos = componentManager_.getComponent<PositionComponent3D>(entityId);
+      obj["position"] = {{"x", pos.x}, {"y", pos.y}, {"z", pos.z}};
+      arr.push_back(std::move(obj));
+    }
+
+    return arr.dump();
+  }
+
+  void GameRuntime::update_api_state()
+  {
+    if (!api_)
+    {
+      return;
+    }
+
+#ifndef HADES_PLATFORM_WEB
+    api_->set_observed_state(scriptRuntime_.collect_observations());
+#endif
+    api_->set_entity_state(collect_entity_state_json());
+    api_->set_game_over(!running_);
+  }
+
+  void GameRuntime::reset_game()
+  {
+#ifndef HADES_PLATFORM_WEB
+    scriptRuntime_.stop();
+#endif
+
+    // Restore the initial world state from the snapshot taken at startup.
+    std::unordered_map<Entity::EntityId, Entity::EntityId> idMap;
+    restore_all_worlds_from_snapshot(initialWorldSnapshot_, entityManager_, componentManager_, &idMap);
+
+    // Re-resolve the active world after restore (IDs may have changed).
+    if (activeWorld_.has_value())
+    {
+      auto it = idMap.find(*activeWorld_);
+      if (it != idMap.end())
+      {
+        activeWorld_ = it->second;
+      }
+      else
+      {
+        activeWorld_ = normalize_default_world(entityManager_, componentManager_);
+      }
+    }
+
+    // Re-initialize subsystems for the new world.
+    if (audioSystem_ != nullptr)
+    {
+      audioSystem_->set_active_world(activeWorld_);
+    }
+    if (physicsSystem_ != nullptr)
+    {
+      physicsSystem_->set_active_world(activeWorld_);
+    }
+
+#ifndef HADES_PLATFORM_WEB
+    std::string scriptError;
+    if (!scriptRuntime_.start(componentManager_, entityManager_, projectPath_, activeWorld_, &scriptError))
+    {
+      if (!scriptError.empty())
+      {
+        std::fprintf(stderr, "Warning: script runtime failed to restart: %s\n", scriptError.c_str());
+      }
+    }
+#endif
+
+    running_ = true;
+  }
+
+  void GameRuntime::run_api_loop()
+  {
+    // Take a snapshot of the initial world state for reset support.
+    initialWorldSnapshot_ = snapshot_all_worlds(entityManager_, componentManager_);
+
+    api_ = std::make_unique<HadesAPI>();
+    HadesAPI::Config config;
+    config.port = apiPort_;
+
+    if (!api_->start(config))
+    {
+      std::fprintf(stderr, "Error: HadesAPI failed to start on port %d\n", apiPort_);
+      return;
+    }
+
+    // Publish initial state.
+    update_api_state();
+
+    // The API loop blocks waiting for commands from HTTP clients.
+    while (running_ && api_->is_running())
+    {
+      if (!api_->wait_for_command())
+      {
+        break;
+      }
+
+      if (api_->has_pending_reset())
+      {
+        api_->consume_pending_reset();
+        reset_game();
+        update_api_state();
+        api_->signal_reset_complete();
+        continue;
+      }
+
+      if (api_->has_pending_step())
+      {
+        const int ticks = api_->consume_pending_step();
+        auto inputs = api_->consume_pending_inputs();
+
+        // Inject queued key events into the script runtime.
+#ifndef HADES_PLATFORM_WEB
+        for (const auto &input : inputs)
+        {
+          if (input.down)
+          {
+            scriptRuntime_.on_key_down(input.keyCode);
+          }
+          else
+          {
+            scriptRuntime_.on_key_up(input.keyCode);
+          }
+
+          if (scriptRuntime_.faulted())
+          {
+            std::fprintf(stderr, "Script error: %s\n", scriptRuntime_.last_error().c_str());
+            running_ = false;
+            break;
+          }
+        }
+#endif
+
+        // Advance the simulation by the requested number of ticks.
+        constexpr float fixedDt = 1.0f / 60.0f;
+        for (int i = 0; i < ticks && running_; ++i)
+        {
+          tick_frame(fixedDt);
+
+          // Also pump SDL events so the OS doesn't think we're hung.
+          SDL_Event event;
+          while (SDL_PollEvent(&event))
+          {
+            if (event.type == SDL_QUIT)
+            {
+              running_ = false;
+            }
+          }
+
+          if (renderer_)
+          {
+            renderer_->render_frame(window_.get());
+            renderer_->present_frame();
+          }
+        }
+
+        update_api_state();
+        api_->signal_step_complete();
+      }
+    }
+
+    api_->stop();
+  }
+#endif // HADES_ENABLE_API
 }

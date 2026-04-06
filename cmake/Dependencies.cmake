@@ -23,6 +23,7 @@ set(HADES_ASSIMP_TAG "v6.0.4" CACHE STRING "Assimp git tag or branch.")
 set(HADES_IMGUI_TEXTEDIT_TAG "master" CACHE STRING "ImGuiColorTextEdit git tag or branch.")
 set(HADES_NLOHMANN_JSON_TAG "v3.11.3" CACHE STRING "nlohmann/json git tag or branch.")
 set(HADES_JOLTPHYSICS_TAG "v5.3.0" CACHE STRING "JoltPhysics git tag or branch.")
+set(HADES_HTTPLIB_TAG "v0.18.3" CACHE STRING "cpp-httplib git tag or branch.")
 
 function(hades_prefer_local_source fetch_name local_dir)
   string(TOUPPER "${fetch_name}" fetch_name_upper)
@@ -55,6 +56,7 @@ function(hades_configure_dependencies)
   hades_prefer_local_source(imgui_color_text_edit "${CMAKE_SOURCE_DIR}/lib/ImGuiColorTextEdit")
   hades_prefer_local_source(nlohmann_json "${CMAKE_SOURCE_DIR}/lib/json")
   hades_prefer_local_source(joltphysics "${CMAKE_SOURCE_DIR}/lib/JoltPhysics")
+  hades_prefer_local_source(httplib "${CMAKE_SOURCE_DIR}/lib/cpp-httplib")
 
   set(CLI11_BUILD_DOCS OFF CACHE BOOL "" FORCE)
   set(CLI11_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -152,12 +154,25 @@ function(hades_configure_dependencies)
     GIT_SHALLOW TRUE
     SOURCE_SUBDIR Build)
 
+  set(HTTPLIB_COMPILE OFF CACHE BOOL "" FORCE)
+  set(HTTPLIB_INSTALL OFF CACHE BOOL "" FORCE)
+  set(HTTPLIB_TEST OFF CACHE BOOL "" FORCE)
+  set(HTTPLIB_REQUIRE_OPENSSL OFF CACHE BOOL "" FORCE)
+  set(HTTPLIB_REQUIRE_ZLIB OFF CACHE BOOL "" FORCE)
+  set(HTTPLIB_USE_OPENSSL_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
+  set(HTTPLIB_USE_ZLIB_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
+  FetchContent_Declare(
+    httplib
+    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
+    GIT_TAG ${HADES_HTTPLIB_TAG}
+    GIT_SHALLOW TRUE)
+
   if(EMSCRIPTEN)
     # Emscripten provides SDL2 as a built-in port (-sUSE_SDL=2).
     # Skip SDL2 FetchContent and GoogleTest/CLI11 (not needed for web runtime).
     FetchContent_MakeAvailable(miniaudio assimp nlohmann_json joltphysics)
   else()
-    FetchContent_MakeAvailable(cli11 googletest miniaudio sdl2 assimp imgui_color_text_edit nlohmann_json joltphysics)
+    FetchContent_MakeAvailable(cli11 googletest miniaudio sdl2 assimp imgui_color_text_edit nlohmann_json joltphysics httplib)
   endif()
 
   FetchContent_GetProperties(imgui)

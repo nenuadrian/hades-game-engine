@@ -750,7 +750,15 @@ namespace hades
 
       if (event == EDITOR_QUIT)
       {
-        request_quit();
+        if (workspaceManager.has_current_workspace())
+        {
+          reset_workspace_session();
+          workspaceManager.close_current_workspace();
+        }
+        else
+        {
+          request_quit();
+        }
       }
     }
   }
@@ -1359,7 +1367,16 @@ namespace hades
         {
           if (event.window.windowID == editorWindowId)
           {
-            running = false;
+            if (workspaceManager.has_current_workspace())
+            {
+              reset_workspace_session();
+              workspaceManager.close_current_workspace();
+              closedAuxiliaryWindowThisFrame = true;
+            }
+            else
+            {
+              running = false;
+            }
           }
           else if (scriptEditorWindowId.has_value() &&
                    event.window.windowID == *scriptEditorWindowId)

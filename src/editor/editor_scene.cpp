@@ -2230,11 +2230,6 @@ namespace hades
                                        ? state.loadedWorld
                                        : normalize_default_world(entityManager, componentManager));
 
-    if (!state.playModeMessage.empty())
-    {
-      ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "%s", state.playModeMessage.c_str());
-    }
-
     if (!sceneWorld.has_value())
     {
       ImGui::End();

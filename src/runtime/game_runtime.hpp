@@ -6,12 +6,17 @@
 #include <memory>
 #include <string>
 
+#include <nlohmann/json.hpp>
+
 #include "engine/core/ecs/component_manager.hpp"
 #include "engine/core/ecs/entity_manager.hpp"
 #include "engine/core/ecs/system_manager.hpp"
 #include "engine/core/events/event_bus.hpp"
 #ifndef HADES_PLATFORM_WEB
 #include "engine/runtime/script_runtime.hpp"
+#endif
+#ifdef HADES_ENABLE_API
+#include "engine/api/hades_api.hpp"
 #endif
 
 struct SDL_Window;
@@ -31,9 +36,10 @@ namespace hades
     GameRuntime();
     ~GameRuntime();
 
-    bool init(const std::filesystem::path &projectPath, bool headless = false);
+    bool init(const std::filesystem::path &projectPath, bool headless = false, bool apiMode = false, int apiPort = 7777);
     int run();
     void render_frame();
+    void tick_frame(float deltaTime);
     bool is_running() const { return running_; }
 
   private:
@@ -71,9 +77,20 @@ namespace hades
     std::shared_ptr<PhysicsSystem> physicsSystem_;
     std::shared_ptr<RenderSystem> renderSystem_;
     bool headless_ = false;
+    bool apiMode_ = false;
     bool initialized_ = false;
     bool running_ = false;
     std::optional<Entity::EntityId> activeWorld_;
+#ifdef HADES_ENABLE_API
+    std::unique_ptr<HadesAPI> api_;
+    int apiPort_ = 7777;
+    nlohmann::json initialWorldSnapshot_;
+
+    void run_api_loop();
+    std::string collect_entity_state_json();
+    void update_api_state();
+    void reset_game();
+#endif
 
     std::string project_name() const;
   };
