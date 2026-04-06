@@ -30,6 +30,8 @@ theme:
 nav:
   - Home: index.md
   - Scripting: scripting.md
+  - API: api.md
+  - Metrics: metrics.md
   - Architecture:
     - Overview: architecture.md
     - Class Relationships: generated/class-relationships.md

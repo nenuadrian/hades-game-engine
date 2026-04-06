@@ -27,6 +27,8 @@ ROOT_DOC_TARGETS = {
     "README.md": "index.md",
     "SCRIPTING.md": "scripting.md",
     "SCRIPTS.md": "scripting.md",
+    "API.md": "api.md",
+    "METRICS.md": "metrics.md",
 }
 
 MARKDOWN_LINK_RE = re.compile(r"(!?\[[^\]]*\]\()([^)]+)(\))")
@@ -160,3 +162,5 @@ def on_pre_build(config, **kwargs):  # noqa: ANN001
         strip_heading="## table of contents",
     )
     _generate_doc("SCRIPTING.md", "scripting.md")
+    _generate_doc("API.md", "api.md")
+    _generate_doc("METRICS.md", "metrics.md")
