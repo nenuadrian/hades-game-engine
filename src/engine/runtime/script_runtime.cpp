@@ -675,7 +675,7 @@ namespace Hades.Scripting
                 SetError(ref result, ex.Message);
             }
         }
-      ") + R"(
+      )") + R"(
 
         [UnmanagedCallersOnly]
         public static unsafe void UpdateFrame(
