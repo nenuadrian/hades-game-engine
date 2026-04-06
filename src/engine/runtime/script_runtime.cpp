@@ -378,7 +378,7 @@ namespace hades
 
     std::string render_host_runtime_source()
     {
-      return R"(using System;
+      return std::string(R"(using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -675,6 +675,7 @@ namespace Hades.Scripting
                 SetError(ref result, ex.Message);
             }
         }
+      ") + R"(
 
         [UnmanagedCallersOnly]
         public static unsafe void UpdateFrame(
