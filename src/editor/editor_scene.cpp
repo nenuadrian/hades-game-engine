@@ -2866,6 +2866,10 @@ namespace hades
       {
         selectedSettingsCategory_ = SettingsCategory::Editor;
       }
+      if (ImGui::Selectable("Game Preview", selectedSettingsCategory_ == SettingsCategory::GamePreview))
+      {
+        selectedSettingsCategory_ = SettingsCategory::GamePreview;
+      }
       if (ImGui::Selectable("Plugins", selectedSettingsCategory_ == SettingsCategory::Plugins))
       {
         selectedSettingsCategory_ = SettingsCategory::Plugins;
@@ -2911,6 +2915,22 @@ namespace hades
         {
           reset_scene_camera();
         }
+      }
+      else if (selectedSettingsCategory_ == SettingsCategory::GamePreview)
+      {
+        ImGui::TextDisabled("Game Preview");
+        ImGui::Separator();
+
+#ifdef HADES_ENABLE_API
+        ImGui::Checkbox("Enable HadesAPI while playing", &gamePreviewEnableHadesAPI_);
+        ImGui::TextDisabled("When enabled, clicking Play starts the preview with HadesAPI on port 7777.");
+#else
+        bool disabledToggle = false;
+        ImGui::BeginDisabled();
+        ImGui::Checkbox("Enable HadesAPI while playing", &disabledToggle);
+        ImGui::EndDisabled();
+        ImGui::TextDisabled("This editor build does not include HadesAPI support.");
+#endif
       }
       else
       {

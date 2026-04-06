@@ -18,6 +18,13 @@
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
 #include "imgui_impl_sdl2.h"
+#ifdef HADES_ENABLE_API
+#include "../engine/api/hades_api.hpp"
+#include "../engine/components/name_component.hpp"
+#include "../engine/components/position_component_3d.hpp"
+#include "../engine/core/ecs/query.hpp"
+#include <nlohmann/json.hpp>
+#endif
 #include "../engine/assets/asset_manager.hpp"
 #include "../engine/core/ecs/scene_serializer.hpp"
 #include "../engine/audio/audio_engine.hpp"
@@ -1129,6 +1136,9 @@ namespace hades
   void WindowManager::reset_workspace_session()
   {
     scriptRuntime.stop();
+#ifdef HADES_ENABLE_API
+    stop_preview_api();
+#endif
     if (audio_engine != nullptr)
     {
       audio_engine->stop_all();
@@ -1172,6 +1182,9 @@ namespace hades
       physicsSystem->set_active_world(std::nullopt);
       physicsSystem->clear_bodies();
     }
+#ifdef HADES_ENABLE_API
+    stop_preview_api();
+#endif
   }
 
   void WindowManager::sync_play_window()
@@ -1225,6 +1238,78 @@ namespace hades
 
     scriptEditorWindow.render(editor, entityManager, componentManager);
   }
+
+#ifdef HADES_ENABLE_API
+  void WindowManager::start_preview_api_if_needed()
+  {
+    if (!editor.game_preview_hades_api_enabled())
+    {
+      stop_preview_api();
+      return;
+    }
+
+    if (previewApi_ && previewApi_->is_running())
+    {
+      return;
+    }
+
+    previewApi_ = std::make_unique<HadesAPI>();
+    HadesAPI::Config config;
+    config.port = 7777;
+    if (!previewApi_->start(config))
+    {
+      previewApi_.reset();
+      editor.log_error("Game Preview HadesAPI failed to start.");
+      return;
+    }
+
+    previewApi_->set_game_over(false);
+    previewApi_->set_observed_state(scriptRuntime.collect_observations());
+    previewApi_->set_entity_state(collect_preview_entity_state_json());
+    editor.log_info("Game Preview HadesAPI is listening on http://localhost:7777");
+  }
+
+  void WindowManager::stop_preview_api()
+  {
+    if (previewApi_)
+    {
+      previewApi_->set_game_over(true);
+      previewApi_->stop();
+      previewApi_.reset();
+    }
+  }
+
+  std::string WindowManager::collect_preview_entity_state_json()
+  {
+    if (!editor.state.activeWorld.has_value())
+    {
+      return "[]";
+    }
+
+    const auto entities = query<PositionComponent3D>(entityManager, componentManager, editor.state.activeWorld);
+    nlohmann::json response = nlohmann::json::array();
+
+    for (const auto entityId : entities)
+    {
+      nlohmann::json row;
+      row["id"] = entityId;
+      if (componentManager.hasComponent<NameComponent>(entityId))
+      {
+        row["name"] = componentManager.getComponent<NameComponent>(entityId).value;
+      }
+
+      const auto &position = componentManager.getComponent<PositionComponent3D>(entityId);
+      row["position"] = {
+          {"x", position.x},
+          {"y", position.y},
+          {"z", position.z},
+      };
+      response.push_back(std::move(row));
+    }
+
+    return response.dump();
+  }
+#endif
 
   void WindowManager::update_window_title()
   {
@@ -1445,6 +1530,40 @@ namespace hades
       }
       if (editor.state.isPlaying)
       {
+#ifdef HADES_ENABLE_API
+        start_preview_api_if_needed();
+#endif
+        int requestedApiTicks = 0;
+        bool requestedApiReset = false;
+
+#ifdef HADES_ENABLE_API
+        if (previewApi_ && previewApi_->is_running())
+        {
+          const auto pendingInputs = previewApi_->consume_pending_inputs();
+          for (const auto &input : pendingInputs)
+          {
+            if (input.down)
+            {
+              scriptRuntime.on_key_down(input.keyCode);
+            }
+            else
+            {
+              scriptRuntime.on_key_up(input.keyCode);
+            }
+          }
+
+          if (previewApi_->has_pending_step())
+          {
+            requestedApiTicks = previewApi_->consume_pending_step();
+          }
+          if (previewApi_->has_pending_reset())
+          {
+            previewApi_->consume_pending_reset();
+            requestedApiReset = true;
+          }
+        }
+#endif
+
         {
           HADES_FRAME_METRIC_SCOPE("script_update");
           scriptRuntime.update(io.DeltaTime, componentManager, entityManager);
@@ -1459,12 +1578,57 @@ namespace hades
           eventBus.dispatch();
           SystemContext context{componentManager, entityManager, eventBus};
           systemManager.updateSystems(io.DeltaTime, context);
+
+#ifdef HADES_ENABLE_API
+          if (requestedApiTicks > 1)
+          {
+            constexpr int API_MAX_EXTRA_TICKS = 240;
+            const int extraTicks = std::min(requestedApiTicks - 1, API_MAX_EXTRA_TICKS);
+            constexpr float API_FIXED_DT = 1.0f / 60.0f;
+            for (int i = 0; i < extraTicks; ++i)
+            {
+              scriptRuntime.update(API_FIXED_DT, componentManager, entityManager);
+              if (scriptRuntime.faulted())
+              {
+                stop_active_play_mode(scriptRuntime.last_error());
+                break;
+              }
+
+              eventBus.dispatch();
+              SystemContext extraContext{componentManager, entityManager, eventBus};
+              systemManager.updateSystems(API_FIXED_DT, extraContext);
+            }
+          }
+
+          if (previewApi_ && previewApi_->is_running())
+          {
+            previewApi_->set_observed_state(scriptRuntime.collect_observations());
+            previewApi_->set_entity_state(collect_preview_entity_state_json());
+            previewApi_->set_game_over(false);
+
+            if (requestedApiTicks > 0)
+            {
+              previewApi_->signal_step_complete();
+            }
+            if (requestedApiReset)
+            {
+              previewApi_->signal_reset_complete();
+            }
+          }
+#endif
         }
       }
       else if (wasPlayingLastFrame && audio_engine != nullptr)
       {
         audio_engine->stop_all();
       }
+
+#ifdef HADES_ENABLE_API
+      if (!editor.state.isPlaying)
+      {
+        stop_preview_api();
+      }
+#endif
 
       wasPlayingLastFrame = editor.state.isPlaying;
       process_editor_events();

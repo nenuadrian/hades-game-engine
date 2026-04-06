@@ -133,6 +133,7 @@ namespace hades
     currentCompileRequestId_ = 0;
     nextCompileRequestId_ = 0;
     selectedSettingsCategory_ = SettingsCategory::Editor;
+    gamePreviewEnableHadesAPI_ = false;
     mainDebugConsole_.clear();
     scriptEditorDebugConsole_.clear();
     openDebugConsoleWindow_ = false;
@@ -197,6 +198,11 @@ namespace hades
   void Editor::log_error(const std::string &text)
   {
     log_message(DebugMessageLevel::Error, text);
+  }
+
+  bool Editor::game_preview_hades_api_enabled() const
+  {
+    return gamePreviewEnableHadesAPI_;
   }
 
   bool Editor::load_workspace_settings(const std::filesystem::path &workspacePath, std::string *errorMessage)
@@ -703,6 +709,7 @@ namespace hades
     settings.exportLinux = to_workspace_export(exportPlatformSettings_[export_platform_index(ExportPlatform::Linux)]);
     settings.exportWindows = to_workspace_export(exportPlatformSettings_[export_platform_index(ExportPlatform::Windows)]);
     settings.exportWeb = to_workspace_export(exportPlatformSettings_[export_platform_index(ExportPlatform::Web)]);
+    settings.gamePreview.enableHadesAPI = gamePreviewEnableHadesAPI_;
 
     for (const auto &plugin : plugins_)
     {
@@ -747,6 +754,7 @@ namespace hades
     from_workspace_export(settings.exportLinux, exportPlatformSettings_[export_platform_index(ExportPlatform::Linux)]);
     from_workspace_export(settings.exportWindows, exportPlatformSettings_[export_platform_index(ExportPlatform::Windows)]);
     from_workspace_export(settings.exportWeb, exportPlatformSettings_[export_platform_index(ExportPlatform::Web)]);
+    gamePreviewEnableHadesAPI_ = settings.gamePreview.enableHadesAPI;
 
     // Export build output is runtime-only; never keep it across workspace restore.
     exportBuildInProgress_ = false;

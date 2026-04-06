@@ -182,6 +182,12 @@ namespace hades
           read_export_settings(exportSettings["web"], settings.exportWeb);
         }
       }
+
+      if (document.contains("gamePreview") && document["gamePreview"].is_object())
+      {
+        const json &gamePreview = document["gamePreview"];
+        read_optional_bool(gamePreview, "enableHadesAPI", settings.gamePreview.enableHadesAPI);
+      }
     }
     catch (const std::exception &exception)
     {
@@ -241,6 +247,9 @@ namespace hades
         {"linux", write_export_settings(settings.exportLinux)},
         {"windows", write_export_settings(settings.exportWindows)},
         {"web", write_export_settings(settings.exportWeb)},
+    };
+    document["gamePreview"] = {
+      {"enableHadesAPI", settings.gamePreview.enableHadesAPI},
     };
 
     std::ofstream output(settingsPath, std::ios::trunc);

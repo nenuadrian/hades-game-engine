@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -29,6 +30,9 @@ namespace hades
   class PhysicsWorld;
   class Renderer;
   class RenderSystem;
+#ifdef HADES_ENABLE_API
+  class HadesAPI;
+#endif
 
   class WindowManager
   {
@@ -118,6 +122,9 @@ namespace hades
     bool initialized = false;
     bool running = false;
     bool wasPlayingLastFrame = false;
+  #ifdef HADES_ENABLE_API
+    std::unique_ptr<HadesAPI> previewApi_;
+  #endif
     bool creatingWorkspace = false;
     std::string workspaceStatusMessage;
     std::array<char, 1024> createWorkspaceParentBuffer{};
@@ -138,6 +145,11 @@ namespace hades
     void stop_active_play_mode(const std::string &message = std::string());
     void sync_play_window();
     void sync_script_editor_window();
+  #ifdef HADES_ENABLE_API
+    void start_preview_api_if_needed();
+    void stop_preview_api();
+    std::string collect_preview_entity_state_json();
+  #endif
     void update_window_title();
     bool init();
     void render_frame();

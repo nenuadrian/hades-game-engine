@@ -15,6 +15,11 @@ namespace hades
     bool enableHadesAPI = false;
   };
 
+  struct WorkspaceGamePreviewSettings
+  {
+    bool enableHadesAPI = false;
+  };
+
   struct WorkspaceEditorSettings
   {
     bool showDebugInfo = false;
@@ -30,6 +35,7 @@ namespace hades
     WorkspaceExportSettings exportLinux;
     WorkspaceExportSettings exportWindows;
     WorkspaceExportSettings exportWeb;
+    WorkspaceGamePreviewSettings gamePreview;
   };
 
   std::filesystem::path workspace_settings_path(const std::filesystem::path &workspacePath);

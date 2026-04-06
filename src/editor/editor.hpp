@@ -49,6 +49,7 @@ namespace hades
     enum class SettingsCategory
     {
       Editor,
+      GamePreview,
       Plugins,
     };
 
@@ -110,6 +111,7 @@ namespace hades
     void log_info(const std::string &text);
     void log_warning(const std::string &text);
     void log_error(const std::string &text);
+    bool game_preview_hades_api_enabled() const;
     bool load_workspace_settings(const std::filesystem::path &workspacePath, std::string *errorMessage = nullptr);
     bool save_workspace_settings(const std::filesystem::path &workspacePath, std::string *errorMessage = nullptr) const;
     void stop_play_mode(EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime);
@@ -186,6 +188,7 @@ namespace hades
     bool openSettingsWindow_ = false;
     bool focusSettingsWindow_ = false;
     SettingsCategory selectedSettingsCategory_ = SettingsCategory::Editor;
+    bool gamePreviewEnableHadesAPI_ = false;
     bool openDebugConsoleWindow_ = false;
     bool focusDebugConsoleWindow_ = false;
     DebugConsolePanel mainDebugConsole_{500};
