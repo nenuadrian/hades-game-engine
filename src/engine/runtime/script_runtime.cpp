@@ -1,7 +1,6 @@
 #include "script_runtime.hpp"
 
 #include <algorithm>
-#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -201,6 +200,23 @@ namespace hades
       }
 
       return "dotnet";
+    }
+
+    std::filesystem::path resolve_script_build_root(const std::filesystem::path &workspaceRoot)
+    {
+      if (workspaceRoot.empty())
+      {
+        return std::filesystem::temp_directory_path();
+      }
+
+      std::error_code absoluteError;
+      const std::filesystem::path absoluteWorkspacePath = std::filesystem::absolute(workspaceRoot, absoluteError);
+      if (absoluteError)
+      {
+        return workspaceRoot.lexically_normal() / ".hades";
+      }
+
+      return absoluteWorkspacePath.lexically_normal() / ".hades";
     }
 
     bool write_text_file(
@@ -952,6 +968,7 @@ namespace Hades.Scripting
 
     bool prepare_build(
         const std::vector<std::filesystem::path> &sourceFiles,
+        const std::filesystem::path &workspaceRoot,
         BuildArtifacts &artifacts,
         std::string *errorMessage)
     {
@@ -992,12 +1009,9 @@ namespace Hades.Scripting
         return false;
       }
 
-      static std::atomic<std::uint64_t> buildCounter{0};
-      const std::uint64_t uniqueId = ++buildCounter;
-
       artifacts.targetFramework = "net" + std::to_string(*majorVersion) + ".0";
       artifacts.workingDirectory =
-          std::filesystem::temp_directory_path() / ("hades-script-host-" + std::to_string(uniqueId));
+          resolve_script_build_root(workspaceRoot) / "script-host" / "current";
       artifacts.outputDirectory = artifacts.workingDirectory / "out";
       artifacts.projectPath = artifacts.workingDirectory / "HadesScriptHost.csproj";
       artifacts.hostPath = artifacts.outputDirectory / HOST_ASSEMBLY_NAME;
@@ -1168,7 +1182,7 @@ namespace Hades.Scripting
       return true;
     }
 
-    if (!prepare_build(sourceFiles, impl_->buildArtifacts, &localError))
+    if (!prepare_build(sourceFiles, workspaceRoot, impl_->buildArtifacts, &localError))
     {
       impl_->lastError = localError;
       impl_->faulted = true;
@@ -1516,6 +1530,6 @@ namespace Hades.Scripting
     }
 
     BuildArtifacts artifacts;
-    return prepare_build(sourceFiles, artifacts, errorMessage);
+    return prepare_build(sourceFiles, std::filesystem::path(), artifacts, errorMessage);
   }
 }

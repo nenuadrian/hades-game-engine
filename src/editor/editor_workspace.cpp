@@ -146,6 +146,7 @@ namespace hades
       }
 
       if (component == ".git" ||
+          component == ".hades" ||
           component == ".vs" ||
           component == ".idea" ||
           component == ".vscode" ||
