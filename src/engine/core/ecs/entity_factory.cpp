@@ -47,6 +47,7 @@ namespace hades
     CameraComponent camera;
     camera.isMainCamera = !has_existing_camera(entityManager, componentManager, world);
     componentManager.addComponent(entity, camera);
+    componentManager.addComponent(entity, RotationComponent3D());
     componentManager.addComponent(entity, AudioListenerComponent());
     return entity;
   }

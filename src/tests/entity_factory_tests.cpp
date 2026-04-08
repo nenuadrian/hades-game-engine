@@ -13,6 +13,7 @@
 #include "../engine/components/name_component.hpp"
 #include "../engine/components/position_component_3d.hpp"
 #include "../engine/components/primitive_component.hpp"
+#include "../engine/components/rotation_component_3d.hpp"
 #include "../engine/components/text_component.hpp"
 #include "../engine/components/transform_hierarchy_component.hpp"
 #include "../engine/components/world_component.hpp"
@@ -46,6 +47,12 @@ namespace hades
     EXPECT_FLOAT_EQ(camera.fovY, 60.0f);
     EXPECT_FLOAT_EQ(camera.nearClip, 0.1f);
     EXPECT_FLOAT_EQ(camera.farClip, 1000.0f);
+    EXPECT_TRUE(componentManager.hasComponent<RotationComponent3D>(entity));
+    const auto &rotation = componentManager.getComponent<RotationComponent3D>(entity);
+    EXPECT_FLOAT_EQ(rotation.qx, 0.0f);
+    EXPECT_FLOAT_EQ(rotation.qy, 0.0f);
+    EXPECT_FLOAT_EQ(rotation.qz, 0.0f);
+    EXPECT_FLOAT_EQ(rotation.qw, 1.0f);
     EXPECT_TRUE(componentManager.hasComponent<AudioListenerComponent>(entity));
     EXPECT_FALSE(componentManager.hasComponent<PrimitiveComponent>(entity));
     EXPECT_FALSE(componentManager.hasComponent<AudioSourceComponent>(entity));
