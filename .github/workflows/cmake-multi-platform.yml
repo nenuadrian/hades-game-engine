@@ -112,3 +112,95 @@ jobs:
       - name: Test
         working-directory: ${{ steps.strings.outputs.build-output-dir }}
         run: ctest --build-config ${{ matrix.build_type }}
+
+      - name: Verify runtime export (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          BUILD_DIR="${{ steps.strings.outputs.build-output-dir }}"
+          RUNTIME="$BUILD_DIR/HadesRuntime"
+          if [ ! -f "$RUNTIME" ]; then
+            echo "ERROR: HadesRuntime binary not found at $RUNTIME"
+            exit 1
+          fi
+
+          TEST_PROJECT="${{ github.workspace }}/tests/fixtures/export-test-project"
+          EXPORT_DIR="$(mktemp -d)/ExportTest"
+          mkdir -p "$EXPORT_DIR"
+
+          # Package: copy binary, project data, and engine assets.
+          cp "$RUNTIME" "$EXPORT_DIR/"
+          chmod +x "$EXPORT_DIR/HadesRuntime"
+          cp -r "$TEST_PROJECT/.hades" "$EXPORT_DIR/.hades"
+          cp -r "${{ github.workspace }}/assets" "$EXPORT_DIR/assets"
+
+          # Verify the packaging structure.
+          test -f "$EXPORT_DIR/HadesRuntime"
+          test -f "$EXPORT_DIR/.hades/worlds/TestWorld.json"
+          test -d "$EXPORT_DIR/assets"
+          echo "Packaging structure OK"
+
+          # Launch in headless mode with a timeout. The runtime enters an
+          # infinite loop, so timeout (exit 124) is the expected outcome.
+          # Any other non-zero exit code indicates a crash.
+          set +e
+          timeout 5 "$EXPORT_DIR/HadesRuntime" --project "$EXPORT_DIR" --headless
+          EXIT_CODE=$?
+          set -e
+
+          if [ "$EXIT_CODE" -ne 0 ] && [ "$EXIT_CODE" -ne 124 ]; then
+            echo "ERROR: Runtime crashed with exit code $EXIT_CODE"
+            exit 1
+          fi
+          echo "Runtime export verification passed"
+
+      - name: Verify runtime export (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $buildDir = "${{ steps.strings.outputs.build-output-dir }}"
+          $runtime = Join-Path $buildDir "Release" "HadesRuntime.exe"
+          if (-not (Test-Path $runtime)) {
+            $runtime = Join-Path $buildDir "HadesRuntime.exe"
+          }
+          if (-not (Test-Path $runtime)) {
+            Write-Error "HadesRuntime.exe not found"
+            exit 1
+          }
+
+          $testProject = Join-Path "${{ github.workspace }}" "tests" "fixtures" "export-test-project"
+          $exportDir = Join-Path $env:RUNNER_TEMP "ExportTest"
+          New-Item -ItemType Directory -Path $exportDir -Force | Out-Null
+
+          # Package: copy binary, project data, and engine assets.
+          Copy-Item $runtime -Destination $exportDir
+          Copy-Item (Join-Path $testProject ".hades") -Destination (Join-Path $exportDir ".hades") -Recurse
+          Copy-Item (Join-Path "${{ github.workspace }}" "assets") -Destination (Join-Path $exportDir "assets") -Recurse
+
+          # Copy any DLLs from the build output alongside the binary.
+          $dllDir = Join-Path $buildDir "Release"
+          if (Test-Path $dllDir) {
+            Get-ChildItem -Path $dllDir -Filter "*.dll" | ForEach-Object {
+              Copy-Item $_.FullName -Destination $exportDir
+            }
+          }
+
+          # Verify packaging structure.
+          if (-not (Test-Path (Join-Path $exportDir "HadesRuntime.exe"))) { exit 1 }
+          if (-not (Test-Path (Join-Path $exportDir ".hades" "worlds" "TestWorld.json"))) { exit 1 }
+          if (-not (Test-Path (Join-Path $exportDir "assets"))) { exit 1 }
+          Write-Host "Packaging structure OK"
+
+          # Launch headless with a 5-second timeout.
+          $proc = Start-Process -FilePath (Join-Path $exportDir "HadesRuntime.exe") `
+            -ArgumentList "--project", $exportDir, "--headless" `
+            -PassThru -NoNewWindow
+          $exited = $proc.WaitForExit(5000)
+          if (-not $exited) {
+            Stop-Process -Id $proc.Id -Force
+            Write-Host "Runtime started successfully (stopped after 5s timeout)"
+          } elseif ($proc.ExitCode -ne 0) {
+            Write-Error "Runtime crashed with exit code $($proc.ExitCode)"
+            exit 1
+          }
+          Write-Host "Runtime export verification passed"

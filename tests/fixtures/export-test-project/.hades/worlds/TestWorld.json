@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "entities": [
+    {
+      "id": 1,
+      "components": {
+        "name": { "value": "TestWorld" },
+        "world": { "isDefault": true },
+        "hierarchy": { "parent": null, "children": [2, 3, 4] }
+      }
+    },
+    {
+      "id": 2,
+      "components": {
+        "name": { "value": "Main Camera" },
+        "position3d": { "x": 0.0, "y": 2.0, "z": -5.0 },
+        "camera": { "isMainCamera": true, "fovY": 60.0, "nearClip": 0.1, "farClip": 1000.0 },
+        "hierarchy": { "parent": 1, "children": [] }
+      }
+    },
+    {
+      "id": 3,
+      "components": {
+        "name": { "value": "Cube A" },
+        "position3d": { "x": -1.5, "y": 0.0, "z": 0.0 },
+        "primitive": { "type": 0 },
+        "hierarchy": { "parent": 1, "children": [] }
+      }
+    },
+    {
+      "id": 4,
+      "components": {
+        "name": { "value": "Cube B" },
+        "position3d": { "x": 1.5, "y": 0.0, "z": 0.0 },
+        "primitive": { "type": 0 },
+        "script": {
+          "attachments": [
+            {
+              "scriptPath": "scripts/Spinner.cs",
+              "className": "Spinner",
+              "enabled": true,
+              "publicFieldValues": {}
+            }
+          ]
+        },
+        "hierarchy": { "parent": 1, "children": [] }
+      }
+    }
+  ]
+}
