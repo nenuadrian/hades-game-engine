@@ -365,6 +365,8 @@ namespace hades
     const bool nodeOpen = ImGui::TreeNodeEx(("##ws" + node.path.string()).c_str(), flags);
     ImGui::PopStyleColor();
 
+    const bool treeNodeHovered = ImGui::IsItemHovered(ImGuiHoveredFlags_None);
+
     ImGui::SameLine();
     ImGui::PushStyleColor(ImGuiCol_Text, fileVisual.iconColor);
     ImGui::TextUnformatted(fileVisual.icon);
@@ -406,7 +408,7 @@ namespace hades
       ImGui::TextUnformatted(label.c_str());
     }
 
-    if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen())
+    if (!isRenaming && treeNodeHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
     {
       if (!node.directory && node.path.extension() == ".cs")
       {

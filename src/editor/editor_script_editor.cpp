@@ -458,6 +458,10 @@ namespace hades
     pendingScriptEditorTabSelectionIndex_ = index;
     openScriptEditorWindow_ = true;
     focusScriptEditorWindow_ = true;
+    scriptEditorShowCodePanel_ = true;
+    scriptEditorShowFileTreePanel_ = true;
+    scriptEditorShowDebugPanel_ = true;
+    scriptEditorShowEntitiesPanel_ = true;
   }
 
   void Editor::close_script_editor_tab(std::size_t index)
