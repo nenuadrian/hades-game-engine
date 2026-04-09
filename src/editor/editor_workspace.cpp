@@ -13,6 +13,7 @@
 #include "imgui.h"
 #include "../engine/core/ecs/component_manager.hpp"
 #include "../engine/core/ecs/entity_manager.hpp"
+#include "../engine/core/ecs/scene_serializer.hpp"
 
 namespace hades
 {
