@@ -508,14 +508,25 @@ namespace hades
         const PositionComponent3D &position,
         float depth,
         float halfWidth,
-        float halfHeight)
+        float halfHeight,
+        const RotationComponent3D *rotation = nullptr)
     {
-      return {
-          make_vec3(position.x - halfWidth, position.y + halfHeight, position.z + depth),
-          make_vec3(position.x + halfWidth, position.y + halfHeight, position.z + depth),
-          make_vec3(position.x + halfWidth, position.y - halfHeight, position.z + depth),
-          make_vec3(position.x - halfWidth, position.y - halfHeight, position.z + depth),
+      std::array<Vec3, 4> corners = {
+          make_vec3(-halfWidth, +halfHeight, depth),
+          make_vec3(+halfWidth, +halfHeight, depth),
+          make_vec3(+halfWidth, -halfHeight, depth),
+          make_vec3(-halfWidth, -halfHeight, depth),
       };
+      const Vec3 pos = make_vec3(position.x, position.y, position.z);
+      for (auto &corner : corners)
+      {
+        if (rotation != nullptr)
+        {
+          corner = rotate_vec3_by_quaternion(corner, *rotation);
+        }
+        corner = add_vec3(pos, corner);
+      }
+      return corners;
     }
 
     hades::preview::Vec3 to_preview_vec3(const Vec3 &value)
@@ -741,7 +752,8 @@ namespace hades
         const PositionComponent3D &position,
         const CameraComponent &camera,
         ImU32 lineColor,
-        float thickness)
+        float thickness,
+        const RotationComponent3D *rotation = nullptr)
     {
       if (canvasSize.x <= 0.0f || canvasSize.y <= 0.0f ||
           camera.fovY <= 0.0f ||
@@ -770,8 +782,8 @@ namespace hades
       const float farHalfHeight = tanHalfFov * farDepth;
       const float farHalfWidth = farHalfHeight * aspectRatio;
 
-      const auto nearCorners = frustum_plane_corners(position, camera.nearClip, nearHalfWidth, nearHalfHeight);
-      const auto farCorners = frustum_plane_corners(position, farDepth, farHalfWidth, farHalfHeight);
+      const auto nearCorners = frustum_plane_corners(position, camera.nearClip, nearHalfWidth, nearHalfHeight, rotation);
+      const auto farCorners = frustum_plane_corners(position, farDepth, farHalfWidth, farHalfHeight, rotation);
 
       int drawnSegmentCount = 0;
       for (std::size_t index = 0; index < nearCorners.size(); ++index)
@@ -1540,8 +1552,8 @@ namespace hades
               const float nearHalfWidth = nearHalfHeight * aspectRatio;
               const float farHalfHeight = tanHalfFov * previewDepth;
               const float farHalfWidth = farHalfHeight * aspectRatio;
-              const auto nearCorners = frustum_plane_corners(position, entityCamera.nearClip, nearHalfWidth, nearHalfHeight);
-              const auto farCorners = frustum_plane_corners(position, previewDepth, farHalfWidth, farHalfHeight);
+              const auto nearCorners = frustum_plane_corners(position, entityCamera.nearClip, nearHalfWidth, nearHalfHeight, pickRotation);
+              const auto farCorners = frustum_plane_corners(position, previewDepth, farHalfWidth, farHalfHeight, pickRotation);
 
               for (std::size_t index = 0; index < nearCorners.size(); ++index)
               {
@@ -1957,6 +1969,9 @@ namespace hades
         }
 
         const auto &position = componentManager.getComponent<PositionComponent3D>(entity);
+        const RotationComponent3D *rotation = componentManager.hasComponent<RotationComponent3D>(entity)
+                                                  ? &componentManager.getComponent<RotationComponent3D>(entity)
+                                                  : nullptr;
         const bool isSelected = selectedEntity.has_value() && *selectedEntity == entity;
         const ImU32 selectedColor = IM_COL32(255, 205, 107, 255);
         const ImU32 selectedLabelColor = IM_COL32(255, 235, 186, 255);
@@ -1974,7 +1989,8 @@ namespace hades
                   position,
                   entityCamera,
                   isSelected ? selectedColor : IM_COL32(255, 165, 0, 255),
-                  isSelected ? 2.5f : 1.5f))
+                  isSelected ? 2.5f : 1.5f,
+                  rotation))
           {
             ++visibleRenderableCount;
             previewDrawn = true;
