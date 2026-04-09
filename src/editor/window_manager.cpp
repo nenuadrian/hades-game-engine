@@ -366,7 +366,7 @@ namespace hades
 
     if (SDL_Init(flags) != 0)
     {
-      hades::Log::error("%s", SDL_GetError());
+      Log::error("%s", SDL_GetError());
       return false;
     }
 
@@ -436,7 +436,7 @@ namespace hades
 
     if (!ImGui_ImplSDL2_InitForVulkan(window))
     {
-      hades::Log::error("ImGui_ImplSDL2_InitForVulkan() failed.");
+      Log::error("ImGui_ImplSDL2_InitForVulkan() failed.");
       ImGui::DestroyContext(context_);
       context_ = nullptr;
       return false;
@@ -1375,7 +1375,7 @@ namespace hades
         window_flags));
     if (window == nullptr)
     {
-      hades::Log::error("SDL_CreateWindow(): %s", SDL_GetError());
+      Log::error("SDL_CreateWindow(): %s", SDL_GetError());
       return false;
     }
 
@@ -1393,13 +1393,13 @@ namespace hades
 
     if (!audio_engine->init())
     {
-      hades::Log::warn("audio engine is unavailable. Audio playback has been disabled.");
+      Log::warn("audio engine is unavailable. Audio playback has been disabled.");
       audio_engine.reset();
     }
 
     if (!physics_world->init())
     {
-      hades::Log::warn("physics engine is unavailable. Physics simulation has been disabled.");
+      Log::warn("physics engine is unavailable. Physics simulation has been disabled.");
       physics_world.reset();
     }
 
@@ -1677,7 +1677,7 @@ namespace hades
       std::string errorMessage;
       if (!persist_workspace_state(workspaceManager.current_workspace()->path, &errorMessage))
       {
-        hades::Log::warn("failed to save workspace on shutdown: %s", errorMessage.c_str());
+        Log::warn("failed to save workspace on shutdown: %s", errorMessage.c_str());
       }
     }
 
