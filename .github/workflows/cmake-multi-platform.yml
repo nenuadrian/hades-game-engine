@@ -141,14 +141,24 @@ jobs:
           echo "Packaging structure OK"
 
           # Launch in headless mode with a timeout. The runtime enters an
-          # infinite loop, so timeout (exit 124) is the expected outcome.
-          # Any other non-zero exit code indicates a crash.
+          # infinite loop, so we kill it after 5 seconds.
+          # A clean kill (SIGTERM) is the expected outcome.
+          # Any crash before the timeout indicates a real failure.
           set +e
-          timeout 5 "$EXPORT_DIR/HadesRuntime" --project "$EXPORT_DIR" --headless
-          EXIT_CODE=$?
+          "$EXPORT_DIR/HadesRuntime" --project "$EXPORT_DIR" --headless &
+          PID=$!
+          sleep 5
+          if kill -0 "$PID" 2>/dev/null; then
+            kill "$PID" 2>/dev/null
+            wait "$PID" 2>/dev/null
+            EXIT_CODE=0
+          else
+            wait "$PID" 2>/dev/null
+            EXIT_CODE=$?
+          fi
           set -e
 
-          if [ "$EXIT_CODE" -ne 0 ] && [ "$EXIT_CODE" -ne 124 ]; then
+          if [ "$EXIT_CODE" -ne 0 ]; then
             echo "ERROR: Runtime crashed with exit code $EXIT_CODE"
             exit 1
           fi
@@ -182,6 +192,17 @@ jobs:
           if (Test-Path $dllDir) {
             Get-ChildItem -Path $dllDir -Filter "*.dll" | ForEach-Object {
               Copy-Item $_.FullName -Destination $exportDir
+            }
+          }
+
+          # Copy Vulkan loader DLL from the SDK so the binary can start.
+          if ($env:VULKAN_SDK) {
+            $vulkanDll = Get-ChildItem -Path $env:VULKAN_SDK -Filter "vulkan-1.dll" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($vulkanDll) {
+              Copy-Item $vulkanDll.FullName -Destination $exportDir
+              Write-Host "Copied Vulkan loader from $($vulkanDll.FullName)"
+            } else {
+              Write-Host "Warning: vulkan-1.dll not found in VULKAN_SDK ($env:VULKAN_SDK)"
             }
           }
 

@@ -1,7 +1,8 @@
 #include "audio_engine.hpp"
 
 #include <algorithm>
-#include <cstdio>
+
+#include "../core/log.hpp"
 
 namespace hades
 {
@@ -36,7 +37,7 @@ namespace hades
     const ma_result result = ma_engine_init(&config, &engine);
     if (result != MA_SUCCESS)
     {
-      std::fprintf(stderr, "Warning: failed to initialize miniaudio engine (%d).\n", result);
+      hades::Log::warn("failed to initialize miniaudio engine (%d)", result);
       return false;
     }
 
@@ -233,14 +234,14 @@ namespace hades
       const ma_result initResult = ma_sound_group_init(&engine, 0, parent, group);
       if (initResult != MA_SUCCESS)
       {
-        std::fprintf(stderr, "Warning: failed to initialize %s audio group (%d).\n", name, initResult);
+        hades::Log::warn("failed to initialize %s audio group (%d)", name, initResult);
         return false;
       }
 
       const ma_result startResult = ma_sound_group_start(group);
       if (startResult != MA_SUCCESS)
       {
-        std::fprintf(stderr, "Warning: failed to start %s audio group (%d).\n", name, startResult);
+        hades::Log::warn("failed to start %s audio group (%d)", name, startResult);
         ma_sound_group_uninit(group);
         return false;
       }
@@ -322,9 +323,8 @@ namespace hades
     if (result != MA_SUCCESS)
     {
       managed.failed = true;
-      std::fprintf(
-          stderr,
-          "Warning: failed to load audio asset '%s' for entity %u (%d).\n",
+      hades::Log::warn(
+          "failed to load audio asset '%s' for entity %u (%d)",
           source.assetPath.c_str(),
           entity,
           result);

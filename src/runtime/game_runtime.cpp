@@ -1,6 +1,5 @@
 #include "game_runtime.hpp"
 
-#include <cstdio>
 #include <cstdlib>
 
 #include <SDL.h>
@@ -9,6 +8,7 @@
 #include <emscripten.h>
 #endif
 
+#include "engine/core/log.hpp"
 #include "engine/assets/asset_manager.hpp"
 #include "engine/audio/audio_engine.hpp"
 #include "engine/core/ecs/scene_serializer.hpp"
@@ -74,7 +74,7 @@ namespace hades
 
     if (SDL_Init(flags) != 0)
     {
-      std::fprintf(stderr, "Error: SDL_Init(): %s\n", SDL_GetError());
+      Log::error("SDL_Init(): %s", SDL_GetError());
       return false;
     }
 
@@ -131,7 +131,7 @@ namespace hades
     (void)apiPort;
     if (apiMode)
     {
-      std::fprintf(stderr, "Warning: HadesAPI was requested but the build does not include API support.\n");
+      Log::warn("HadesAPI was requested but the build does not include API support.");
       apiMode_ = false;
     }
 #endif
@@ -166,7 +166,7 @@ namespace hades
           window_flags));
       if (window_ == nullptr)
       {
-        std::fprintf(stderr, "Error: SDL_CreateWindow(): %s\n", SDL_GetError());
+        Log::error("SDL_CreateWindow(): %s", SDL_GetError());
         return false;
       }
 
@@ -186,13 +186,13 @@ namespace hades
 
     if (!audioEngine_->init())
     {
-      std::fprintf(stderr, "Warning: audio engine is unavailable. Audio playback has been disabled.\n");
+      Log::warn("audio engine is unavailable. Audio playback has been disabled.");
       audioEngine_.reset();
     }
 
     if (!physicsWorld_->init())
     {
-      std::fprintf(stderr, "Warning: physics engine is unavailable. Physics simulation has been disabled.\n");
+      Log::warn("physics engine is unavailable. Physics simulation has been disabled.");
       physicsWorld_.reset();
     }
 
@@ -210,7 +210,7 @@ namespace hades
     const auto worlds = load_all_worlds(projectPath_, entityManager_, componentManager_, &loadError);
     if (worlds.empty())
     {
-      std::fprintf(stderr, "Error: failed to load worlds: %s\n", loadError.c_str());
+      Log::error("failed to load worlds: %s", loadError.c_str());
       return false;
     }
 
@@ -226,7 +226,7 @@ namespace hades
     const auto cameraSelection = select_main_camera(entityManager_, componentManager_, activeWorld_);
     if (cameraSelection.status != MainCameraSelectionStatus::Ready)
     {
-      std::fprintf(stderr, "Warning: %s\n", main_camera_selection_message(cameraSelection.status));
+      Log::warn("%s", main_camera_selection_message(cameraSelection.status));
     }
 
     // Set up audio and physics for the active world.
@@ -246,7 +246,7 @@ namespace hades
     {
       if (!scriptError.empty())
       {
-        std::fprintf(stderr, "Warning: script runtime failed to start: %s\n", scriptError.c_str());
+        Log::warn("script runtime failed to start: %s", scriptError.c_str());
       }
     }
 #endif
@@ -276,7 +276,7 @@ namespace hades
         scriptRuntime_.on_key_down(static_cast<int>(event.key.keysym.sym));
         if (scriptRuntime_.faulted())
         {
-          std::fprintf(stderr, "Script error: %s\n", scriptRuntime_.last_error().c_str());
+          Log::error("script: %s", scriptRuntime_.last_error().c_str());
           running_ = false;
         }
       }
@@ -285,7 +285,7 @@ namespace hades
         scriptRuntime_.on_key_up(static_cast<int>(event.key.keysym.sym));
         if (scriptRuntime_.faulted())
         {
-          std::fprintf(stderr, "Script error: %s\n", scriptRuntime_.last_error().c_str());
+          Log::error("script: %s", scriptRuntime_.last_error().c_str());
           running_ = false;
         }
       }
@@ -313,7 +313,7 @@ namespace hades
       scriptRuntime_.update(deltaTime, componentManager_, entityManager_);
       if (scriptRuntime_.faulted())
       {
-        std::fprintf(stderr, "Script error: %s\n", scriptRuntime_.last_error().c_str());
+        Log::error("script: %s", scriptRuntime_.last_error().c_str());
         running_ = false;
         return;
       }
@@ -341,7 +341,7 @@ namespace hades
       scriptRuntime_.update(deltaTime, componentManager_, entityManager_);
       if (scriptRuntime_.faulted())
       {
-        std::fprintf(stderr, "Script error: %s\n", scriptRuntime_.last_error().c_str());
+        Log::error("script: %s", scriptRuntime_.last_error().c_str());
         running_ = false;
         return;
       }
@@ -486,7 +486,7 @@ namespace hades
     {
       if (!scriptError.empty())
       {
-        std::fprintf(stderr, "Warning: script runtime failed to restart: %s\n", scriptError.c_str());
+        Log::warn("script runtime failed to restart: %s", scriptError.c_str());
       }
     }
 #endif
@@ -505,7 +505,7 @@ namespace hades
 
     if (!api_->start(config))
     {
-      std::fprintf(stderr, "Error: HadesAPI failed to start on port %d\n", apiPort_);
+      Log::error("HadesAPI failed to start on port %d", apiPort_);
       return;
     }
 
@@ -549,7 +549,7 @@ namespace hades
 
           if (scriptRuntime_.faulted())
           {
-            std::fprintf(stderr, "Script error: %s\n", scriptRuntime_.last_error().c_str());
+            Log::error("script: %s", scriptRuntime_.last_error().c_str());
             running_ = false;
             break;
           }

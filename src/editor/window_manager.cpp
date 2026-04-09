@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
-#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <memory>
@@ -26,6 +25,7 @@
 #include <nlohmann/json.hpp>
 #endif
 #include "../engine/assets/asset_manager.hpp"
+#include "../engine/core/log.hpp"
 #include "../engine/core/ecs/scene_serializer.hpp"
 #include "../engine/audio/audio_engine.hpp"
 #include "../engine/rendering/renderer.hpp"
@@ -69,7 +69,7 @@ namespace
     SDL_Surface *surface = SDL_LoadBMP(logo_path.c_str());
     if (surface == nullptr)
     {
-      std::fprintf(stderr, "Warning: failed to load '%s': %s\n", logo_path.c_str(), SDL_GetError());
+      hades::Log::warn("failed to load '%s': %s", logo_path.c_str(), SDL_GetError());
     }
 
     return SurfacePtr(surface, SDL_FreeSurface);
@@ -195,7 +195,7 @@ namespace
     SurfacePtr rgbaSurface(SDL_ConvertSurfaceFormat(logoSurface, SDL_PIXELFORMAT_RGBA32, 0), SDL_FreeSurface);
     if (rgbaSurface == nullptr)
     {
-      std::fprintf(stderr, "Warning: failed to convert logo surface for workspace preview: %s\n", SDL_GetError());
+      hades::Log::warn("failed to convert logo surface for workspace preview: %s", SDL_GetError());
       return;
     }
 
@@ -213,7 +213,7 @@ namespace
         SDL_FreeSurface);
     if (scaledSurface == nullptr)
     {
-      std::fprintf(stderr, "Warning: failed to allocate logo preview surface: %s\n", SDL_GetError());
+      hades::Log::warn("failed to allocate logo preview surface: %s", SDL_GetError());
       width = 0;
       height = 0;
       return;
@@ -221,7 +221,7 @@ namespace
 
     if (SDL_BlitScaled(rgbaSurface.get(), nullptr, scaledSurface.get(), nullptr) != 0)
     {
-      std::fprintf(stderr, "Warning: failed to scale logo preview surface: %s\n", SDL_GetError());
+      hades::Log::warn("failed to scale logo preview surface: %s", SDL_GetError());
       pixels.clear();
       width = 0;
       height = 0;
@@ -366,7 +366,7 @@ namespace hades
 
     if (SDL_Init(flags) != 0)
     {
-      std::fprintf(stderr, "Error: %s\n", SDL_GetError());
+      hades::Log::error("%s", SDL_GetError());
       return false;
     }
 
@@ -436,7 +436,7 @@ namespace hades
 
     if (!ImGui_ImplSDL2_InitForVulkan(window))
     {
-      std::fprintf(stderr, "Error: ImGui_ImplSDL2_InitForVulkan() failed.\n");
+      hades::Log::error("ImGui_ImplSDL2_InitForVulkan() failed.");
       ImGui::DestroyContext(context_);
       context_ = nullptr;
       return false;
@@ -1375,7 +1375,7 @@ namespace hades
         window_flags));
     if (window == nullptr)
     {
-      std::fprintf(stderr, "Error: SDL_CreateWindow(): %s\n", SDL_GetError());
+      hades::Log::error("SDL_CreateWindow(): %s", SDL_GetError());
       return false;
     }
 
@@ -1393,13 +1393,13 @@ namespace hades
 
     if (!audio_engine->init())
     {
-      std::fprintf(stderr, "Warning: audio engine is unavailable. Audio playback has been disabled.\n");
+      hades::Log::warn("audio engine is unavailable. Audio playback has been disabled.");
       audio_engine.reset();
     }
 
     if (!physics_world->init())
     {
-      std::fprintf(stderr, "Warning: physics engine is unavailable. Physics simulation has been disabled.\n");
+      hades::Log::warn("physics engine is unavailable. Physics simulation has been disabled.");
       physics_world.reset();
     }
 
@@ -1677,7 +1677,7 @@ namespace hades
       std::string errorMessage;
       if (!persist_workspace_state(workspaceManager.current_workspace()->path, &errorMessage))
       {
-        std::fprintf(stderr, "Warning: failed to save workspace on shutdown: %s\n", errorMessage.c_str());
+        hades::Log::warn("failed to save workspace on shutdown: %s", errorMessage.c_str());
       }
     }
 

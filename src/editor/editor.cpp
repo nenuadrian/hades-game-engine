@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cstdio>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -11,6 +10,7 @@
 #include "imgui_internal.h"
 #include "IconsFontAwesome6.h"
 #include "../engine/components/name_component.hpp"
+#include "../engine/core/log.hpp"
 #include "../engine/core/ecs/component_manager.hpp"
 #include "../engine/core/ecs/entity_manager.hpp"
 #include "../engine/core/ecs/scene_serializer.hpp"
@@ -165,16 +165,18 @@ namespace hades
 
   void Editor::log_message(DebugMessageLevel level, const std::string &text)
   {
-    const char *prefix = "INFO";
     if (level == DebugMessageLevel::Warning)
     {
-      prefix = "WARNING";
+      Log::warn("%s", text.c_str());
     }
     else if (level == DebugMessageLevel::Error)
     {
-      prefix = "ERROR";
+      Log::error("%s", text.c_str());
     }
-    std::fprintf(stderr, "[%s] %s\n", prefix, text.c_str());
+    else
+    {
+      Log::info("%s", text.c_str());
+    }
 
     mainDebugConsole_.add_message(level, text);
 

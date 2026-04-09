@@ -1,7 +1,8 @@
 #include "webgpu_renderer.hpp"
 
-#include <cstdio>
 #include <SDL.h>
+
+#include "../core/log.hpp"
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten/html5_webgpu.h>
@@ -43,7 +44,7 @@ namespace hades
 
     if (window == nullptr)
     {
-      std::fprintf(stderr, "WebGPURenderer::init: window is null\n");
+      hades::Log::error("webgpu", "WebGPURenderer::init: window is null");
       return false;
     }
 
@@ -51,7 +52,7 @@ namespace hades
     instance_ = wgpuCreateInstance(nullptr);
     if (instance_ == nullptr)
     {
-      std::fprintf(stderr, "WebGPURenderer::init: failed to create WebGPU instance\n");
+      hades::Log::error("webgpu", "WebGPURenderer::init: failed to create WebGPU instance");
       return false;
     }
 
@@ -60,12 +61,12 @@ namespace hades
     device_ = emscripten_webgpu_get_device();
     if (device_ == nullptr)
     {
-      std::fprintf(stderr, "WebGPURenderer::init: failed to get WebGPU device\n");
+      hades::Log::error("webgpu", "WebGPURenderer::init: failed to get WebGPU device");
       return false;
     }
 #else
     // Native WebGPU path would go here (wgpu-native / dawn).
-    std::fprintf(stderr, "WebGPURenderer::init: native WebGPU not supported\n");
+    hades::Log::error("webgpu", "WebGPURenderer::init: native WebGPU not supported");
     return false;
 #endif
 
@@ -81,7 +82,7 @@ namespace hades
     surface_ = wgpuInstanceCreateSurface(instance_, &surfaceDesc);
     if (surface_ == nullptr)
     {
-      std::fprintf(stderr, "WebGPURenderer::init: failed to create surface\n");
+      hades::Log::error("webgpu", "WebGPURenderer::init: failed to create surface");
       return false;
     }
 

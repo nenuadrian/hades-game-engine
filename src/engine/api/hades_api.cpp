@@ -3,12 +3,13 @@
 #include "hades_api.hpp"
 
 #include <atomic>
-#include <cstdio>
 #include <condition_variable>
 #include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
+
+#include "../core/log.hpp"
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
@@ -231,12 +232,12 @@ namespace hades
 
     impl_->serverThread = std::thread([this]()
                                       {
-      std::fprintf(stderr, "HadesAPI: listening on http://localhost:%d\n", impl_->config.port);
+      hades::Log::info("HadesAPI: listening on http://localhost:%d", impl_->config.port);
       if (!impl_->server.listen("0.0.0.0", impl_->config.port))
       {
         if (impl_->running.load())
         {
-          std::fprintf(stderr, "HadesAPI: failed to bind to port %d\n", impl_->config.port);
+          hades::Log::error("HadesAPI: failed to bind to port %d", impl_->config.port);
         }
       }
       impl_->running.store(false);

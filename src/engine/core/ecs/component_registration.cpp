@@ -1,10 +1,11 @@
 #include "component_registry.hpp"
 
-#include <cstdio>
 #include <map>
 #include <string>
 
 #include <nlohmann/json.hpp>
+
+#include "../log.hpp"
 
 #include "../../assets/asset_manager.hpp"
 #include "../../assets/model_importer.hpp"
@@ -358,7 +359,7 @@ namespace hades
               }
               else
               {
-                std::fprintf(stderr, "Warning: failed to re-import model from '%s'\n", sourcePath.c_str());
+                hades::Log::warn("failed to re-import model from '%s'", sourcePath.c_str());
               }
               return true;
             });

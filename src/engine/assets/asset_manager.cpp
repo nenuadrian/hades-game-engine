@@ -1,7 +1,7 @@
 #include "asset_manager.hpp"
 #include "model_importer.hpp"
 
-#include <cstdio>
+#include "../core/log.hpp"
 
 namespace hades
 {
@@ -147,7 +147,7 @@ namespace hades
     else
     {
       handle.set_failed(errorMessage.empty() ? "Failed to import model." : errorMessage);
-      std::fprintf(stderr, "Warning: failed to load model from '%s': %s\n",
+      hades::Log::warn("failed to load model from '%s': %s",
                    sourcePath.string().c_str(), handle.error().c_str());
     }
 
@@ -192,7 +192,7 @@ namespace hades
       else
       {
         request.handle.set_failed(errorMessage.empty() ? "Failed to import model." : errorMessage);
-        std::fprintf(stderr, "Warning: async model load failed for '%s': %s\n",
+        hades::Log::warn("async model load failed for '%s': %s",
                      request.canonicalPath.c_str(), request.handle.error().c_str());
       }
     }

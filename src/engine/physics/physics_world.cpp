@@ -5,6 +5,8 @@
 #include <mutex>
 #include <thread>
 
+#include "../core/log.hpp"
+
 #include <Jolt/Jolt.h>
 #include <Jolt/RegisterTypes.h>
 #include <Jolt/Core/Factory.h>
@@ -27,13 +29,13 @@ namespace
     char buf[1024];
     std::vsnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
-    std::fprintf(stderr, "[Jolt] %s\n", buf);
+    hades::Log::info("jolt", "%s", buf);
   }
 
 #ifdef JPH_ENABLE_ASSERTS
   static bool jolt_assert_failed(const char *expression, const char *message, const char *file, JPH::uint line)
   {
-    std::fprintf(stderr, "[Jolt] Assertion failed: %s:%u: (%s) %s\n", file, line, expression, message ? message : "");
+    hades::Log::error("jolt", "Assertion failed: %s:%u: (%s) %s", file, line, expression, message ? message : "");
     return true; // trigger breakpoint
   }
 #endif
@@ -150,7 +152,7 @@ namespace hades
     impl_->physicsSystem->SetContactListener(&impl_->contactListener);
 
     impl_->initialized = true;
-    std::fprintf(stderr, "PhysicsWorld: Jolt Physics initialized (%u threads)\n", numThreads);
+    hades::Log::info("jolt", "Jolt Physics initialized (%u threads)", numThreads);
     return true;
   }
 

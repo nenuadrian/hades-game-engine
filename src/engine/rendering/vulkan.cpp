@@ -1,9 +1,10 @@
 #include "vulkan.hpp"
 
 #include <cassert>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+
+#include "../core/log.hpp"
 
 #include <SDL.h>
 #include <SDL_vulkan.h>
@@ -55,7 +56,7 @@ namespace hades
       return;
     }
 
-    std::fprintf(stderr, "[vulkan] Error: VkResult = %d\n", err);
+    hades::Log::error("vulkan", "VkResult = %d", err);
     if (err < 0)
     {
       std::abort();
@@ -78,7 +79,7 @@ namespace hades
     (void)messageCode;
     (void)pUserData;
     (void)pLayerPrefix;
-    std::fprintf(stderr, "[vulkan] Debug report from ObjectType: %i\nMessage: %s\n\n", objectType, pMessage);
+    hades::Log::warn("vulkan", "Debug report from ObjectType: %i -- Message: %s", objectType, pMessage);
     return VK_FALSE;
   }
 
@@ -186,7 +187,7 @@ namespace hades
         }
         else
         {
-          std::fprintf(stderr, "[vulkan] Warning: validation layer not available, skipping debug report\n");
+          hades::Log::warn("vulkan", "validation layer not available, skipping debug report");
         }
       }
 #endif
@@ -366,7 +367,7 @@ namespace hades
     VkResult err;
     if (SDL_Vulkan_CreateSurface(window, g_Instance, &surface) == 0)
     {
-      std::fprintf(stderr, "Failed to create Vulkan surface: %s\n", SDL_GetError());
+      hades::Log::error("vulkan", "Failed to create Vulkan surface: %s", SDL_GetError());
       return false;
     }
 
@@ -376,7 +377,7 @@ namespace hades
     vkGetPhysicalDeviceSurfaceSupportKHR(g_PhysicalDevice, g_QueueFamily, g_MainWindowData.Surface, &res);
     if (res != VK_TRUE)
     {
-      std::fprintf(stderr, "Error no WSI support on physical device 0\n");
+      hades::Log::error("vulkan", "no WSI support on physical device 0");
       return false;
     }
 
