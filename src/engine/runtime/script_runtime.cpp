@@ -397,9 +397,9 @@ namespace hades
     {
       // The public API types (Vector3, EntityContext, HadesScript, HadesAPI) are
       // maintained in hades_scripting_api.cs and embedded at build time via CMake.
-      // The interop scaffolding below is only needed by the host runtime.
-      return std::string(HADES_SCRIPTING_API_SOURCE) + std::string(R"(
-using System;
+      // Extra using directives needed by the interop scaffolding are prepended so
+      // they appear before any namespace/type definitions from the API source.
+      return std::string(R"(using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -407,6 +407,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
+)") + std::string(HADES_SCRIPTING_API_SOURCE) + std::string(R"(
 namespace Hades.Scripting
 {
     // Interop structures matching the C++ side (packed, blittable).
