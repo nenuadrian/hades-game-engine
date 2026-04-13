@@ -188,6 +188,12 @@ namespace hades
         const json &gamePreview = document["gamePreview"];
         read_optional_bool(gamePreview, "enableHadesAPI", settings.gamePreview.enableHadesAPI);
       }
+
+      if (document.contains("scripting") && document["scripting"].is_object())
+      {
+        const json &scripting = document["scripting"];
+        read_optional_int(scripting, "externalEditor", settings.externalEditor);
+      }
     }
     catch (const std::exception &exception)
     {
@@ -250,6 +256,9 @@ namespace hades
     };
     document["gamePreview"] = {
       {"enableHadesAPI", settings.gamePreview.enableHadesAPI},
+    };
+    document["scripting"] = {
+      {"externalEditor", settings.externalEditor},
     };
 
     std::ofstream output(settingsPath, std::ios::trunc);

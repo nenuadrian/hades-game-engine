@@ -697,11 +697,6 @@ namespace hades
     prePlaySelectedEntity_ = state.selectedEntity;
     prePlayLoadedWorld_ = state.loadedWorld;
 
-    if (!activeWorkspacePath_.empty() && !workspaceScriptFiles_.empty())
-    {
-      queue_workspace_script_compile();
-    }
-
     const auto startupWorld = normalize_default_world(entityManager, componentManager);
     if (!startupWorld.has_value())
     {

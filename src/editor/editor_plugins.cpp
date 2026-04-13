@@ -147,29 +147,6 @@ namespace hades
         }));
 
     register_plugin(std::make_unique<CallbackEditorPlugin>(
-        "script-editor-window",
-        "Editor",
-        EditorPluginPhase::PreEntityDeletion,
-        20,
-        [this](EditorPluginContext &context)
-        {
-          (void)context;
-        },
-        false,
-        [this](const Editor &editor)
-        {
-          return editor.is_script_editor_window_open();
-        },
-        [this](Editor &editor, bool visible)
-        {
-          editor.set_script_editor_window_open(visible);
-        },
-        [this](Editor &editor)
-        {
-          editor.set_script_editor_window_open(true);
-        }));
-
-    register_plugin(std::make_unique<CallbackEditorPlugin>(
         "entities",
         "Entities",
         EditorPluginPhase::PreEntityDeletion,

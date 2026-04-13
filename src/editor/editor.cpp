@@ -17,6 +17,8 @@
 #include "../engine/core/ecs/world_utils.hpp"
 #include "../engine/gui/imgui.hpp"
 #include "../engine/profiling/frame_metrics.hpp"
+#include "../engine/runtime/project_generator.hpp"
+#include "../engine/runtime/scripting_sdk.hpp"
 #include "../engine/runtime/script_runtime.hpp"
 
 namespace hades
@@ -102,40 +104,17 @@ namespace hades
     sceneGizmoPixelsPerWorldUnit_ = 1.0f;
     pendingSavedWorldRestore_ = false;
 
-    scriptAutoComplete_.reset();
-
     activeWorkspacePath_.clear();
     workspaceTreeRoot_.reset();
     workspaceScriptFiles_.clear();
     workspaceScanError_.clear();
-    openScriptEditorTabs_.clear();
-    activeScriptEditorTabIndex_.reset();
-    pendingScriptEditorTabSelectionIndex_.reset();
-    scriptEditorStatusMessage_.clear();
-    scriptEditorStatusIsError_ = false;
-    openScriptEditorWindow_ = false;
-    scriptEditorDockLayoutInitialized_ = false;
-    scriptEditorShowCodePanel_ = true;
-    scriptEditorShowFileTreePanel_ = true;
-    scriptEditorShowDebugPanel_ = true;
-    scriptEditorShowEntitiesPanel_ = true;
-    focusScriptEditorWindow_ = false;
-    openScriptEditorUnsavedChangesDialog_ = false;
-    pendingScriptEditorClosePath_.reset();
-    pendingCloseScriptEditorWindow_ = false;
     cachedDiskWorlds_.clear();
     workspaceScriptListDirty_ = false;
     parsedScriptCache_.clear();
     parsedScriptModTimes_.clear();
-    lastCompileError_.clear();
-    scriptCompileStatus_ = ScriptCompileStatus::Unknown;
-    backgroundCompileInProgress_ = false;
-    currentCompileRequestId_ = 0;
-    nextCompileRequestId_ = 0;
     selectedSettingsCategory_ = SettingsCategory::Editor;
     gamePreviewEnableHadesAPI_ = false;
     mainDebugConsole_.clear();
-    scriptEditorDebugConsole_.clear();
     openDebugConsoleWindow_ = false;
     focusDebugConsoleWindow_ = false;
     openAboutWindow_ = false;
@@ -243,20 +222,6 @@ namespace hades
     }
     configure_default_dock_layout(gui->render_frame());
 
-    if (backgroundCompileInProgress_ && backgroundCompileResult_.valid() &&
-        backgroundCompileResult_.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
-    {
-      BackgroundCompileTaskResult result = backgroundCompileResult_.get();
-      backgroundCompileInProgress_ = false;
-      if (result.requestId == currentCompileRequestId_)
-      {
-        lastCompileError_ = std::move(result.error);
-        scriptCompileStatus_ = lastCompileError_.empty()
-                                   ? ScriptCompileStatus::Succeeded
-                                   : ScriptCompileStatus::Failed;
-      }
-    }
-
     render_add_entity_dialog(entityManager, componentManager);
     handle_entity_creation_requests(entityManager, componentManager);
     import_model(entityManager, componentManager);
@@ -336,6 +301,35 @@ namespace hades
     file.children_menu_items.push_back(newWorld);
     file.children_menu_items.push_back(save);
     file.children_menu_items.push_back(exportItem);
+
+    MenuBarItem openExternalEditor;
+    openExternalEditor.title = ICON_FA_UP_RIGHT_FROM_SQUARE "  Open in External Editor";
+    openExternalEditor.enabled = !activeWorkspacePath_.empty();
+    openExternalEditor.on_activate = [this]()
+    {
+      std::string errorMessage;
+      const auto sdkDllPath = ensure_scripting_sdk(&errorMessage);
+      if (sdkDllPath.empty())
+      {
+        log_error("SDK build failed: " + errorMessage);
+        return;
+      }
+
+      if (!generate_workspace_project(activeWorkspacePath_, sdkDllPath, &errorMessage))
+      {
+        log_error("Project generation failed: " + errorMessage);
+        return;
+      }
+
+      if (!open_in_external_editor(externalEditor_, activeWorkspacePath_, {}, &errorMessage))
+      {
+        log_error(errorMessage);
+        return;
+      }
+
+      log_info(std::string("Opened workspace in ") + external_editor_name(externalEditor_) + ".");
+    };
+    file.children_menu_items.push_back(std::move(openExternalEditor));
 
     MenuBarItem settingsWindow;
     settingsWindow.title = ICON_FA_GEAR "  Settings";
@@ -480,22 +474,6 @@ namespace hades
 
     MenuBarItem windows;
     windows.title = ICON_FA_WINDOW_MAXIMIZE "  Windows";
-
-    MenuBarItem codeEditorWindow;
-    codeEditorWindow.title = ICON_FA_CODE "  Code Editor";
-    codeEditorWindow.selected = is_script_editor_window_open();
-    codeEditorWindow.on_activate = [this]()
-    {
-      if (is_script_editor_window_open())
-      {
-        set_script_editor_window_open(false);
-      }
-      else
-      {
-        show_plugin("script-editor-window");
-      }
-    };
-    windows.children_menu_items.push_back(std::move(codeEditorWindow));
 
     add_plugin_toggle_item(windows, ICON_FA_FOLDER_OPEN "  Workspace", "workspace");
     add_plugin_toggle_item(windows, ICON_FA_LAYER_GROUP "  Entities", "entities");
@@ -712,6 +690,7 @@ namespace hades
     settings.exportWindows = to_workspace_export(exportPlatformSettings_[export_platform_index(ExportPlatform::Windows)]);
     settings.exportWeb = to_workspace_export(exportPlatformSettings_[export_platform_index(ExportPlatform::Web)]);
     settings.gamePreview.enableHadesAPI = gamePreviewEnableHadesAPI_;
+    settings.externalEditor = static_cast<int>(externalEditor_);
 
     for (const auto &plugin : plugins_)
     {
@@ -757,6 +736,10 @@ namespace hades
     from_workspace_export(settings.exportWindows, exportPlatformSettings_[export_platform_index(ExportPlatform::Windows)]);
     from_workspace_export(settings.exportWeb, exportPlatformSettings_[export_platform_index(ExportPlatform::Web)]);
     gamePreviewEnableHadesAPI_ = settings.gamePreview.enableHadesAPI;
+    if (settings.externalEditor >= 0 && settings.externalEditor <= static_cast<int>(ExternalEditor::System))
+    {
+      externalEditor_ = static_cast<ExternalEditor>(settings.externalEditor);
+    }
 
     // Export build output is runtime-only; never keep it across workspace restore.
     exportBuildInProgress_ = false;

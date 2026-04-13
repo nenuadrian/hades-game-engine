@@ -581,9 +581,9 @@ namespace hades
           else if (!attachment.scriptPath.empty())
           {
             ImGui::TextDisabled("%s", attachment.scriptPath.c_str());
-            if (!activeWorkspacePath_.empty() && ImGui::Button("Open in Script Editor"))
+            if (!activeWorkspacePath_.empty() && ImGui::Button("Open in External Editor"))
             {
-              request_script_editor_open(activeWorkspacePath_ / attachment.scriptPath, attachment.scriptPath);
+              open_in_external_editor(externalEditor_, activeWorkspacePath_, activeWorkspacePath_ / attachment.scriptPath);
             }
           }
 

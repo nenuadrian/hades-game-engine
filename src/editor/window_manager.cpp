@@ -40,13 +40,10 @@
 namespace
 {
   constexpr char EDITOR_WINDOW_TITLE[] = "Hades Editor";
-  constexpr char SCRIPT_EDITOR_WINDOW_TITLE[] = "Hades Script Editor";
   constexpr char WORKSPACE_HISTORY_FILENAME[] = "recent_workspaces.txt";
   constexpr char LOGO_ASSET_PATH[] = "assets/logo.bmp";
   constexpr int EDITOR_WINDOW_WIDTH = 1280;
   constexpr int EDITOR_WINDOW_HEIGHT = 720;
-  constexpr int SCRIPT_EDITOR_WINDOW_WIDTH = 1280;
-  constexpr int SCRIPT_EDITOR_WINDOW_HEIGHT = 720;
   constexpr int WORKSPACE_LOGO_MAX_SIZE = 160;
 
   using SdlStringPtr = std::unique_ptr<char, decltype(&SDL_free)>;
@@ -532,156 +529,6 @@ namespace hades
     initialized = false;
   }
 
-  WindowManager::DetachedScriptEditorWindow::~DetachedScriptEditorWindow()
-  {
-    destroy();
-  }
-
-  bool WindowManager::DetachedScriptEditorWindow::open(std::string *errorMessage)
-  {
-    if (window_ != nullptr && renderer_ != nullptr)
-    {
-      visible_ = true;
-      SDL_RestoreWindow(window_.get());
-      SDL_ShowWindow(window_.get());
-      SDL_RaiseWindow(window_.get());
-      if (errorMessage != nullptr)
-      {
-        errorMessage->clear();
-      }
-      return true;
-    }
-
-    const SDL_WindowFlags windowFlags =
-        static_cast<SDL_WindowFlags>(SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE |
-                                     SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_HIDDEN);
-    WindowPtr window(SDL_CreateWindow(
-        SCRIPT_EDITOR_WINDOW_TITLE,
-        SDL_WINDOWPOS_CENTERED,
-        SDL_WINDOWPOS_CENTERED,
-        SCRIPT_EDITOR_WINDOW_WIDTH,
-        SCRIPT_EDITOR_WINDOW_HEIGHT,
-        windowFlags));
-    if (window == nullptr)
-    {
-      if (errorMessage != nullptr)
-      {
-        *errorMessage = std::string("Failed to create script editor window: ") + SDL_GetError();
-      }
-      return false;
-    }
-
-    SurfacePtr logoSurface = load_logo_surface();
-    set_window_icon(window.get(), logoSurface.get());
-
-    auto renderer = std::make_unique<VulkanRenderer>(false);
-    if (!renderer->init(window.get()))
-    {
-      if (errorMessage != nullptr)
-      {
-        *errorMessage = "Failed to initialize the script editor renderer.";
-      }
-      return false;
-    }
-
-    if (!imgui_session_.init(window.get(), *renderer, false))
-    {
-      if (errorMessage != nullptr)
-      {
-        *errorMessage = "Failed to initialize the script editor UI.";
-      }
-      return false;
-    }
-
-    window_ = std::move(window);
-    renderer_ = std::move(renderer);
-    visible_ = true;
-    SDL_RestoreWindow(window_.get());
-    SDL_ShowWindow(window_.get());
-    SDL_RaiseWindow(window_.get());
-    if (errorMessage != nullptr)
-    {
-      errorMessage->clear();
-    }
-    return true;
-  }
-
-  void WindowManager::DetachedScriptEditorWindow::close()
-  {
-    visible_ = false;
-    if (window_ != nullptr)
-    {
-      SDL_HideWindow(window_.get());
-    }
-  }
-
-  void WindowManager::DetachedScriptEditorWindow::show()
-  {
-    if (window_ == nullptr)
-    {
-      return;
-    }
-    visible_ = true;
-    SDL_RestoreWindow(window_.get());
-    SDL_ShowWindow(window_.get());
-    SDL_RaiseWindow(window_.get());
-  }
-
-  bool WindowManager::DetachedScriptEditorWindow::is_open() const
-  {
-    return window_ != nullptr && renderer_ != nullptr;
-  }
-
-  bool WindowManager::DetachedScriptEditorWindow::is_visible() const
-  {
-    return visible_;
-  }
-
-  std::optional<std::uint32_t> WindowManager::DetachedScriptEditorWindow::window_id() const
-  {
-    if (window_ == nullptr)
-    {
-      return std::nullopt;
-    }
-
-    return SDL_GetWindowID(window_.get());
-  }
-
-  void WindowManager::DetachedScriptEditorWindow::process_event(const SDL_Event &event)
-  {
-    imgui_session_.process_event(event);
-  }
-
-  void WindowManager::DetachedScriptEditorWindow::render(
-      Editor &editor,
-      EntityManager &entityManager,
-      ComponentManager &componentManager)
-  {
-    if (!is_open() || !visible_)
-    {
-      return;
-    }
-
-    if (editor.consume_script_editor_focus_request())
-    {
-      SDL_RestoreWindow(window_.get());
-      SDL_RaiseWindow(window_.get());
-    }
-
-    renderer_->render_frame(window_.get());
-    imgui_session_.begin_frame();
-    editor.render_script_editor_window(entityManager, componentManager);
-    imgui_session_.render();
-  }
-
-  void WindowManager::DetachedScriptEditorWindow::destroy()
-  {
-    visible_ = false;
-    imgui_session_.close();
-    renderer_.reset();
-    window_.reset();
-  }
-
   WindowManager::WindowManager()
       : renderer(std::make_unique<VulkanRenderer>()),
         audio_engine(std::make_unique<AudioEngine>()),
@@ -1145,7 +992,6 @@ namespace hades
     }
 
     playWindow.close();
-    scriptEditorWindow.close();
     entityManager = EntityManager();
     componentManager = ComponentManager(&entityManager);
     eventBus.clear();
@@ -1210,33 +1056,6 @@ namespace hades
         componentManager,
         editor.state.activeWorld,
         editor.state.activeCamera);
-  }
-
-  void WindowManager::sync_script_editor_window()
-  {
-    if (!editor.is_script_editor_window_open())
-    {
-      scriptEditorWindow.close();
-      return;
-    }
-
-    std::string errorMessage;
-    if (!scriptEditorWindow.is_open() && !scriptEditorWindow.open(&errorMessage))
-    {
-      editor.set_script_editor_window_open(false);
-      if (!errorMessage.empty())
-      {
-        editor.log_error("Script editor window error: " + errorMessage);
-      }
-      return;
-    }
-
-    if (scriptEditorWindow.is_open() && !scriptEditorWindow.is_visible())
-    {
-      scriptEditorWindow.show();
-    }
-
-    scriptEditorWindow.render(editor, entityManager, componentManager);
   }
 
 #ifdef HADES_ENABLE_API
@@ -1425,7 +1244,6 @@ namespace hades
     {
       HADES_FRAME_METRIC_SCOPE("event_poll");
       const Uint32 editorWindowId = window != nullptr ? SDL_GetWindowID(window.get()) : 0U;
-      const auto scriptEditorWindowId = scriptEditorWindow.window_id();
       bool closedAuxiliaryWindowThisFrame = false;
       SDL_Event event;
       while (SDL_PollEvent(&event))
@@ -1435,10 +1253,6 @@ namespace hades
         if (!targetWindowId.has_value() || *targetWindowId == editorWindowId)
         {
           imgui_session.process_event(event);
-        }
-        else if (scriptEditorWindowId.has_value() && *targetWindowId == *scriptEditorWindowId)
-        {
-          scriptEditorWindow.process_event(event);
         }
         if (event.type == SDL_QUIT)
         {
@@ -1462,12 +1276,6 @@ namespace hades
             {
               running = false;
             }
-          }
-          else if (scriptEditorWindowId.has_value() &&
-                   event.window.windowID == *scriptEditorWindowId)
-          {
-            closedAuxiliaryWindowThisFrame = true;
-            editor.request_close_script_editor_window();
           }
           else if (playWindowId.has_value() &&
                    event.window.windowID == *playWindowId)
@@ -1641,10 +1449,6 @@ namespace hades
     {
       HADES_FRAME_METRIC_SCOPE("imgui_render");
       imgui_session.render();
-    }
-    {
-      HADES_FRAME_METRIC_SCOPE("sync_script_editor");
-      sync_script_editor_window();
     }
     {
       HADES_FRAME_METRIC_SCOPE("sync_play_window");

@@ -73,33 +73,6 @@ namespace hades
 
     using WindowPtr = std::unique_ptr<SDL_Window, SDLWindowDeleter>;
 
-    class DetachedScriptEditorWindow
-    {
-    public:
-      DetachedScriptEditorWindow() = default;
-      ~DetachedScriptEditorWindow();
-
-      DetachedScriptEditorWindow(const DetachedScriptEditorWindow &) = delete;
-      DetachedScriptEditorWindow &operator=(const DetachedScriptEditorWindow &) = delete;
-
-      bool open(std::string *errorMessage = nullptr);
-      void close();
-      void show();
-      bool is_open() const;
-      bool is_visible() const;
-      std::optional<std::uint32_t> window_id() const;
-      void process_event(const SDL_Event &event);
-      void render(Editor &editor, EntityManager &entityManager, ComponentManager &componentManager);
-
-    private:
-      void destroy();
-
-      WindowPtr window_{nullptr};
-      std::unique_ptr<Renderer> renderer_;
-      ImGuiSession imgui_session_;
-      bool visible_ = false;
-    };
-
     EntityManager entityManager;
     ComponentManager componentManager;
     SystemManager systemManager;
@@ -111,7 +84,6 @@ namespace hades
     SdlSession sdl_session;
     WindowPtr window{nullptr};
     DetachedPlayWindow playWindow;
-    DetachedScriptEditorWindow scriptEditorWindow;
     std::unique_ptr<Renderer> renderer;
     std::unique_ptr<AudioEngine> audio_engine;
     std::shared_ptr<AudioSystem> audioSystem;
@@ -144,7 +116,6 @@ namespace hades
     void reset_workspace_session();
     void stop_active_play_mode(const std::string &message = std::string());
     void sync_play_window();
-    void sync_script_editor_window();
   #ifdef HADES_ENABLE_API
     void start_preview_api_if_needed();
     void stop_preview_api();

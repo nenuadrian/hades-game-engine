@@ -2,10 +2,8 @@
 #define HADES_EDITOR_EDITOR_HPP
 
 #include <array>
-#include <atomic>
 #include <cstdint>
 #include <filesystem>
-#include <future>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -21,13 +19,12 @@
 #include "types.h"
 #include "debug_console_panel.hpp"
 #include "editor_settings.hpp"
+#include "external_editor.hpp"
 #include "script_analysis.hpp"
-#include "script_autocomplete.hpp"
 #include "plugins/editor_plugin.hpp"
 #include "../engine/core/ecs/entity.hpp"
 #include "../engine/rendering/render_types.hpp"
 #include "../engine/rendering/scene_renderer.hpp"
-#include "TextEditor.h"
 
 namespace hades
 {
@@ -102,11 +99,6 @@ namespace hades
 
     void show_plugin(std::string_view pluginId);
     bool is_plugin_visible(std::string_view pluginId) const;
-    bool is_script_editor_window_open() const;
-    void set_script_editor_window_open(bool open);
-    void request_close_script_editor_window();
-    bool consume_script_editor_focus_request();
-    void render_script_editor_window(EntityManager &entityManager, ComponentManager &componentManager);
     void log_message(DebugMessageLevel level, const std::string &text);
     void log_info(const std::string &text);
     void log_warning(const std::string &text);
@@ -117,32 +109,6 @@ namespace hades
     void stop_play_mode(EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime);
 
   private:
-    enum class ScriptCompileStatus
-    {
-      Unknown,
-      Succeeded,
-      Failed,
-    };
-
-    struct BackgroundCompileTaskResult
-    {
-      std::uint64_t requestId = 0;
-      std::string error;
-    };
-
-    struct ScriptEditorTab
-    {
-      std::filesystem::path path;
-      std::string relativePath;
-      std::string contents;
-      std::string savedContents;
-      std::unique_ptr<TextEditor> textEditor;
-      std::optional<std::filesystem::file_time_type> savedWriteTime;
-      bool dirty = false;
-    };
-
-    ScriptAutoComplete scriptAutoComplete_;
-
     bool dockLayoutInitialized = false;
     bool openImportModelDialog = false;
     std::array<char, 512> importModelPathBuffer{};
@@ -151,28 +117,6 @@ namespace hades
     std::optional<WorkspaceTreeNode> workspaceTreeRoot_;
     std::vector<std::string> workspaceScriptFiles_;
     std::string workspaceScanError_;
-    std::vector<ScriptEditorTab> openScriptEditorTabs_;
-    std::optional<std::size_t> activeScriptEditorTabIndex_;
-    std::optional<std::size_t> pendingScriptEditorTabSelectionIndex_;
-    std::string scriptEditorStatusMessage_;
-    bool scriptEditorStatusIsError_ = false;
-    DebugConsolePanel scriptEditorDebugConsole_{500};
-    std::string lastLoggedScriptEditorStatusMessage_;
-    bool lastLoggedScriptEditorStatusIsError_ = false;
-    bool lastLoggedCompileInProgress_ = false;
-    ScriptCompileStatus lastLoggedCompileStatus_ = ScriptCompileStatus::Unknown;
-    std::string lastLoggedCompileError_;
-    bool openScriptEditorWindow_ = false;
-    bool scriptEditorDockLayoutInitialized_ = false;
-    bool scriptEditorShowCodePanel_ = true;
-    bool scriptEditorShowFileTreePanel_ = true;
-    bool scriptEditorShowDebugPanel_ = true;
-    bool scriptEditorShowEntitiesPanel_ = true;
-    bool focusScriptEditorWindow_ = false;
-    bool openScriptEditorUnsavedChangesDialog_ = false;
-    std::optional<std::filesystem::path> pendingScriptEditorClosePath_;
-    bool pendingCloseAllScriptEditorTabs_ = false;
-    bool pendingCloseScriptEditorWindow_ = false;
     std::vector<std::string> cachedDiskWorlds_;
     bool workspaceScriptListDirty_ = false;
     bool openWorkspaceCreateDialog_ = false;
@@ -263,17 +207,12 @@ namespace hades
     bool sceneDrawModelMeshes_ = true;
     bool pendingSavedWorldRestore_ = false;
 
+    // External editor preference for "Open in External Editor".
+    ExternalEditor externalEditor_ = ExternalEditor::VSCode;
+
     // Render pipeline integration.
     SceneRenderer sceneRenderer_;
     RenderList sceneRenderList_;
-
-    // Background compile state.
-    std::future<BackgroundCompileTaskResult> backgroundCompileResult_;
-    bool backgroundCompileInProgress_ = false;
-    std::string lastCompileError_;
-    ScriptCompileStatus scriptCompileStatus_ = ScriptCompileStatus::Unknown;
-    std::uint64_t currentCompileRequestId_ = 0;
-    std::uint64_t nextCompileRequestId_ = 0;
 
     // Parsed script class cache (keyed by resolved script path).
     std::unordered_map<std::string, std::vector<ParsedScriptClass>> parsedScriptCache_;
@@ -307,20 +246,6 @@ namespace hades
     void render_export_window(EntityManager &entityManager, ComponentManager &componentManager);
     void render_workspace_tree_node(const WorkspaceTreeNode &node, int depth, int &rowIndex, const char *filter);
     void render_workspace_create_menu(const std::filesystem::path &destination);
-    void render_script_editor_menu(EntityManager &entityManager, ComponentManager &componentManager);
-    void render_script_editor(EntityManager &entityManager, ComponentManager &componentManager);
-    std::optional<std::size_t> find_script_editor_tab_index(const std::filesystem::path &scriptPath) const;
-    ScriptEditorTab *active_script_editor_tab();
-    const ScriptEditorTab *active_script_editor_tab() const;
-    void activate_script_editor_tab(std::size_t index);
-    void close_script_editor_tab(std::size_t index);
-    void continue_close_all_script_editor_tabs();
-    void request_script_editor_open(const std::filesystem::path &scriptPath, const std::string &relativePath);
-    bool open_script_document(const std::filesystem::path &scriptPath, const std::string &relativePath, std::string *errorMessage = nullptr);
-    bool save_active_script_document(bool triggerCompile, std::string *errorMessage = nullptr);
-    bool save_script_document_at_index(std::size_t index, bool triggerCompile, std::string *errorMessage = nullptr);
-    bool save_all_script_documents(bool triggerCompile, std::string *errorMessage = nullptr);
-    void queue_workspace_script_compile();
     void reset_scene_camera();
     void restore_saved_worlds_if_needed(EntityManager &entityManager, ComponentManager &componentManager);
     void ensure_world_state(EntityManager &entityManager, ComponentManager &componentManager);

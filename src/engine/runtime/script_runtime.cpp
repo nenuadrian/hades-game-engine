@@ -23,6 +23,7 @@
 #include "../core/ecs/world_utils.hpp"
 #include "clr_host.hpp"
 #include "dotnet_config.hpp"
+#include "hades_scripting_api_source.hpp"
 #include "subprocess.hpp"
 
 namespace hades
@@ -394,7 +395,11 @@ namespace hades
 
     std::string render_host_runtime_source()
     {
-      return std::string(R"(using System;
+      // The public API types (Vector3, EntityContext, HadesScript, HadesAPI) are
+      // maintained in hades_scripting_api.cs and embedded at build time via CMake.
+      // The interop scaffolding below is only needed by the host runtime.
+      return std::string(HADES_SCRIPTING_API_SOURCE) + std::string(R"(
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -404,77 +409,6 @@ using System.Runtime.InteropServices;
 
 namespace Hades.Scripting
 {
-    public struct Vector3
-    {
-        public float X;
-        public float Y;
-        public float Z;
-
-        public Vector3(float x, float y, float z)
-        {
-            X = x;
-            Y = y;
-            Z = z;
-        }
-    }
-
-    public sealed class EntityContext
-    {
-        public uint EntityId { get; }
-        public string Name { get; }
-        public Vector3 Position { get; set; }
-
-        public EntityContext(uint entityId, string name, Vector3 position)
-        {
-            EntityId = entityId;
-            Name = name;
-            Position = position;
-        }
-    }
-
-    public abstract class HadesScript
-    {
-        public virtual void OnStart(EntityContext context) { }
-        public virtual void OnUpdate(EntityContext context, float deltaTime) { }
-        public virtual void OnKeyDown(EntityContext context, int keyCode) { }
-        public virtual void OnKeyUp(EntityContext context, int keyCode) { }
-    }
-
-    public static class HadesAPI
-    {
-        private static readonly Dictionary<string, string> _observed = new();
-
-        public static void Observe(string key, int value) => _observed[key] = value.ToString(CultureInfo.InvariantCulture);
-        public static void Observe(string key, float value) => _observed[key] = value.ToString(CultureInfo.InvariantCulture);
-        public static void Observe(string key, double value) => _observed[key] = value.ToString(CultureInfo.InvariantCulture);
-        public static void Observe(string key, bool value) => _observed[key] = value ? "true" : "false";
-        public static void Observe(string key, string value) => _observed[key] = "\"" + EscapeJson(value ?? "") + "\"";
-
-        public static void Clear() => _observed.Clear();
-
-        internal static string SerializeJson()
-        {
-            if (_observed.Count == 0) return "{}";
-            var sb = new System.Text.StringBuilder("{");
-            bool first = true;
-            foreach (var kvp in _observed)
-            {
-                if (!first) sb.Append(',');
-                sb.Append('"').Append(EscapeJson(kvp.Key)).Append("\":");
-                sb.Append(kvp.Value);
-                first = false;
-            }
-            sb.Append('}');
-            return sb.ToString();
-        }
-
-        private static string EscapeJson(string s)
-        {
-            return s.Replace("\\", "\\\\").Replace("\"", "\\\"")
-                    .Replace("\n", "\\n").Replace("\r", "\\r").Replace("\t", "\\t");
-        }
-    }
-
     // Interop structures matching the C++ side (packed, blittable).
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     internal struct InteropEntityData

@@ -36,6 +36,9 @@ namespace hades
     WorkspaceExportSettings exportWindows;
     WorkspaceExportSettings exportWeb;
     WorkspaceGamePreviewSettings gamePreview;
+
+    // External editor preference: 0 = VS Code, 1 = Rider, 2 = Visual Studio, 3 = System.
+    int externalEditor = 0;
   };
 
   std::filesystem::path workspace_settings_path(const std::filesystem::path &workspacePath);

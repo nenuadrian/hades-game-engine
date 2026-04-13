@@ -77,6 +77,15 @@ configure_file(
   "${CMAKE_BINARY_DIR}/generated/build_config.hpp"
   @ONLY)
 
+# Embed the Hades scripting API C# source as a C++ string constant so that
+# both the play-mode build (script_runtime.cpp) and the SDK builder
+# (scripting_sdk.cpp) share a single source of truth.
+file(READ "${CMAKE_SOURCE_DIR}/src/engine/runtime/hades_scripting_api.cs" _HADES_API_SOURCE)
+configure_file(
+  "${CMAKE_SOURCE_DIR}/cmake/hades_scripting_api_source.hpp.in"
+  "${CMAKE_BINARY_DIR}/generated/hades_scripting_api_source.hpp"
+  @ONLY)
+
 # Define the source directory.
 set(SRC_DIR "${CMAKE_SOURCE_DIR}/src")
 
@@ -93,7 +102,9 @@ if(EMSCRIPTEN)
     "${SRC_DIR}/engine/rendering/vulkan.cpp"
     "${SRC_DIR}/engine/runtime/script_runtime.cpp"
     "${SRC_DIR}/engine/runtime/clr_host.cpp"
-    "${SRC_DIR}/engine/runtime/subprocess.cpp")
+    "${SRC_DIR}/engine/runtime/subprocess.cpp"
+    "${SRC_DIR}/engine/runtime/scripting_sdk.cpp"
+    "${SRC_DIR}/engine/runtime/project_generator.cpp")
 else()
   # For native builds: remove WebGPU renderer (only usable with Emscripten).
   list(REMOVE_ITEM ENGINE_SOURCE_FILES
@@ -161,8 +172,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_BINARY_DIR}/generate
 target_link_libraries(
   ${PROJECT_NAME}
   PRIVATE HadesEngine
-          CLI11::CLI11
-          hades_imgui_textedit)
+          CLI11::CLI11)
 hades_stage_runtime_dependency(${PROJECT_NAME} assimp)
 
 add_custom_command(
@@ -223,7 +233,6 @@ set(TEST_EDITOR_SUPPORT_SOURCES
   src/editor/editor_settings.cpp
   src/editor/plugins/editor_plugin.cpp
   src/editor/script_analysis.cpp
-  src/editor/script_document.cpp
   src/editor/workspace_manager.cpp
   src/editor/workspace_file_operations.cpp)
 

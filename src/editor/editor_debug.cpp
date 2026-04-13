@@ -293,6 +293,17 @@ namespace hades
         {
           reset_scene_camera();
         }
+
+        ImGui::Spacing();
+        ImGui::TextDisabled("Scripting");
+        ImGui::Separator();
+
+        static const char *editorNames[] = {"Visual Studio Code", "Rider", "Visual Studio", "System Default"};
+        int editorIndex = static_cast<int>(externalEditor_);
+        if (ImGui::Combo("External Editor", &editorIndex, editorNames, IM_ARRAYSIZE(editorNames)))
+        {
+          externalEditor_ = static_cast<ExternalEditor>(editorIndex);
+        }
       }
       else if (selectedSettingsCategory_ == SettingsCategory::GamePreview)
       {
@@ -432,20 +443,6 @@ namespace hades
     const std::optional<Entity::EntityId> statsWorld = state.isPlaying ? state.activeWorld : state.loadedWorld;
     const DebugEntityStats entityStats =
         collect_debug_entity_stats(entityManager, componentManager, statsWorld, state.selectedEntity);
-    const char *compileStatusLabel =
-        scriptCompileStatus_ == ScriptCompileStatus::Succeeded ? "Succeeded"
-        : scriptCompileStatus_ == ScriptCompileStatus::Failed  ? "Failed"
-                                                               : "Idle";
-
-    std::size_t dirtyScriptTabs = 0;
-    for (const auto &tab : openScriptEditorTabs_)
-    {
-      if (tab.dirty)
-      {
-        dirtyScriptTabs += 1;
-      }
-    }
-
     std::size_t warningCount = 0;
     std::size_t errorCount = 0;
     for (const auto &message : mainDebugConsole_.messages())
@@ -562,17 +559,8 @@ namespace hades
       add_stat_row_label_value("Workspace loaded", activeWorkspacePath_.empty() ? "No" : "Yes");
       add_stat_row_label_value("Saved worlds on disk", cachedDiskWorlds_.size());
       add_stat_row_label_value("Workspace scripts", workspaceScriptFiles_.size());
-      add_stat_row_label_value("Open script tabs", openScriptEditorTabs_.size());
-      add_stat_row_label_value("Dirty script tabs", dirtyScriptTabs);
       add_stat_row_label_value("Parsed script cache entries", parsedScriptCache_.size());
-      add_stat_row_label_value("Compile in progress", backgroundCompileInProgress_ ? "Yes" : "No");
-      add_stat_row_label_value("Compile status", compileStatusLabel);
-      add_stat_row_label_value("Compile request id", static_cast<std::size_t>(currentCompileRequestId_));
       add_stat_row_label_value("Restore saved worlds pending", pendingSavedWorldRestore_ ? "Yes" : "No");
-      if (!lastCompileError_.empty())
-      {
-        add_stat_row_label_value("Last compile error bytes", lastCompileError_.size());
-      }
       ImGui::EndTable();
     }
 

@@ -434,34 +434,7 @@ namespace hades
         }
 
         workspaceDeleteError_.clear();
-        const std::filesystem::path deletedPath = pendingWorkspaceDeletePath_;
         pendingWorkspaceDeletePath_.clear();
-
-        std::size_t removedTabCount = 0;
-        for (std::size_t index = openScriptEditorTabs_.size(); index > 0; --index)
-        {
-          if (!path_is_same_or_within(deletedPath, openScriptEditorTabs_[index - 1].path))
-          {
-            continue;
-          }
-
-          close_script_editor_tab(index - 1);
-          ++removedTabCount;
-        }
-
-        if (pendingScriptEditorClosePath_.has_value() &&
-            path_is_same_or_within(deletedPath, *pendingScriptEditorClosePath_))
-        {
-          pendingScriptEditorClosePath_.reset();
-          openScriptEditorUnsavedChangesDialog_ = false;
-        }
-
-        if (removedTabCount > 0)
-        {
-          scriptEditorStatusMessage_ = "Closed " + std::to_string(removedTabCount) +
-              (removedTabCount == 1 ? " script tab that was deleted from the workspace." : " script tabs that were deleted from the workspace.");
-          scriptEditorStatusIsError_ = false;
-        }
 
         invalidate_workspace_cache();
         ImGui::CloseCurrentPopup();

@@ -243,26 +243,9 @@ namespace hades
       workspaceTreeRoot_.reset();
       workspaceScriptFiles_.clear();
       workspaceScanError_.clear();
-      openScriptEditorTabs_.clear();
-      activeScriptEditorTabIndex_.reset();
-      scriptEditorStatusMessage_.clear();
-      scriptEditorStatusIsError_ = false;
-      scriptEditorDockLayoutInitialized_ = false;
-      scriptEditorShowCodePanel_ = true;
-      scriptEditorShowFileTreePanel_ = true;
-      scriptEditorShowDebugPanel_ = true;
-      scriptEditorShowEntitiesPanel_ = true;
-      focusScriptEditorWindow_ = false;
-      openScriptEditorUnsavedChangesDialog_ = false;
-      pendingScriptEditorClosePath_.reset();
-      pendingCloseAllScriptEditorTabs_ = false;
-      pendingCloseScriptEditorWindow_ = false;
       workspaceScriptListDirty_ = false;
       parsedScriptCache_.clear();
       parsedScriptModTimes_.clear();
-      lastCompileError_.clear();
-      scriptCompileStatus_ = ScriptCompileStatus::Unknown;
-      currentCompileRequestId_ = ++nextCompileRequestId_;
       cachedDiskWorlds_.clear();
     }
 
@@ -412,8 +395,7 @@ namespace hades
     {
       if (!node.directory && node.path.extension() == ".cs")
       {
-        const std::string relativePath = relative_workspace_path(activeWorkspacePath_, node.path);
-        request_script_editor_open(node.path, relativePath);
+        open_in_external_editor(externalEditor_, activeWorkspacePath_, node.path);
       }
     }
 

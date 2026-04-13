@@ -147,6 +147,10 @@ function(hades_configure_dependencies)
   set(TARGET_VIEWER OFF CACHE BOOL "" FORCE)
   set(ENABLE_ALL_WARNINGS OFF CACHE BOOL "" FORCE)
   set(INTERPROCEDURAL_OPTIMIZATION OFF CACHE BOOL "" FORCE)
+  # Jolt defaults to the static MSVC runtime (/MT) when BUILD_SHARED_LIBS is
+  # OFF.  The rest of the project uses the dynamic CRT (/MD), so force Jolt
+  # to match to avoid LNK2038 RuntimeLibrary mismatches.
+  set(USE_STATIC_MSVC_RUNTIME_LIBRARY OFF CACHE BOOL "" FORCE)
   FetchContent_Declare(
     nlohmann_json
     GIT_REPOSITORY https://github.com/nlohmann/json.git
