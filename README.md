@@ -44,10 +44,11 @@ The purpose is educational and experimental, to explore the intriguing world of 
 
 **Scripting**
 
-- C# scripting via in-process .NET CoreCLR embedding (hostfxr hosting API)
-- Scripts compiled on play start via local `dotnet build` (SDK 7.0+)
-- Zero-IPC overhead: managed code runs in-engine via native function pointers
-- Blittable struct data exchange (no serialization)
+- C++ scripting compiled into shared libraries at play start
+- Direct ECS access from scripts -- no marshaling or IPC overhead
+- Mouse and keyboard input callbacks
+- World loading API for scene transitions
+- Screen-to-world raycasting utilities for entity picking
 - Background workspace script compilation with error reporting
 - See [SCRIPTING.md](SCRIPTING.md) for details
 
@@ -112,12 +113,8 @@ cmake --build build
 ./build/Hades
 ```
 
-Entity scripts are compiled when Play starts. Install a local `dotnet` SDK if you
-want to attach `.cs` files to entities and run them in play mode on macOS,
-Linux, or Windows. CMake captures the resolved `dotnet` path at configure time
-when available, so rerun `cmake -S . -B build` after installing or moving the
-SDK. You can also point CMake at it explicitly with
-`-DHADES_DOTNET_EXECUTABLE=/absolute/path/to/dotnet`.
+Entity scripts are C++ files compiled at play start using the same compiler that
+built the engine. No additional SDK is needed.
 
 ### Test
 
@@ -165,7 +162,7 @@ destroy_entities                     avg   314.592 ms  min   299.797 ms  max   3
 
 ## Scripting
 
-For C# scripting workflow, runtime behavior, and the current limitations, see
+For C++ scripting workflow, runtime behavior, and the current limitations, see
 [SCRIPTING.md](SCRIPTING.md).
 
 ## Previous Versions
