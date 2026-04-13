@@ -81,6 +81,12 @@ function(hades_configure_dependencies)
   set(MINIAUDIO_NO_EXTRA_NODES ON CACHE BOOL "" FORCE)
   set(MINIAUDIO_NO_LIBVORBIS ON CACHE BOOL "" FORCE)
 
+  # Force assimp (and its bundled zlib) to build as a static library.
+  # Assimp defaults BUILD_SHARED_LIBS to ON, which also makes its internal
+  # zlib shared — producing a DLL that is not staged alongside the binary,
+  # causing 0xC0000135 (DLL Not Found) on Windows CI.
+  set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+
   set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
   set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
   # Assimp's bundled zlib keeps Linux source-only builds self-contained, but it

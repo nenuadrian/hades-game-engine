@@ -212,6 +212,10 @@ jobs:
           if (-not (Test-Path (Join-Path $exportDir "assets"))) { exit 1 }
           Write-Host "Packaging structure OK"
 
+          # List exported files for debugging DLL issues.
+          Write-Host "Export directory contents:"
+          Get-ChildItem -Path $exportDir | ForEach-Object { Write-Host "  $($_.Name)" }
+
           # Launch headless with a 5-second timeout.
           $proc = Start-Process -FilePath (Join-Path $exportDir "HadesRuntime.exe") `
             -ArgumentList "--project", $exportDir, "--headless" `
