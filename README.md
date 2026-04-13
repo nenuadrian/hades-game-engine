@@ -6,7 +6,7 @@
 
 ## Overview
 
-A C++ 3D game engine with a Vulkan renderer, in-process C# scripting, spatial audio, and an ImGui-based editor. Built around a custom Entity-Component-System architecture.
+A C++ 3D game engine with a Vulkan renderer, in-process C++ scripting, spatial audio, and an ImGui-based editor. Built around a custom Entity-Component-System architecture.
 
 The purpose is educational and experimental, to explore the intriguing world of game engine development and to enable quick use of environments created for machine learning/AI training through headless mode and a flexible API.
 
