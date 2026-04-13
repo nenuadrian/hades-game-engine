@@ -79,7 +79,7 @@ namespace hades
       return true;
     }
 
-    std::string csharp_class_name_from_stem(const std::string &stem)
+    std::string class_name_from_stem(const std::string &stem)
     {
       std::string className;
       bool capitalizeNext = true;
@@ -113,27 +113,24 @@ namespace hades
 
     std::string build_script_template(const std::string &className)
     {
-      return "using Hades.Scripting;\n\n"
-             "public sealed class " +
+      return "#include \"engine/hades.hpp\"\n"
+             "\n"
+             "class " +
              className +
-             " : HadesScript\n"
+             " : public hades::HadesScript\n"
              "{\n"
-             "    public override void OnStart(EntityContext context)\n"
-             "    {\n"
-             "    }\n"
+             "public:\n"
+             "  void onStart(hades::ScriptContext &ctx) override\n"
+             "  {\n"
+             "  }\n"
              "\n"
-             "    public override void OnUpdate(EntityContext context, float deltaTime)\n"
-             "    {\n"
-             "    }\n"
+             "  void onUpdate(hades::ScriptContext &ctx, float deltaTime) override\n"
+             "  {\n"
+             "  }\n"
+             "};\n"
              "\n"
-             "    public override void OnKeyDown(EntityContext context, int keyCode)\n"
-             "    {\n"
-             "    }\n"
-             "\n"
-             "    public override void OnKeyUp(EntityContext context, int keyCode)\n"
-             "    {\n"
-             "    }\n"
-             "}\n";
+             "HADES_REGISTER_SCRIPT(" +
+             className + ")\n";
     }
 
     std::string trim(const std::string &value)
@@ -187,13 +184,13 @@ namespace hades
       {
         if (!targetPath.has_extension())
         {
-          targetPath += ".cs";
+          targetPath += ".cpp";
         }
-        else if (targetPath.extension() != ".cs")
+        else if (targetPath.extension() != ".cpp")
         {
           if (errorMessage != nullptr)
           {
-            *errorMessage = "Scripts must use the .cs extension.";
+            *errorMessage = "Scripts must use the .cpp extension.";
           }
           return false;
         }
@@ -231,7 +228,7 @@ namespace hades
         return false;
       }
 
-      output << build_script_template(csharp_class_name_from_stem(targetPath.stem().string()));
+      output << build_script_template(class_name_from_stem(targetPath.stem().string()));
       if (!output.good())
       {
         if (errorMessage != nullptr)

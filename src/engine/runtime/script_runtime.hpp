@@ -49,13 +49,20 @@ namespace hades
     const std::string &last_error() const;
     void on_key_down(int keyCode);
     void on_key_up(int keyCode);
+    void on_mouse_down(int button, float screenX, float screenY);
+    void on_mouse_up(int button, float screenX, float screenY);
+    void on_mouse_move(float screenX, float screenY);
+    void set_viewport_size(float width, float height);
+
+    /// Check if a script has requested a world load. Returns the world name if so.
+    static std::optional<std::string> consume_pending_world_load();
 
     /// Collect observed variables set by scripts via HadesAPI.Observe().
     /// Returns a JSON object string, e.g. {"score":10,"health":100}.
     std::string collect_observations() const;
 
-    /// Compile the given .cs source files without loading or running them.
-    /// Returns true on success. On failure, sets errorMessage with build output.
+    /// Compile the given .cpp source files without loading or running them.
+    /// Returns true on success. On failure, sets errorMessage with compiler output.
     static bool compile(
         const std::vector<std::filesystem::path> &sourceFiles,
         std::string *errorMessage = nullptr);

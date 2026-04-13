@@ -63,12 +63,7 @@ namespace hades
         const std::filesystem::path &workspacePath,
         const std::filesystem::path &path)
     {
-      if (path.extension() != ".cs")
-      {
-        return false;
-      }
-
-      if (path.filename() == "AssemblyInfo.cs")
+      if (path.extension() != ".cpp")
       {
         return false;
       }
@@ -125,7 +120,7 @@ namespace hades
 
       const std::string ext = to_lower(path.extension().string());
 
-      if (ext == ".cs")
+      if (ext == ".cpp" || ext == ".hpp" || ext == ".h")
         return {ICON_FA_FILE_CODE, IM_COL32(130, 150, 210, 255)};
       if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".tga")
         return {ICON_FA_IMAGE, IM_COL32(130, 190, 130, 255)};
@@ -141,29 +136,32 @@ namespace hades
       return {ICON_FA_FILE, IM_COL32(161, 151, 146, 255)};
     }
 
-    bool subtree_matches_filter(const Editor::WorkspaceTreeNode &node, const char *filter)
+    bool name_matches_filter(const std::string &name, const char *filter)
     {
       if (filter[0] == '\0')
       {
         return true;
       }
+      return to_lower(name).find(to_lower(filter)) != std::string::npos;
+    }
 
-      const std::string lowerFilter = to_lower(filter);
-      const std::string lowerName = to_lower(path_display_name(node.path));
-      if (lowerName.find(lowerFilter) != std::string::npos)
+    const Editor::WorkspaceTreeNode *find_tree_node(
+        const Editor::WorkspaceTreeNode &root,
+        const std::filesystem::path &targetPath)
+    {
+      if (root.path.lexically_normal() == targetPath.lexically_normal())
       {
-        return true;
+        return &root;
       }
-
-      for (const auto &child : node.children)
+      for (const auto &child : root.children)
       {
-        if (subtree_matches_filter(child, filter))
+        const Editor::WorkspaceTreeNode *found = find_tree_node(child, targetPath);
+        if (found != nullptr)
         {
-          return true;
+          return found;
         }
       }
-
-      return false;
+      return nullptr;
     }
 
     bool build_workspace_tree(
@@ -240,6 +238,7 @@ namespace hades
     {
       activeWorkspacePath_ = workspacePath;
       pendingSavedWorldRestore_ = !activeWorkspacePath_.empty();
+      workspaceGridCurrentDir_.clear();
       workspaceTreeRoot_.reset();
       workspaceScriptFiles_.clear();
       workspaceScanError_.clear();
@@ -311,91 +310,38 @@ namespace hades
     }
   }
 
-  void Editor::render_workspace_tree_node(const WorkspaceTreeNode &node, int depth, int &rowIndex, const char *filter)
+  void Editor::render_workspace_grid_cell(const WorkspaceTreeNode &node, const char *filter)
   {
     const std::string label = path_display_name(node.path);
-    const bool isLeaf = !node.directory || node.children.empty();
     const bool isRenaming = !workspaceRenamePath_.empty() &&
                             workspaceRenamePath_.lexically_normal() == node.path.lexically_normal();
 
-    if (filter[0] != '\0' && !subtree_matches_filter(node, filter))
-    {
-      return;
-    }
-
-    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
-    if (isLeaf)
-    {
-      flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-    }
-
-    const bool isAlternateRow = (rowIndex % 2 != 0);
-    if (isAlternateRow)
-    {
-      ImDrawList *drawList = ImGui::GetWindowDrawList();
-      const ImVec2 pos = ImGui::GetCursorScreenPos();
-      const float availWidth = ImGui::GetContentRegionAvail().x;
-      const float rowHeight = ImGui::GetTextLineHeightWithSpacing() + ImGui::GetStyle().FramePadding.y * 2;
-      drawList->AddRectFilled(
-          ImVec2(pos.x, pos.y),
-          ImVec2(pos.x + availWidth, pos.y + rowHeight),
-          IM_COL32(50, 50, 50, 60));
-    }
-    ++rowIndex;
-
     const FileTypeVisual fileVisual = get_file_type_visual(node.path, node.directory, false);
-    ImGui::PushStyleColor(ImGuiCol_Text, fileVisual.iconColor);
-    const bool nodeOpen = ImGui::TreeNodeEx(("##ws" + node.path.string()).c_str(), flags);
-    ImGui::PopStyleColor();
 
-    const bool treeNodeHovered = ImGui::IsItemHovered(ImGuiHoveredFlags_None);
+    const float cellWidth = ImGui::GetColumnWidth();
+    const float textLineHeight = ImGui::GetTextLineHeight();
+    const float iconScale = 2.5f;
+    const float iconHeight = textLineHeight * iconScale;
+    const float cellPaddingY = 6.0f;
+    const float cellHeight = cellPaddingY + iconHeight + 4.0f + textLineHeight + cellPaddingY;
 
-    ImGui::SameLine();
-    ImGui::PushStyleColor(ImGuiCol_Text, fileVisual.iconColor);
-    ImGui::TextUnformatted(fileVisual.icon);
-    ImGui::PopStyleColor();
-    ImGui::SameLine();
+    const ImVec2 cellStart = ImGui::GetCursorPos();
+    const std::string cellId = "##wscell_" + node.path.string();
 
-    if (isRenaming)
+    ImGui::PushID(cellId.c_str());
+
+    if (ImGui::Selectable("##sel", false, ImGuiSelectableFlags_AllowDoubleClick, ImVec2(cellWidth, cellHeight)))
     {
-      if (workspaceRenameFocusPending_)
+      if (!isRenaming)
       {
-        ImGui::SetKeyboardFocusHere();
-        workspaceRenameFocusPending_ = false;
-      }
-
-      ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-      const bool entered = ImGui::InputText(
-          "##rename",
-          workspaceRenameBuffer_.data(),
-          workspaceRenameBuffer_.size(),
-          ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
-      const bool lostFocus = !ImGui::IsItemActive() && !workspaceRenameFocusPending_;
-      if (entered || lostFocus)
-      {
-        const std::string newName(workspaceRenameBuffer_.data());
-        if (!newName.empty() && newName != label)
+        if (node.directory)
         {
-          std::error_code errorCode;
-          std::filesystem::rename(node.path, node.path.parent_path() / newName, errorCode);
-          if (!errorCode)
-          {
-            invalidate_workspace_cache();
-          }
+          workspaceGridCurrentDir_ = node.path;
         }
-        workspaceRenamePath_.clear();
-      }
-    }
-    else
-    {
-      ImGui::TextUnformatted(label.c_str());
-    }
-
-    if (!isRenaming && treeNodeHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-    {
-      if (!node.directory && node.path.extension() == ".cs")
-      {
-        open_in_external_editor(externalEditor_, activeWorkspacePath_, node.path);
+        else if (node.path.extension() == ".cpp")
+        {
+          open_in_external_editor(externalEditor_, activeWorkspacePath_, node.path);
+        }
       }
     }
 
@@ -448,14 +394,83 @@ namespace hades
       ImGui::EndPopup();
     }
 
-    if (nodeOpen && !isLeaf)
+    // Draw icon centered in cell.
     {
-      for (const auto &child : node.children)
-      {
-        render_workspace_tree_node(child, depth + 1, rowIndex, filter);
-      }
-      ImGui::TreePop();
+      const float origScale = ImGui::GetFont()->Scale;
+      ImGui::GetFont()->Scale = iconScale;
+      ImGui::PushFont(ImGui::GetFont());
+
+      const ImVec2 iconSize = ImGui::CalcTextSize(fileVisual.icon);
+      const float iconX = cellStart.x + (cellWidth - iconSize.x) * 0.5f;
+      const float iconY = cellStart.y + cellPaddingY;
+      ImGui::SetCursorPos(ImVec2(iconX, iconY));
+      ImGui::PushStyleColor(ImGuiCol_Text, fileVisual.iconColor);
+      ImGui::TextUnformatted(fileVisual.icon);
+      ImGui::PopStyleColor();
+
+      ImGui::GetFont()->Scale = origScale;
+      ImGui::PopFont();
     }
+
+    // Draw filename or rename input below icon.
+    {
+      const float textY = cellStart.y + cellPaddingY + iconHeight + 4.0f;
+
+      if (isRenaming)
+      {
+        if (workspaceRenameFocusPending_)
+        {
+          ImGui::SetKeyboardFocusHere();
+          workspaceRenameFocusPending_ = false;
+        }
+
+        ImGui::SetCursorPos(ImVec2(cellStart.x, textY));
+        ImGui::SetNextItemWidth(cellWidth);
+        const bool entered = ImGui::InputText(
+            "##rename",
+            workspaceRenameBuffer_.data(),
+            workspaceRenameBuffer_.size(),
+            ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+        const bool lostFocus = !ImGui::IsItemActive() && !workspaceRenameFocusPending_;
+        if (entered || lostFocus)
+        {
+          const std::string newName(workspaceRenameBuffer_.data());
+          if (!newName.empty() && newName != label)
+          {
+            std::error_code errorCode;
+            std::filesystem::rename(node.path, node.path.parent_path() / newName, errorCode);
+            if (!errorCode)
+            {
+              invalidate_workspace_cache();
+            }
+          }
+          workspaceRenamePath_.clear();
+        }
+      }
+      else
+      {
+        std::string displayName = label;
+        if (displayName.size() > 14)
+        {
+          displayName = displayName.substr(0, 11) + "...";
+        }
+
+        const ImVec2 textSize = ImGui::CalcTextSize(displayName.c_str());
+        const float textX = cellStart.x + (cellWidth - textSize.x) * 0.5f;
+        ImGui::SetCursorPos(ImVec2(textX, textY));
+        ImGui::TextUnformatted(displayName.c_str());
+
+        if (displayName != label && ImGui::IsItemHovered())
+        {
+          ImGui::SetTooltip("%s", label.c_str());
+        }
+      }
+    }
+
+    // Advance cursor past the cell.
+    ImGui::SetCursorPos(ImVec2(cellStart.x, cellStart.y + cellHeight));
+
+    ImGui::PopID();
   }
 
   void Editor::workspace(EntityManager &entityManager, ComponentManager &componentManager)
@@ -493,17 +508,101 @@ namespace hades
       ImGui::Spacing();
     }
 
-    // --- File tree ---
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 3.0f));
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
-    int workspaceRowIndex = 0;
-    ImGui::SetNextItemOpen(true, ImGuiCond_Once);
-    render_workspace_tree_node(*workspaceTreeRoot_, 0, workspaceRowIndex, workspaceFilterBuffer_.data());
-    ImGui::PopStyleVar(2);
+    // --- Breadcrumb navigation ---
+    {
+      if (workspaceGridCurrentDir_.empty())
+      {
+        workspaceGridCurrentDir_ = activeWorkspacePath_;
+      }
+
+      if (ImGui::SmallButton(ICON_FA_HOUSE))
+      {
+        workspaceGridCurrentDir_ = activeWorkspacePath_;
+      }
+
+      const std::filesystem::path relativePath = workspaceGridCurrentDir_.lexically_relative(activeWorkspacePath_);
+      if (!relativePath.empty() && relativePath != ".")
+      {
+        std::filesystem::path accumulated = activeWorkspacePath_;
+        for (const auto &segment : relativePath)
+        {
+          accumulated /= segment;
+          ImGui::SameLine();
+          ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(120, 120, 120, 255));
+          ImGui::TextUnformatted(ICON_FA_CHEVRON_RIGHT);
+          ImGui::PopStyleColor();
+          ImGui::SameLine();
+          const std::string segStr = segment.string();
+          const std::string btnId = segStr + "##bc_" + accumulated.string();
+          if (ImGui::SmallButton(btnId.c_str()))
+          {
+            workspaceGridCurrentDir_ = accumulated;
+          }
+        }
+      }
+
+      ImGui::Spacing();
+      ImGui::Separator();
+      ImGui::Spacing();
+    }
+
+    // --- Resolve current directory node ---
+    const WorkspaceTreeNode *currentNode = find_tree_node(*workspaceTreeRoot_, workspaceGridCurrentDir_);
+    if (currentNode == nullptr)
+    {
+      workspaceGridCurrentDir_ = activeWorkspacePath_;
+      currentNode = &(*workspaceTreeRoot_);
+    }
+
+    // --- Grid view ---
+    if (currentNode->children.empty())
+    {
+      ImGui::TextDisabled("Empty folder.");
+    }
+    else
+    {
+      constexpr int columns = 6;
+      if (ImGui::BeginTable("WorkspaceGrid", columns, ImGuiTableFlags_SizingStretchSame))
+      {
+        for (const auto &child : currentNode->children)
+        {
+          const std::string childName = path_display_name(child.path);
+          if (!name_matches_filter(childName, workspaceFilterBuffer_.data()))
+          {
+            continue;
+          }
+
+          ImGui::TableNextColumn();
+          render_workspace_grid_cell(child, workspaceFilterBuffer_.data());
+        }
+        ImGui::EndTable();
+      }
+    }
+
+    // Drop target for current directory background.
+    if (ImGui::BeginDragDropTarget())
+    {
+      if (const ImGuiPayload *payload = ImGui::AcceptDragDropPayload("WORKSPACE_PATH"))
+      {
+        const char *sourcePath = static_cast<const char *>(payload->Data);
+        const std::filesystem::path source(sourcePath);
+        const std::filesystem::path destination = currentNode->path / source.filename();
+        std::error_code errorCode;
+        if (source != destination)
+        {
+          std::filesystem::rename(source, destination, errorCode);
+          if (!errorCode)
+          {
+            invalidate_workspace_cache();
+          }
+        }
+      }
+      ImGui::EndDragDropTarget();
+    }
 
     if (ImGui::BeginPopupContextWindow("WorkspaceRootContext", ImGuiPopupFlags_NoOpenOverItems))
     {
-      render_workspace_create_menu(activeWorkspacePath_);
+      render_workspace_create_menu(currentNode->path);
       ImGui::EndPopup();
     }
     ImGui::End();

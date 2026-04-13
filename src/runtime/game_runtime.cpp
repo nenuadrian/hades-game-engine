@@ -289,6 +289,41 @@ namespace hades
           running_ = false;
         }
       }
+      else if (event.type == SDL_MOUSEBUTTONDOWN)
+      {
+        scriptRuntime_.on_mouse_down(
+            static_cast<int>(event.button.button),
+            static_cast<float>(event.button.x),
+            static_cast<float>(event.button.y));
+        if (scriptRuntime_.faulted())
+        {
+          Log::error("script: %s", scriptRuntime_.last_error().c_str());
+          running_ = false;
+        }
+      }
+      else if (event.type == SDL_MOUSEBUTTONUP)
+      {
+        scriptRuntime_.on_mouse_up(
+            static_cast<int>(event.button.button),
+            static_cast<float>(event.button.x),
+            static_cast<float>(event.button.y));
+        if (scriptRuntime_.faulted())
+        {
+          Log::error("script: %s", scriptRuntime_.last_error().c_str());
+          running_ = false;
+        }
+      }
+      else if (event.type == SDL_MOUSEMOTION)
+      {
+        scriptRuntime_.on_mouse_move(
+            static_cast<float>(event.motion.x),
+            static_cast<float>(event.motion.y));
+        if (scriptRuntime_.faulted())
+        {
+          Log::error("script: %s", scriptRuntime_.last_error().c_str());
+          running_ = false;
+        }
+      }
 #endif
     }
 
@@ -310,6 +345,10 @@ namespace hades
     // Update scripts.
     if (scriptRuntime_.is_running())
     {
+      int windowW = 0, windowH = 0;
+      SDL_GetWindowSize(window_.get(), &windowW, &windowH);
+      scriptRuntime_.set_viewport_size(static_cast<float>(windowW), static_cast<float>(windowH));
+
       scriptRuntime_.update(deltaTime, componentManager_, entityManager_);
       if (scriptRuntime_.faulted())
       {
@@ -317,6 +356,8 @@ namespace hades
         running_ = false;
         return;
       }
+
+      handle_pending_world_load();
     }
 #endif
 
@@ -345,6 +386,8 @@ namespace hades
         running_ = false;
         return;
       }
+
+      handle_pending_world_load();
     }
 #endif
 
@@ -587,4 +630,56 @@ namespace hades
     api_->stop();
   }
 #endif // HADES_ENABLE_API
+
+#ifndef HADES_PLATFORM_WEB
+  void GameRuntime::handle_pending_world_load()
+  {
+    auto worldName = ScriptRuntime::consume_pending_world_load();
+    if (!worldName.has_value())
+    {
+      return;
+    }
+
+    const auto worldFilePath = projectPath_ / ".hades" / "worlds" / (*worldName + ".json");
+    if (!std::filesystem::exists(worldFilePath))
+    {
+      Log::error("World file not found: %s", worldFilePath.string().c_str());
+      return;
+    }
+
+    scriptRuntime_.stop();
+
+    if (activeWorld_.has_value())
+    {
+      destroy_world_tree(*activeWorld_, entityManager_, componentManager_);
+    }
+
+    auto newWorld = load_world_from_file(worldFilePath, entityManager_, componentManager_);
+    if (!newWorld.has_value())
+    {
+      Log::error("Failed to load world: %s", worldName->c_str());
+      running_ = false;
+      return;
+    }
+
+    activeWorld_ = newWorld;
+
+    if (physicsSystem_)
+    {
+      physicsSystem_->clear_bodies();
+      physicsSystem_->set_active_world(newWorld);
+    }
+    if (audioSystem_)
+    {
+      audioSystem_->set_active_world(newWorld);
+    }
+
+    std::string scriptError;
+    if (!scriptRuntime_.start(componentManager_, entityManager_, projectPath_, newWorld, &scriptError))
+    {
+      Log::error("World load script error: %s", scriptError.c_str());
+      running_ = false;
+    }
+  }
+#endif
 }

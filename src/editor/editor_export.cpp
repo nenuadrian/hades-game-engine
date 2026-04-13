@@ -113,32 +113,12 @@ namespace
     }
 
     std::string line;
-    while (proc.is_running())
-    {
-      std::string readError;
-      if (proc.read_line(line, &readError))
-      {
-        append_log(state, line + "\n");
-      }
-    }
-    // Drain remaining output after process exits.
     while (proc.read_line(line))
     {
       append_log(state, line + "\n");
     }
 
-    // Get exit code via run_capture on a no-op -- we need to check exit status.
-    // Subprocess doesn't expose exit code directly after start(), so we rely on
-    // is_running() becoming false. Use the fact that read_line returns false when
-    // the process has exited. We'll assume success if it exited cleanly.
-    // Actually, let's just check if the process is still running.
-    // The Subprocess API doesn't expose exit code for start() mode, so we'll
-    // fall back to run_capture for the actual build steps and only use
-    // start()+read_line() for streaming.
-
-    // Since Subprocess::start() doesn't give us an exit code, we'll use a
-    // different approach: run_capture but log intermediate phase headers.
-    return 0;
+    return proc.wait_for_exit();
   }
 
   void run_export_build(
@@ -193,17 +173,16 @@ namespace
       // Step 1: CMake configure via emcmake.
       append_log(*state, "=== Configuring (emcmake cmake) ===\n");
       {
-        auto result = hades::Subprocess::run_capture(
+        int exitCode = run_streaming(*state,
             {emcmake, "cmake",
              "-S", sourceDir,
              "-B", buildDir.string(),
              "-DCMAKE_BUILD_TYPE=Release",
              "-DBUILD_SHARED_LIBS=OFF",
              "-DHADES_WEB_ASSET_DIR=" + webAssetDir});
-        append_log(*state, result.output);
-        if (!result.launched || result.exitCode != 0)
+        if (exitCode != 0)
         {
-          fail("Emscripten CMake configure failed (exit code " + std::to_string(result.exitCode) + "). "
+          fail("Emscripten CMake configure failed (exit code " + std::to_string(exitCode) + "). "
                "Is the Emscripten SDK installed and in your PATH?");
           return;
         }
@@ -213,15 +192,14 @@ namespace
       // Step 2: Build.
       append_log(*state, "=== Building HadesRuntime (WebAssembly) ===\n");
       {
-        auto result = hades::Subprocess::run_capture(
+        int exitCode = run_streaming(*state,
             {cmakeCommand,
              "--build", buildDir.string(),
              "--target", "HadesRuntime",
              "--config", "Release"});
-        append_log(*state, result.output);
-        if (!result.launched || result.exitCode != 0)
+        if (exitCode != 0)
         {
-          fail("Web build failed (exit code " + std::to_string(result.exitCode) + ").");
+          fail("Web build failed (exit code " + std::to_string(exitCode) + ").");
           return;
         }
         append_log(*state, "\n");
@@ -334,11 +312,10 @@ namespace
       {
         configureArgs.push_back("-DHADES_ENABLE_API=ON");
       }
-      auto result = hades::Subprocess::run_capture(configureArgs);
-      append_log(*state, result.output);
-      if (!result.launched || result.exitCode != 0)
+      int exitCode = run_streaming(*state, configureArgs);
+      if (exitCode != 0)
       {
-        fail("CMake configure failed (exit code " + std::to_string(result.exitCode) + ").");
+        fail("CMake configure failed (exit code " + std::to_string(exitCode) + ").");
         return;
       }
       append_log(*state, "\n");
@@ -347,15 +324,14 @@ namespace
     // Step 2: CMake build.
     append_log(*state, "=== Building HadesRuntime ===\n");
     {
-      auto result = hades::Subprocess::run_capture(
+      int exitCode = run_streaming(*state,
           {cmakeCommand,
            "--build", buildDir.string(),
            "--target", "HadesRuntime",
            "--config", "Release"});
-      append_log(*state, result.output);
-      if (!result.launched || result.exitCode != 0)
+      if (exitCode != 0)
       {
-        fail("Build failed (exit code " + std::to_string(result.exitCode) + ").");
+        fail("Build failed (exit code " + std::to_string(exitCode) + ").");
         return;
       }
       append_log(*state, "\n");

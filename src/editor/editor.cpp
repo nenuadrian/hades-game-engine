@@ -17,8 +17,6 @@
 #include "../engine/core/ecs/world_utils.hpp"
 #include "../engine/gui/imgui.hpp"
 #include "../engine/profiling/frame_metrics.hpp"
-#include "../engine/runtime/project_generator.hpp"
-#include "../engine/runtime/scripting_sdk.hpp"
 #include "../engine/runtime/script_runtime.hpp"
 
 namespace hades
@@ -105,6 +103,7 @@ namespace hades
     pendingSavedWorldRestore_ = false;
 
     activeWorkspacePath_.clear();
+    workspaceGridCurrentDir_.clear();
     workspaceTreeRoot_.reset();
     workspaceScriptFiles_.clear();
     workspaceScanError_.clear();
@@ -308,19 +307,6 @@ namespace hades
     openExternalEditor.on_activate = [this]()
     {
       std::string errorMessage;
-      const auto sdkDllPath = ensure_scripting_sdk(&errorMessage);
-      if (sdkDllPath.empty())
-      {
-        log_error("SDK build failed: " + errorMessage);
-        return;
-      }
-
-      if (!generate_workspace_project(activeWorkspacePath_, sdkDllPath, &errorMessage))
-      {
-        log_error("Project generation failed: " + errorMessage);
-        return;
-      }
-
       if (!open_in_external_editor(externalEditor_, activeWorkspacePath_, {}, &errorMessage))
       {
         log_error(errorMessage);

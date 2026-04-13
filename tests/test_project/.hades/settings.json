@@ -1,0 +1,55 @@
+{
+  "editor": {
+    "sceneCamera": {
+      "distance": 34.0734977722168,
+      "pitchDegrees": -26.815048217773438,
+      "targetX": -0.32714593410491943,
+      "targetY": 0.0,
+      "targetZ": 5.069582939147949,
+      "yawDegrees": -74.2000503540039
+    },
+    "showDebugInfo": false
+  },
+  "export": {
+    "linux": {
+      "enableHadesAPI": false,
+      "enableHeadless": false,
+      "outputPath": "",
+      "projectName": "test_project"
+    },
+    "macOS": {
+      "enableHadesAPI": false,
+      "enableHeadless": false,
+      "outputPath": "/Users/adriannenu/Desktop/asdasd/",
+      "projectName": "test_project"
+    },
+    "selectedPlatform": 0,
+    "web": {
+      "enableHadesAPI": false,
+      "enableHeadless": false,
+      "outputPath": "",
+      "projectName": "test_project"
+    },
+    "windows": {
+      "enableHadesAPI": false,
+      "enableHeadless": false,
+      "outputPath": "",
+      "projectName": "test_project"
+    }
+  },
+  "gamePreview": {
+    "enableHadesAPI": false
+  },
+  "plugins": {
+    "debug": false,
+    "entities": true,
+    "export": false,
+    "properties": true,
+    "workspace": true,
+    "world": true
+  },
+  "scripting": {
+    "externalEditor": 0
+  },
+  "version": 2
+}

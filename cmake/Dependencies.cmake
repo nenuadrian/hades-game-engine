@@ -89,16 +89,25 @@ function(hades_configure_dependencies)
 
   set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
   set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
-  # Assimp's bundled zlib keeps Linux source-only builds self-contained, but it
-  # fails under current Xcode/macOS SDKs, so prefer the platform zlib there.
+  # Assimp's bundled zlib is too old for modern macOS SDKs (fdopen macro
+  # conflict), so use the platform zlib there.  On other platforms the bundled
+  # zlib keeps source-only builds self-contained.
   if(APPLE)
     set(ASSIMP_BUILD_ZLIB OFF CACHE BOOL "" FORCE)
   else()
     set(ASSIMP_BUILD_ZLIB ON CACHE BOOL "" FORCE)
   endif()
+  # Always build minizip from assimp's bundled contrib/unzip sources rather
+  # than discovering Homebrew's minizip via pkg-config (it can ship an
+  # incompatible libminizip.a on macOS).  This is a regular variable, not a
+  # cache entry, because assimp's CMakeLists.txt checks it with a plain IF().
+  set(ASSIMP_BUILD_MINIZIP TRUE)
   set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
   set(ASSIMP_WARNINGS_AS_ERRORS OFF CACHE BOOL "" FORCE)
   set(ASSIMP_INJECT_DEBUG_POSTFIX OFF CACHE BOOL "" FORCE)
+  # Disable the 3MF exporter to avoid building contrib/zip/src/zip.c, which
+  # triggers false positives in some antivirus software (e.g. Avast).
+  set(ASSIMP_BUILD_3MF_EXPORTER OFF CACHE BOOL "" FORCE)
 
   FetchContent_Declare(
     cli11

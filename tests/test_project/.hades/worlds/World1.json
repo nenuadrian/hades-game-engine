@@ -1,0 +1,153 @@
+{
+  "entities": [
+    {
+      "components": {
+        "hierarchy": {
+          "children": [
+            3,
+            2,
+            1,
+            0
+          ],
+          "parent": null
+        },
+        "name": {
+          "value": "World1"
+        },
+        "world": {
+          "isDefault": true
+        }
+      },
+      "id": 4
+    },
+    {
+      "components": {
+        "audioListener": {
+          "enabled": true,
+          "forwardX": 0.0,
+          "forwardY": 0.0,
+          "forwardZ": 1.0,
+          "upX": 0.0,
+          "upY": 1.0,
+          "upZ": 0.0
+        },
+        "camera": {
+          "farClip": 1000.0,
+          "fovY": 60.0,
+          "isMainCamera": true,
+          "nearClip": 0.10000000149011612
+        },
+        "hierarchy": {
+          "children": [],
+          "parent": 4
+        },
+        "name": {
+          "value": "Camera"
+        },
+        "position3d": {
+          "x": 0.0,
+          "y": 5.0,
+          "z": -10.0
+        },
+        "rotation3d": {
+          "qw": 0.9895059466362,
+          "qx": 0.14449244737625122,
+          "qy": 0.0,
+          "qz": 0.0
+        }
+      },
+      "id": 3
+    },
+    {
+      "components": {
+        "hierarchy": {
+          "children": [],
+          "parent": 4
+        },
+        "name": {
+          "value": "Player"
+        },
+        "position3d": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "script": {
+          "attachments": [
+            {
+              "className": "ArrowMovement",
+              "enabled": true,
+              "publicFieldValues": {},
+              "scriptPath": "ArrowMovement.cpp"
+            },
+            {
+              "className": "Jump",
+              "enabled": true,
+              "publicFieldValues": {},
+              "scriptPath": "Jump.cpp"
+            }
+          ]
+        }
+      },
+      "id": 2
+    },
+    {
+      "components": {
+        "hierarchy": {
+          "children": [],
+          "parent": 4
+        },
+        "name": {
+          "value": "Clickable"
+        },
+        "position3d": {
+          "x": 3.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "primitive": {
+          "type": 0
+        },
+        "script": {
+          "attachments": [
+            {
+              "className": "ClickDetection",
+              "enabled": true,
+              "publicFieldValues": {},
+              "scriptPath": "ClickDetection.cpp"
+            }
+          ]
+        }
+      },
+      "id": 1
+    },
+    {
+      "components": {
+        "hierarchy": {
+          "children": [],
+          "parent": 4
+        },
+        "name": {
+          "value": "Portal"
+        },
+        "position3d": {
+          "x": -3.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "script": {
+          "attachments": [
+            {
+              "className": "WorldLoader",
+              "enabled": true,
+              "publicFieldValues": {},
+              "scriptPath": "WorldLoader.cpp"
+            }
+          ]
+        }
+      },
+      "id": 0
+    }
+  ],
+  "version": 1
+}

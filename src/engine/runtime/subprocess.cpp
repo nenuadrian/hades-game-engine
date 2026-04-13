@@ -560,4 +560,34 @@ namespace hades
   {
     return impl_->running;
   }
+
+  int Subprocess::wait_for_exit()
+  {
+    // Drain any remaining output so the pipe doesn't block the child.
+    std::string line;
+    while (read_line(line))
+    {
+    }
+
+    int exitCode = -1;
+#ifdef _WIN32
+    if (impl_->processHandle != nullptr)
+    {
+      WaitForSingleObject(impl_->processHandle, INFINITE);
+      DWORD code = 0;
+      GetExitCodeProcess(impl_->processHandle, &code);
+      exitCode = static_cast<int>(code);
+    }
+#else
+    if (impl_->pid >= 0)
+    {
+      int status = 0;
+      waitpid(impl_->pid, &status, 0);
+      exitCode = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    }
+#endif
+
+    impl_->running = false;
+    return exitCode;
+  }
 }

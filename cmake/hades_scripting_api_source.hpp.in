@@ -1,6 +1,0 @@
-#pragma once
-
-namespace hades
-{
-  inline constexpr char HADES_SCRIPTING_API_SOURCE[] = R"HADES_API(@_HADES_API_SOURCE@)HADES_API";
-}

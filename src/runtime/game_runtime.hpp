@@ -93,6 +93,9 @@ namespace hades
 #endif
 
     std::string project_name() const;
+#ifndef HADES_PLATFORM_WEB
+    void handle_pending_world_load();
+#endif
   };
 }
 

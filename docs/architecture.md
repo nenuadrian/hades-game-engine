@@ -44,10 +44,9 @@ and editor code stay easy to trace.
 
     `src/engine/runtime`
 
-    In-process C# scripting via the .NET CoreCLR hosting API. Handles
-    script compilation (`dotnet build`), CLR embedding (hostfxr), and
-    managed-to-native interop using `[UnmanagedCallersOnly]` function
-    pointers. See [Scripting](scripting.md) for details.
+    C++ scripting compiled into shared libraries at play start. Handles
+    script compilation, dynamic loading, and direct ECS access from user
+    scripts. See [Scripting](scripting.md) for details.
 
 -   ### Editor
 

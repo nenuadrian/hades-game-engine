@@ -34,56 +34,9 @@ if(NOT EMSCRIPTEN)
 endif()
 hades_configure_dependencies()
 
-if(NOT EMSCRIPTEN)
-set(HADES_DOTNET_EXECUTABLE "" CACHE FILEPATH "Absolute path to the dotnet executable used by runtime scripting")
-set(HADES_DOTNET_ROOT "" CACHE PATH "Absolute path to DOTNET_ROOT used by runtime scripting")
-
-set(HADES_DOTNET_EXECUTABLE_PATH "${HADES_DOTNET_EXECUTABLE}")
-if(NOT HADES_DOTNET_EXECUTABLE_PATH)
-  find_program(HADES_DOTNET_EXECUTABLE_PATH NAMES dotnet)
-  if(HADES_DOTNET_EXECUTABLE_PATH)
-    set(HADES_DOTNET_EXECUTABLE "${HADES_DOTNET_EXECUTABLE_PATH}" CACHE FILEPATH "Absolute path to the dotnet executable used by runtime scripting" FORCE)
-  endif()
-endif()
-
-if(NOT HADES_DOTNET_ROOT AND HADES_DOTNET_EXECUTABLE_PATH)
-  get_filename_component(HADES_DOTNET_ROOT_PATH "${HADES_DOTNET_EXECUTABLE_PATH}" DIRECTORY)
-  set(HADES_DOTNET_ROOT "${HADES_DOTNET_ROOT_PATH}" CACHE PATH "Absolute path to DOTNET_ROOT used by runtime scripting" FORCE)
-endif()
-
-set(HADES_DOTNET_EXECUTABLE_CONFIG "${HADES_DOTNET_EXECUTABLE}")
-set(HADES_DOTNET_ROOT_CONFIG "${HADES_DOTNET_ROOT}")
-if(HADES_DOTNET_EXECUTABLE_CONFIG)
-  file(TO_CMAKE_PATH "${HADES_DOTNET_EXECUTABLE_CONFIG}" HADES_DOTNET_EXECUTABLE_CONFIG)
-endif()
-if(HADES_DOTNET_ROOT_CONFIG)
-  file(TO_CMAKE_PATH "${HADES_DOTNET_ROOT_CONFIG}" HADES_DOTNET_ROOT_CONFIG)
-endif()
-
-if(HADES_DOTNET_EXECUTABLE_CONFIG)
-  message(STATUS "Using dotnet SDK at: ${HADES_DOTNET_EXECUTABLE_CONFIG}")
-else()
-  message(STATUS "dotnet SDK not found during configure; scripting falls back to runtime PATH/DOTNET_ROOT lookup")
-endif()
-
-configure_file(
-  "${CMAKE_SOURCE_DIR}/cmake/dotnet_config.hpp.in"
-  "${CMAKE_BINARY_DIR}/generated/dotnet_config.hpp"
-  @ONLY)
-endif() # NOT EMSCRIPTEN (.NET configuration)
-
 configure_file(
   "${CMAKE_SOURCE_DIR}/cmake/build_config.hpp.in"
   "${CMAKE_BINARY_DIR}/generated/build_config.hpp"
-  @ONLY)
-
-# Embed the Hades scripting API C# source as a C++ string constant so that
-# both the play-mode build (script_runtime.cpp) and the SDK builder
-# (scripting_sdk.cpp) share a single source of truth.
-file(READ "${CMAKE_SOURCE_DIR}/src/engine/runtime/hades_scripting_api.cs" _HADES_API_SOURCE)
-configure_file(
-  "${CMAKE_SOURCE_DIR}/cmake/hades_scripting_api_source.hpp.in"
-  "${CMAKE_BINARY_DIR}/generated/hades_scripting_api_source.hpp"
   @ONLY)
 
 # Define the source directory.
@@ -96,15 +49,14 @@ file(GLOB_RECURSE ENGINE_HEADER_FILES CONFIGURE_DEPENDS "${SRC_DIR}/engine/*.h" 
 list(REMOVE_ITEM ENGINE_SOURCE_FILES "${SRC_DIR}/engine/gui/imgui.cpp")
 
 if(EMSCRIPTEN)
-  # For web builds: remove Vulkan renderer and .NET scripting sources;
+  # For web builds: remove Vulkan renderer and native scripting sources;
   # the WebGPU renderer is already picked up by the glob.
   list(REMOVE_ITEM ENGINE_SOURCE_FILES
     "${SRC_DIR}/engine/rendering/vulkan.cpp"
     "${SRC_DIR}/engine/runtime/script_runtime.cpp"
-    "${SRC_DIR}/engine/runtime/clr_host.cpp"
-    "${SRC_DIR}/engine/runtime/subprocess.cpp"
-    "${SRC_DIR}/engine/runtime/scripting_sdk.cpp"
-    "${SRC_DIR}/engine/runtime/project_generator.cpp")
+    "${SRC_DIR}/engine/runtime/script_compiler.cpp"
+    "${SRC_DIR}/engine/runtime/script_loader.cpp"
+    "${SRC_DIR}/engine/runtime/subprocess.cpp")
 else()
   # For native builds: remove WebGPU renderer (only usable with Emscripten).
   list(REMOVE_ITEM ENGINE_SOURCE_FILES

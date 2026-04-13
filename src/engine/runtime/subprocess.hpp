@@ -41,6 +41,10 @@ namespace hades
     void stop();
     bool is_running() const;
 
+    // Wait for the process to exit and return the exit code.
+    // Returns -1 if the process was never started or already stopped.
+    int wait_for_exit();
+
   private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

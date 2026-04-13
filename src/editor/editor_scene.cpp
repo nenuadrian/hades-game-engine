@@ -41,6 +41,11 @@ namespace hades
     constexpr char SCENE_WINDOW_TITLE[] = "World";
     constexpr float PI = 3.14159265358979323846f;
     constexpr float CUBE_HALF_EXTENT = 0.5f;
+    constexpr float PLANE_HALF_EXTENT = 0.5f;
+    constexpr int PLANE_EDGES[6][2] = {
+        {0, 1}, {1, 2}, {2, 3}, {3, 0},
+        {0, 2}, {1, 3},
+    };
     constexpr float EDITOR_SCENE_CAMERA_TARGET_X = 0.0f;
     constexpr float EDITOR_SCENE_CAMERA_TARGET_Y = 0.0f;
     constexpr float EDITOR_SCENE_CAMERA_TARGET_Z = 0.0f;
@@ -897,6 +902,85 @@ namespace hades
       return true;
     }
 
+    bool draw_wire_plane(
+        ImDrawList *drawList,
+        const EditorSceneViewCamera &sceneCamera,
+        const CameraComponent &camera,
+        const ImVec2 &canvasOrigin,
+        const ImVec2 &canvasSize,
+        const PositionComponent3D &position,
+        ImU32 lineColor,
+        float thickness,
+        const std::string *label = nullptr,
+        ImU32 labelColor = IM_COL32(205, 210, 218, 255),
+        const RotationComponent3D *rotation = nullptr,
+        const ScaleComponent3D *scale = nullptr)
+    {
+      const Vec3 localCorners[4] = {
+          make_vec3(-PLANE_HALF_EXTENT, 0.0f, -PLANE_HALF_EXTENT),
+          make_vec3(PLANE_HALF_EXTENT, 0.0f, -PLANE_HALF_EXTENT),
+          make_vec3(PLANE_HALF_EXTENT, 0.0f, PLANE_HALF_EXTENT),
+          make_vec3(-PLANE_HALF_EXTENT, 0.0f, PLANE_HALF_EXTENT),
+      };
+
+      const Vec3 pos = make_vec3(position);
+      Vec3 corners[4];
+      for (int i = 0; i < 4; ++i)
+      {
+        Vec3 corner = localCorners[i];
+        if (scale != nullptr)
+        {
+          corner = make_vec3(corner.x * scale->x, corner.y * scale->y, corner.z * scale->z);
+        }
+        if (rotation != nullptr)
+        {
+          corner = rotate_vec3_by_quaternion(corner, *rotation);
+        }
+        corners[i] = add_vec3(pos, corner);
+      }
+
+      int drawnEdgeCount = 0;
+      for (const auto &edge : PLANE_EDGES)
+      {
+        ImVec2 lineStart;
+        ImVec2 lineEnd;
+        if (!project_line_segment(
+                corners[edge[0]],
+                corners[edge[1]],
+                sceneCamera,
+                camera,
+                canvasOrigin,
+                canvasSize,
+                lineStart,
+                lineEnd))
+        {
+          continue;
+        }
+
+        drawList->AddLine(lineStart, lineEnd, lineColor, thickness);
+        ++drawnEdgeCount;
+      }
+
+      if (drawnEdgeCount == 0)
+      {
+        return false;
+      }
+
+      if (label != nullptr)
+      {
+        ImVec2 centerPoint;
+        if (project_point(pos, sceneCamera, camera, canvasOrigin, canvasSize, centerPoint))
+        {
+          drawList->AddText(
+              ImVec2(centerPoint.x + 6.0f, centerPoint.y + 6.0f),
+              labelColor,
+              label->c_str());
+        }
+      }
+
+      return true;
+    }
+
     bool draw_vector_text(
         ImDrawList *drawList,
         const EditorSceneViewCamera &sceneCamera,
@@ -1474,13 +1558,14 @@ namespace hades
         if (componentManager.hasComponent<PrimitiveComponent>(entity))
         {
           const auto &primitive = componentManager.getComponent<PrimitiveComponent>(entity);
-          if (primitive.type == PrimitiveType::Cube)
+          if (primitive.type == PrimitiveType::Cube || primitive.type == PrimitiveType::Plane)
           {
             hasPreviewGeometry = true;
+            const float halfY = (primitive.type == PrimitiveType::Cube) ? CUBE_HALF_EXTENT : 0.0f;
             if (const auto rect = project_box_screen_rect(
                     box_corners(
-                        make_vec3(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT),
-                        make_vec3(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT),
+                        make_vec3(-PLANE_HALF_EXTENT, -halfY, -PLANE_HALF_EXTENT),
+                        make_vec3(PLANE_HALF_EXTENT, halfY, PLANE_HALF_EXTENT),
                         position,
                         pickRotation),
                     sceneCamera,
@@ -1831,26 +1916,43 @@ namespace hades
 
         if (item.isPrimitive)
         {
-          if (item.primitiveType != PrimitiveType::Cube)
+          bool drawn = false;
+          if (item.primitiveType == PrimitiveType::Cube)
           {
-            return;
+            drawn = draw_wire_box(
+                drawList,
+                sceneCamera,
+                camera,
+                canvasOrigin,
+                canvasSize,
+                position,
+                make_vec3(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT),
+                make_vec3(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT),
+                isSelected ? selectedColor : IM_COL32(223, 228, 235, 255),
+                isSelected ? 2.5f : 1.5f,
+                get_label(),
+                isSelected ? selectedLabelColor : IM_COL32(205, 210, 218, 255),
+                rotation,
+                scale);
+          }
+          else if (item.primitiveType == PrimitiveType::Plane)
+          {
+            drawn = draw_wire_plane(
+                drawList,
+                sceneCamera,
+                camera,
+                canvasOrigin,
+                canvasSize,
+                position,
+                isSelected ? selectedColor : IM_COL32(223, 228, 235, 255),
+                isSelected ? 2.5f : 1.5f,
+                get_label(),
+                isSelected ? selectedLabelColor : IM_COL32(205, 210, 218, 255),
+                rotation,
+                scale);
           }
 
-          if (draw_wire_box(
-                  drawList,
-                  sceneCamera,
-                  camera,
-                  canvasOrigin,
-                  canvasSize,
-                  position,
-                  make_vec3(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT),
-                  make_vec3(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT),
-                  isSelected ? selectedColor : IM_COL32(223, 228, 235, 255),
-                  isSelected ? 2.5f : 1.5f,
-                  get_label(),
-                  isSelected ? selectedLabelColor : IM_COL32(205, 210, 218, 255),
-                  rotation,
-                  scale))
+          if (drawn)
           {
             ++visibleRenderableCount;
           }
@@ -2219,7 +2321,7 @@ namespace hades
           EDITOR_SCENE_CAMERA_MAX_DISTANCE);
     }
 
-    if (sceneCanvasActive && rotateModifierDown && ImGui::IsMouseDragging(ImGuiMouseButton_Left))
+    if (sceneCanvasHovered && ImGui::IsMouseDragging(ImGuiMouseButton_Right))
     {
       sceneCameraYawDegrees_ = std::remainder(
           sceneCameraYawDegrees_ + (io.MouseDelta.x * EDITOR_SCENE_CAMERA_ROTATION_SENSITIVITY_X),

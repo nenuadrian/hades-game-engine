@@ -1,7 +1,0 @@
-#pragma once
-
-namespace hades::dotnet_config
-{
-  inline constexpr const char *configured_dotnet_executable = "@HADES_DOTNET_EXECUTABLE_CONFIG@";
-  inline constexpr const char *configured_dotnet_root = "@HADES_DOTNET_ROOT_CONFIG@";
-}

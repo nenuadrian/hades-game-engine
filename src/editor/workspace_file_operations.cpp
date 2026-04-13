@@ -96,7 +96,7 @@ namespace hades
 
       if (!targetIsDirectory)
       {
-        if (targetPath.extension() == ".cs")
+        if (targetPath.extension() == ".cpp")
         {
           scriptPaths.push_back(relative_workspace_path(workspacePath, targetPath));
         }
@@ -113,7 +113,7 @@ namespace hades
           continue;
         }
 
-        if (iterator->path().extension() == ".cs")
+        if (iterator->path().extension() == ".cpp")
         {
           scriptPaths.push_back(relative_workspace_path(workspacePath, iterator->path()));
         }

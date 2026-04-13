@@ -27,6 +27,9 @@
 #include "../engine/assets/asset_manager.hpp"
 #include "../engine/core/log.hpp"
 #include "../engine/core/ecs/scene_serializer.hpp"
+#include "../engine/core/ecs/world_utils.hpp"
+#include "../engine/runtime/main_camera_selection.hpp"
+#include "../engine/runtime/script_runtime.hpp"
 #include "../engine/audio/audio_engine.hpp"
 #include "../engine/rendering/renderer.hpp"
 #include "../engine/profiling/frame_metrics.hpp"
@@ -1303,6 +1306,38 @@ namespace hades
               stop_active_play_mode(scriptRuntime.last_error());
             }
           }
+          else if (event.type == SDL_MOUSEBUTTONDOWN)
+          {
+            scriptRuntime.on_mouse_down(
+                static_cast<int>(event.button.button),
+                static_cast<float>(event.button.x),
+                static_cast<float>(event.button.y));
+            if (scriptRuntime.faulted())
+            {
+              stop_active_play_mode(scriptRuntime.last_error());
+            }
+          }
+          else if (event.type == SDL_MOUSEBUTTONUP)
+          {
+            scriptRuntime.on_mouse_up(
+                static_cast<int>(event.button.button),
+                static_cast<float>(event.button.x),
+                static_cast<float>(event.button.y));
+            if (scriptRuntime.faulted())
+            {
+              stop_active_play_mode(scriptRuntime.last_error());
+            }
+          }
+          else if (event.type == SDL_MOUSEMOTION)
+          {
+            scriptRuntime.on_mouse_move(
+                static_cast<float>(event.motion.x),
+                static_cast<float>(event.motion.y));
+            if (scriptRuntime.faulted())
+            {
+              stop_active_play_mode(scriptRuntime.last_error());
+            }
+          }
         }
       }
     }
@@ -1372,6 +1407,7 @@ namespace hades
         }
 #endif
 
+        scriptRuntime.set_viewport_size(io.DisplaySize.x, io.DisplaySize.y);
         {
           HADES_FRAME_METRIC_SCOPE("script_update");
           scriptRuntime.update(io.DeltaTime, componentManager, entityManager);
@@ -1424,6 +1460,61 @@ namespace hades
             }
           }
 #endif
+        }
+
+        // Handle pending world load requests from scripts.
+        if (editor.state.isPlaying)
+        {
+          if (auto worldName = ScriptRuntime::consume_pending_world_load(); worldName.has_value())
+          {
+            const auto &workspacePath = workspaceManager.current_workspace()->path;
+            const auto worldFilePath = workspacePath / ".hades" / "worlds" / (*worldName + ".json");
+
+            if (std::filesystem::exists(worldFilePath))
+            {
+              scriptRuntime.stop();
+
+              if (editor.state.activeWorld.has_value())
+              {
+                destroy_world_tree(*editor.state.activeWorld, entityManager, componentManager);
+              }
+
+              auto newWorld = load_world_from_file(worldFilePath, entityManager, componentManager);
+              if (newWorld.has_value())
+              {
+                editor.state.activeWorld = newWorld;
+                auto cameraSelection = select_main_camera(entityManager, componentManager, newWorld);
+                if (cameraSelection.status == MainCameraSelectionStatus::Ready && cameraSelection.entity.has_value())
+                {
+                  editor.state.activeCamera = cameraSelection.entity;
+                }
+
+                if (physicsSystem != nullptr)
+                {
+                  physicsSystem->clear_bodies();
+                  physicsSystem->set_active_world(newWorld);
+                }
+                if (audioSystem != nullptr)
+                {
+                  audioSystem->set_active_world(newWorld);
+                }
+
+                std::string scriptError;
+                if (!scriptRuntime.start(componentManager, entityManager, workspacePath, newWorld, &scriptError))
+                {
+                  stop_active_play_mode("World load failed: " + scriptError);
+                }
+              }
+              else
+              {
+                stop_active_play_mode("Failed to load world: " + *worldName);
+              }
+            }
+            else
+            {
+              editor.log_error("World file not found: " + worldFilePath.string());
+            }
+          }
         }
       }
       else if (wasPlayingLastFrame && audio_engine != nullptr)

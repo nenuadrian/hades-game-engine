@@ -129,7 +129,7 @@ namespace hades
     const auto cube = EntityFactory::createCube(entityManager, componentManager);
     ScriptComponent scriptComponent;
     scriptComponent.attachments.push_back(ScriptAttachment{
-        "missing-script.cs",
+        "missing-script.cpp",
         "MissingScript",
         true});
     componentManager.addComponent(cube, scriptComponent);
@@ -150,11 +150,13 @@ namespace hades
     const std::filesystem::path scriptsDirectory = workspaceRoot / "Scripts";
     std::filesystem::create_directories(scriptsDirectory);
 
-    const std::filesystem::path scriptPath = scriptsDirectory / "Mover.cs";
+    const std::filesystem::path scriptPath = scriptsDirectory / "Mover.cpp";
     {
       std::ofstream output(scriptPath);
-      output << "using Hades.Scripting;\n";
-      output << "public sealed class Mover : HadesScript {}\n";
+      output << "#include \"engine/runtime/hades_script.hpp\"\n";
+      output << "#include \"engine/runtime/hades_script_registration.hpp\"\n\n";
+      output << "class Mover : public hades::HadesScript {};\n";
+      output << "HADES_REGISTER_SCRIPT(Mover)\n";
     }
 
     EntityManager entityManager;
@@ -164,7 +166,7 @@ namespace hades
     const auto cube = EntityFactory::createCube(entityManager, componentManager);
     ScriptComponent scriptComponent;
     scriptComponent.attachments.push_back(ScriptAttachment{
-        "Scripts/Mover.cs",
+        "Scripts/Mover.cpp",
         "Mover",
         true});
     componentManager.addComponent(cube, scriptComponent);

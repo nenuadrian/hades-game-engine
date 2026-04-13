@@ -6,6 +6,8 @@ namespace hades::build_config
   inline constexpr const char *cmake_source_dir = "@CMAKE_SOURCE_DIR@";
   inline constexpr const char *cmake_command = "@CMAKE_COMMAND@";
   inline constexpr const char *cmake_generator = "@CMAKE_GENERATOR@";
+  inline constexpr const char *cxx_compiler = "@CMAKE_CXX_COMPILER@";
+  inline constexpr const char *cxx_compiler_id = "@CMAKE_CXX_COMPILER_ID@";
 }
 
 #endif

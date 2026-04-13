@@ -184,7 +184,7 @@ namespace hades
     const std::filesystem::path scriptsDirectory = workspaceRoot / "Scripts";
     std::filesystem::create_directories(scriptsDirectory);
 
-    const std::filesystem::path moverPath = scriptsDirectory / "Mover.cs";
+    const std::filesystem::path moverPath = scriptsDirectory / "Mover.cpp";
     {
       std::ofstream output(moverPath);
       output << "public sealed class Mover {}\n";
@@ -197,12 +197,12 @@ namespace hades
     const auto secondEntity = EntityFactory::createCube(entityManager, componentManager);
 
     ScriptComponent firstComponent;
-    firstComponent.attachments.push_back(ScriptAttachment{"Scripts/Mover.cs", "Mover", true});
+    firstComponent.attachments.push_back(ScriptAttachment{"Scripts/Mover.cpp", "Mover", true});
     componentManager.addComponent(firstEntity, firstComponent);
 
     ScriptComponent secondComponent;
-    secondComponent.attachments.push_back(ScriptAttachment{"Scripts/Mover.cs", "Mover", true});
-    secondComponent.attachments.push_back(ScriptAttachment{"Scripts/Other.cs", "Other", true});
+    secondComponent.attachments.push_back(ScriptAttachment{"Scripts/Mover.cpp", "Mover", true});
+    secondComponent.attachments.push_back(ScriptAttachment{"Scripts/Other.cpp", "Other", true});
     componentManager.addComponent(secondEntity, secondComponent);
 
     WorkspaceDeleteResult deleteResult;
@@ -218,7 +218,7 @@ namespace hades
 
     EXPECT_FALSE(std::filesystem::exists(moverPath));
     ASSERT_EQ(deleteResult.removedScriptPaths.size(), 1U);
-    EXPECT_EQ(deleteResult.removedScriptPaths.front(), "Scripts/Mover.cs");
+    EXPECT_EQ(deleteResult.removedScriptPaths.front(), "Scripts/Mover.cpp");
     EXPECT_EQ(deleteResult.removedScriptAssignments, 2U);
     EXPECT_EQ(deleteResult.affectedScriptComponents, 2U);
 
@@ -226,7 +226,7 @@ namespace hades
 
     const auto &remainingAttachments = componentManager.getComponent<ScriptComponent>(secondEntity).attachments;
     ASSERT_EQ(remainingAttachments.size(), 1U);
-    EXPECT_EQ(remainingAttachments.front().scriptPath, "Scripts/Other.cs");
+    EXPECT_EQ(remainingAttachments.front().scriptPath, "Scripts/Other.cpp");
   }
 
   TEST(WorkspaceFileOperationsTest, DeleteWorkspaceItemRemovesNestedScriptAssignments)
@@ -239,11 +239,11 @@ namespace hades
     std::filesystem::create_directories(aiDirectory);
 
     {
-      std::ofstream output(aiDirectory / "Chaser.cs");
+      std::ofstream output(aiDirectory / "Chaser.cpp");
       output << "public sealed class Chaser {}\n";
     }
     {
-      std::ofstream output(aiDirectory / "Lookout.cs");
+      std::ofstream output(aiDirectory / "Lookout.cpp");
       output << "public sealed class Lookout {}\n";
     }
 
@@ -252,9 +252,9 @@ namespace hades
 
     const auto entity = EntityFactory::createCube(entityManager, componentManager);
     ScriptComponent scriptComponent;
-    scriptComponent.attachments.push_back(ScriptAttachment{"Scripts/AI/Chaser.cs", "Chaser", true});
-    scriptComponent.attachments.push_back(ScriptAttachment{"Scripts/AI/Lookout.cs", "Lookout", true});
-    scriptComponent.attachments.push_back(ScriptAttachment{"Scripts/Patrol.cs", "Patrol", true});
+    scriptComponent.attachments.push_back(ScriptAttachment{"Scripts/AI/Chaser.cpp", "Chaser", true});
+    scriptComponent.attachments.push_back(ScriptAttachment{"Scripts/AI/Lookout.cpp", "Lookout", true});
+    scriptComponent.attachments.push_back(ScriptAttachment{"Scripts/Patrol.cpp", "Patrol", true});
     componentManager.addComponent(entity, scriptComponent);
 
     WorkspaceDeleteResult deleteResult;
@@ -275,6 +275,6 @@ namespace hades
 
     const auto &remainingAttachments = componentManager.getComponent<ScriptComponent>(entity).attachments;
     ASSERT_EQ(remainingAttachments.size(), 1U);
-    EXPECT_EQ(remainingAttachments.front().scriptPath, "Scripts/Patrol.cs");
+    EXPECT_EQ(remainingAttachments.front().scriptPath, "Scripts/Patrol.cpp");
   }
 }

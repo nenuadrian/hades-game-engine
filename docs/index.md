@@ -13,7 +13,7 @@ hide:
 
 ## Overview
 
-A C++ 3D game engine with a Vulkan renderer, in-process C# scripting, spatial audio, and an ImGui-based editor. Built around a custom Entity-Component-System architecture.
+A C++ 3D game engine with a Vulkan renderer, C++ scripting, spatial audio, and an ImGui-based editor. Built around a custom Entity-Component-System architecture.
 
 The purpose is educational and experimental in nature to explore the intriguing world of game engine development.
 
@@ -46,10 +46,11 @@ The purpose is educational and experimental in nature to explore the intriguing 
 
 **Scripting**
 
-- C# scripting via in-process .NET CoreCLR embedding (hostfxr hosting API)
-- Scripts compiled on play start via local `dotnet build` (SDK 7.0+)
-- Zero-IPC overhead: managed code runs in-engine via native function pointers
-- Blittable struct data exchange (no serialization)
+- C++ scripting compiled into shared libraries at play start
+- Direct ECS access from scripts -- no marshaling or IPC overhead
+- Mouse and keyboard input callbacks
+- World loading API for scene transitions
+- Screen-to-world raycasting utilities for entity picking
 - Background workspace script compilation with error reporting
 - See [SCRIPTS.md](scripting.md) for details
 
@@ -114,12 +115,8 @@ cmake --build build
 ./build/Hades
 ```
 
-Entity scripts are compiled when Play starts. Install a local `dotnet` SDK if you
-want to attach `.cs` files to entities and run them in play mode on macOS,
-Linux, or Windows. CMake captures the resolved `dotnet` path at configure time
-when available, so rerun `cmake -S . -B build` after installing or moving the
-SDK. You can also point CMake at it explicitly with
-`-DHADES_DOTNET_EXECUTABLE=/absolute/path/to/dotnet`.
+Entity scripts are C++ files compiled at play start using the same compiler that
+built the engine. No additional SDK is needed.
 
 ### Test
 
@@ -167,7 +164,7 @@ destroy_entities                     avg   314.592 ms  min   299.797 ms  max   3
 
 ## Scripting
 
-For C# scripting workflow, runtime behavior, and the current limitations, see
+For C++ scripting workflow, runtime behavior, and the current limitations, see
 [SCRIPTS.md](scripting.md).
 
 ## Documentation
