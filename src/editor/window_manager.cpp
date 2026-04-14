@@ -16,6 +16,7 @@
 #include "native_dialogs.hpp"
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
+#include "imgui_internal.h"
 #include "imgui_impl_sdl2.h"
 #ifdef HADES_ENABLE_API
 #include "../engine/api/hades_api.hpp"
@@ -73,6 +74,35 @@ namespace
     }
 
     return SurfacePtr(surface, SDL_FreeSurface);
+  }
+
+  void apply_editor_hover_cursor()
+  {
+    ImGuiContext *context = ImGui::GetCurrentContext();
+    if (context == nullptr)
+    {
+      return;
+    }
+
+    ImGuiContext &g = *context;
+    ImGuiIO &io = ImGui::GetIO();
+    if (io.MouseDrawCursor || (io.ConfigFlags & ImGuiConfigFlags_NoMouseCursorChange) != 0)
+    {
+      return;
+    }
+
+    if (ImGui::GetMouseCursor() != ImGuiMouseCursor_Arrow)
+    {
+      return;
+    }
+
+    // Dear ImGui leaves the default arrow cursor in place for many clickable widgets.
+    // In the editor we prefer a pointing hand whenever a live item is hoverable/clickable,
+    // while preserving more specific cursors such as text input and resize handles.
+    if (g.HoveredId != 0 && !g.HoveredIdIsDisabled && g.ActiveId == 0)
+    {
+      ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+    }
   }
 
   void set_window_icon(SDL_Window *window, SDL_Surface *icon_surface)
@@ -481,6 +511,7 @@ namespace hades
     }
 
     ImGui::SetCurrentContext(context_);
+    apply_editor_hover_cursor();
     ImGui::Render();
     ImDrawData *draw_data = ImGui::GetDrawData();
     const bool is_minimized = (draw_data->DisplaySize.x <= 0.0f || draw_data->DisplaySize.y <= 0.0f);

@@ -4,10 +4,10 @@
       "components": {
         "hierarchy": {
           "children": [
-            3,
-            2,
             1,
-            0
+            2,
+            3,
+            4
           ],
           "parent": null
         },
@@ -18,7 +18,7 @@
           "isDefault": true
         }
       },
-      "id": 4
+      "id": 0
     },
     {
       "components": {
@@ -39,7 +39,7 @@
         },
         "hierarchy": {
           "children": [],
-          "parent": 4
+          "parent": 0
         },
         "name": {
           "value": "Camera"
@@ -56,13 +56,13 @@
           "qz": 0.0
         }
       },
-      "id": 3
+      "id": 1
     },
     {
       "components": {
         "hierarchy": {
           "children": [],
-          "parent": 4
+          "parent": 0
         },
         "name": {
           "value": "Player"
@@ -95,7 +95,7 @@
       "components": {
         "hierarchy": {
           "children": [],
-          "parent": 4
+          "parent": 0
         },
         "name": {
           "value": "Clickable"
@@ -119,13 +119,13 @@
           ]
         }
       },
-      "id": 1
+      "id": 3
     },
     {
       "components": {
         "hierarchy": {
           "children": [],
-          "parent": 4
+          "parent": 0
         },
         "name": {
           "value": "Portal"
@@ -146,7 +146,7 @@
           ]
         }
       },
-      "id": 0
+      "id": 4
     }
   ],
   "version": 1
