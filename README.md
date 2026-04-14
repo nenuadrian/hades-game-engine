@@ -16,8 +16,6 @@ The purpose is educational and experimental, to explore the intriguing world of 
 
 ## Features
 
-![editor](assets/editor.png)
-
 ![workspace](assets/workspace.png)
 
 ![scripts](assets/scripts.png)
@@ -65,17 +63,6 @@ The purpose is educational and experimental, to explore the intriguing world of 
 - Post-processing: triangulation, vertex deduplication, cache optimization
 - Bounding box computation for imported models
 
-**Editor**
-
-- Workspace-based project management with file tree navigation
-- Entity hierarchy panel with drag-based re-parenting
-- 3D scene viewport with orbit camera and transform gizmos (per-axis drag)
-- Properties and Components inspector with per-component editing
-- Integrated script editor with syntax highlighting, multi-tab editing, and unsaved changes tracking
-- Play mode with main camera validation, script runtime, and detached play window
-- Debug Console panel with centralized error/warning/info logging, auto-open on errors, right-click copy, and "Copy All" button
-- Settings panel with scene camera controls
-- Plugin system for extending the editor with custom panels
 
 **Build & Platform**
 
