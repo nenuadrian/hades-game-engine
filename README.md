@@ -78,7 +78,7 @@ The purpose is educational and experimental, to explore the intriguing world of 
 
 **Build & Platform**
 
-- CMake build system targeting C++17
+- CMake build system targeting C++20
 - Cross-platform: macOS, Linux, Windows
 - Unit tests via GoogleTest
 - ECS benchmark tool
@@ -142,7 +142,7 @@ Tune the workload:
 python3 scripts/run_ecs_benchmark.py --entities 250000 --frames 1000 --iterations 5 --warmup 1
 ```
 
-The runner expects a C++17 compiler on `PATH` and writes the compiled binary to
+The runner expects a C++20 compiler on `PATH` and writes the compiled binary to
 `build/benchmarks/ecs_benchmark`.
 
 Results captured on April 3, 2026 on `Darwin arm64` with `Apple clang 17.0.0`
@@ -167,3 +167,8 @@ For C++ scripting workflow, runtime behavior, and the current limitations, see
 ## Previous Versions
 
 The engine has gone through several renderer backends in this repository: Metal, OpenGL, and now Vulkan (<https://github.com/nenuadrian/hades-game-engine/tree/507e1d5c3bece7e09d78d668d4e3d652be0b2431>).
+
+## License
+
+MIT License. See [LICENSE](LICENSE) for details.
+

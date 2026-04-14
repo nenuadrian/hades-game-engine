@@ -81,7 +81,7 @@ The purpose is educational and experimental in nature to explore the intriguing 
 
 **Build & Platform**
 
-- CMake build system targeting C++17
+- CMake build system targeting C++20
 - Cross-platform: macOS, Linux, Windows
 - Unit tests via GoogleTest
 - ECS benchmark tool
@@ -145,7 +145,7 @@ Tune the workload:
 python3 scripts/run_ecs_benchmark.py --entities 250000 --frames 1000 --iterations 5 --warmup 1
 ```
 
-The runner expects a C++17 compiler on `PATH` and writes the compiled binary to
+The runner expects a C++20 compiler on `PATH` and writes the compiled binary to
 `build/benchmarks/ecs_benchmark`.
 
 Results captured on April 3, 2026 on `Darwin arm64` with `Apple clang 17.0.0`

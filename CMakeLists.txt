@@ -1,12 +1,24 @@
 cmake_minimum_required(VERSION 3.16)
 project(Hades LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(HADES_CXX_STANDARD 20)
+
+set(CMAKE_CXX_STANDARD ${HADES_CXX_STANDARD})
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(cmake/Dependencies.cmake)
 include(cmake/WebPlatform.cmake)
+
+function(hades_configure_cxx_standard target visibility)
+  set_target_properties(
+    "${target}"
+    PROPERTIES
+      CXX_STANDARD ${HADES_CXX_STANDARD}
+      CXX_STANDARD_REQUIRED ON
+      CXX_EXTENSIONS OFF)
+  target_compile_features("${target}" ${visibility} cxx_std_${HADES_CXX_STANDARD})
+endfunction()
 
 function(hades_stage_runtime_dependency target dependency)
   if(NOT WIN32 OR NOT TARGET "${target}" OR NOT TARGET "${dependency}")
@@ -82,6 +94,7 @@ option(HADES_ENABLE_API "Enable HadesAPI REST server for ML training" OFF)
 # HadesEngine static library (engine core, shared by editor and runtime)
 # ---------------------------------------------------------------------------
 add_library(HadesEngine STATIC ${ENGINE_SOURCE_FILES} ${ENGINE_HEADER_FILES})
+hades_configure_cxx_standard(HadesEngine PUBLIC)
 target_include_directories(HadesEngine PUBLIC "${SRC_DIR}" "${CMAKE_BINARY_DIR}/generated")
 if(HADES_FRAME_METRICS)
   target_compile_definitions(HadesEngine PUBLIC HADES_ENABLE_FRAME_METRICS)
@@ -120,6 +133,7 @@ endif()
 # ---------------------------------------------------------------------------
 if(NOT EMSCRIPTEN)
 add_executable(${PROJECT_NAME} ${EDITOR_SOURCE_FILES} ${EDITOR_HEADER_FILES})
+hades_configure_cxx_standard(${PROJECT_NAME} PRIVATE)
 target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(
   ${PROJECT_NAME}
@@ -150,6 +164,7 @@ endif() # NOT EMSCRIPTEN (editor)
 # HadesRuntime standalone game executable
 # ---------------------------------------------------------------------------
 add_executable(HadesRuntime ${RUNTIME_SOURCE_FILES} ${RUNTIME_HEADER_FILES})
+hades_configure_cxx_standard(HadesRuntime PRIVATE)
 target_include_directories(HadesRuntime PRIVATE "${CMAKE_BINARY_DIR}/generated")
 if(EMSCRIPTEN)
   target_link_libraries(HadesRuntime PRIVATE HadesEngine)
@@ -189,6 +204,7 @@ set(TEST_EDITOR_SUPPORT_SOURCES
   src/editor/workspace_file_operations.cpp)
 
 add_executable(hades_tests ${TEST_SOURCE_FILES} ${TEST_EDITOR_SUPPORT_SOURCES})
+hades_configure_cxx_standard(hades_tests PRIVATE)
 target_include_directories(hades_tests PRIVATE "${SRC_DIR}" "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(hades_tests PRIVATE HadesEngine gtest_main)
 hades_stage_runtime_dependency(hades_tests assimp)

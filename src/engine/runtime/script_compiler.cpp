@@ -172,7 +172,7 @@ namespace hades
     if (is_msvc_compiler(compilerId))
     {
       args.push_back(compiler);
-      args.push_back("/std:c++17");
+      args.push_back("/std:c++20");
       args.push_back("/LD");
       args.push_back("/EHsc");
       args.push_back("/O2");
@@ -189,7 +189,7 @@ namespace hades
     else
     {
       args.push_back(compiler);
-      args.push_back("-std=c++17");
+      args.push_back("-std=c++20");
       args.push_back("-shared");
       args.push_back("-fPIC");
       args.push_back("-O2");

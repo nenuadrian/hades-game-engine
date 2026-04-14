@@ -57,7 +57,7 @@ def main() -> int:
     if not args.skip_build:
         compile_command = [
             args.compiler,
-            "-std=c++17",
+            "-std=c++20",
             "-O3",
             "-DNDEBUG",
             "-I",

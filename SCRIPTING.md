@@ -185,7 +185,7 @@ All script-related errors are routed to the **Debug Console** panel
 
 - **C++ compiler**: detected automatically at CMake configure time. The same
   compiler used to build the engine is used to compile scripts.
-- Scripts are compiled with `-std=c++17` (or `/std:c++17` on MSVC).
+- Scripts are compiled with `-std=c++20` (or `/std:c++20` on MSVC).
 
 ## Key Source Files
 
