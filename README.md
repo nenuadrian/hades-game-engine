@@ -106,6 +106,30 @@ cmake -S . -B build -DHADES_USE_BUNDLED_DEPS=OFF
 cmake --build build
 ```
 
+### Bundled neural engine
+
+`hades-neural-engine` is integrated as a pinned git submodule at `lib/hades-neural-engine` and is currently pinned to upstream commit `6e1de612267021e715729ead8c8be0dcc1113603`. The top-level CMake build adds it with `add_subdirectory(...)` and currently keeps `hne_core` available while leaving the LibTorch-backed targets off.
+
+Fresh checkout:
+
+```bash
+git clone --recurse-submodules https://github.com/nenuadrian/hades-game-engine.git
+```
+
+If you already cloned the repo, or you just pulled a change that updated the pinned HNE commit:
+
+```bash
+git submodule update --init --recursive
+```
+
+To move HNE forward to the latest upstream `main` commit and record that new pin in this repository:
+
+```bash
+git submodule update --remote --init --recursive lib/hades-neural-engine
+git add lib/hades-neural-engine
+git commit -m "Update hades-neural-engine"
+```
+
 ### Run
 
 ```bash
@@ -171,4 +195,3 @@ The engine has gone through several renderer backends in this repository: Metal,
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
-

@@ -1,0 +1,4 @@
+[submodule "lib/hades-neural-engine"]
+	path = lib/hades-neural-engine
+	url = https://github.com/nenuadrian/hades-neural-engine.git
+	branch = main

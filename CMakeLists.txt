@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.20)
 project(Hades LANGUAGES CXX)
 
 set(HADES_CXX_STANDARD 20)
@@ -9,6 +9,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(cmake/Dependencies.cmake)
 include(cmake/WebPlatform.cmake)
+
+set(HADES_NEURAL_ENGINE_DIR "${CMAKE_SOURCE_DIR}/lib/hades-neural-engine")
 
 function(hades_configure_cxx_standard target visibility)
   set_target_properties(
@@ -45,6 +47,21 @@ if(NOT EMSCRIPTEN)
   find_package(Vulkan REQUIRED)
 endif()
 hades_configure_dependencies()
+
+if(NOT EXISTS "${HADES_NEURAL_ENGINE_DIR}/CMakeLists.txt")
+  message(
+    FATAL_ERROR
+      "Missing submodule '${HADES_NEURAL_ENGINE_DIR}'. "
+      "Run 'git submodule update --init --recursive' and reconfigure.")
+endif()
+
+# Keep HNE integration lightweight until the engine starts linking against it.
+set(HNE_BUILD_TRAINING OFF CACHE BOOL "Build Hades Neural Engine training targets.")
+set(HNE_BUILD_INFERENCE OFF CACHE BOOL "Build Hades Neural Engine inference targets.")
+set(HNE_BUILD_IMGUI_WIDGETS OFF CACHE BOOL "Build Hades Neural Engine ImGui widgets.")
+set(HNE_BUILD_TESTS OFF CACHE BOOL "Build Hades Neural Engine tests.")
+set(HNE_BUILD_EXAMPLES OFF CACHE BOOL "Build Hades Neural Engine examples.")
+add_subdirectory("${HADES_NEURAL_ENGINE_DIR}")
 
 configure_file(
   "${CMAKE_SOURCE_DIR}/cmake/build_config.hpp.in"
