@@ -252,7 +252,7 @@ namespace hades
     PROCESS_INFORMATION processInformation{};
     std::wstring commandLine = build_windows_command_line(args);
     std::wstring workingDirectoryWide =
-        workingDirectory.empty() ? std::wstring() : utf8_to_wide(workingDirectory.u8string());
+        workingDirectory.empty() ? std::wstring() : workingDirectory.wstring();
 
     BOOL created = CreateProcessW(
         nullptr,
