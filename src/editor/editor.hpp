@@ -208,6 +208,7 @@ namespace hades
     float sceneGizmoDragStartScaleY_ = 1.0f;
     float sceneGizmoDragStartScaleZ_ = 1.0f;
     bool sceneDrawModelMeshes_ = true;
+    bool sceneCanvasKeyboardCapture_ = false;
     bool pendingSavedWorldRestore_ = false;
 
     // External editor preference for "Open in External Editor".

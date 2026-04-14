@@ -9,6 +9,7 @@
 
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
+#include "imgui_internal.h"
 #include "../engine/components/audio_listener_component.hpp"
 #include "../engine/components/audio_source_component.hpp"
 #include "../engine/components/camera_component.hpp"
@@ -2308,10 +2309,42 @@ namespace hades
     const ImVec2 canvasOrigin = ImGui::GetCursorScreenPos();
     const ImVec2 canvasMax(canvasOrigin.x + canvasSize.x, canvasOrigin.y + canvasSize.y);
     ImGui::InvisibleButton("scene_canvas", canvasSize);
+    const ImGuiID sceneCanvasId = ImGui::GetItemID();
     const bool sceneCanvasHovered = ImGui::IsItemHovered();
     const bool sceneCanvasActive = ImGui::IsItemActive();
     const bool sceneWindowFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
     const bool rotateModifierDown = io.KeyCtrl || io.KeySuper;
+    const bool sceneCanvasClicked =
+        sceneCanvasHovered &&
+        (ImGui::IsMouseClicked(ImGuiMouseButton_Left) ||
+         ImGui::IsMouseClicked(ImGuiMouseButton_Right) ||
+         ImGui::IsMouseClicked(ImGuiMouseButton_Middle));
+
+    if (sceneCanvasClicked)
+    {
+      sceneCanvasKeyboardCapture_ = true;
+      ImGui::SetNavCursorVisible(false);
+    }
+    else if (!sceneWindowFocused)
+    {
+      sceneCanvasKeyboardCapture_ = false;
+    }
+
+    const bool sceneCapturesArrowKeys =
+        sceneWindowFocused &&
+        sceneCanvasKeyboardCapture_ &&
+        !rotateModifierDown &&
+        !io.WantTextInput;
+
+    if (sceneCapturesArrowKeys)
+    {
+      ImGui::SetKeyOwner(ImGuiKey_LeftArrow, sceneCanvasId, ImGuiInputFlags_LockThisFrame);
+      ImGui::SetKeyOwner(ImGuiKey_RightArrow, sceneCanvasId, ImGuiInputFlags_LockThisFrame);
+      ImGui::SetKeyOwner(ImGuiKey_UpArrow, sceneCanvasId, ImGuiInputFlags_LockThisFrame);
+      ImGui::SetKeyOwner(ImGuiKey_DownArrow, sceneCanvasId, ImGuiInputFlags_LockThisFrame);
+      ImGui::SetNavCursorVisible(false);
+      ImGui::SetNextFrameWantCaptureKeyboard(true);
+    }
 
     if (sceneCanvasHovered && io.MouseWheel != 0.0f)
     {
@@ -2340,24 +2373,24 @@ namespace hades
         sceneCameraYawDegrees_,
         sceneCameraPitchDegrees_);
 
-    if (sceneWindowFocused && !rotateModifierDown && !io.WantTextInput)
+    if (sceneCapturesArrowKeys)
     {
       Vec3 movement = make_vec3(0.0f, 0.0f, 0.0f);
       const Vec3 forwardOnGround = flatten_xz(sceneCamera.forward);
 
-      if (ImGui::IsKeyDown(ImGuiKey_LeftArrow))
+      if (ImGui::IsKeyDown(ImGuiKey_LeftArrow, sceneCanvasId))
       {
         movement = subtract_vec3(movement, sceneCamera.right);
       }
-      if (ImGui::IsKeyDown(ImGuiKey_RightArrow))
+      if (ImGui::IsKeyDown(ImGuiKey_RightArrow, sceneCanvasId))
       {
         movement = add_vec3(movement, sceneCamera.right);
       }
-      if (ImGui::IsKeyDown(ImGuiKey_UpArrow))
+      if (ImGui::IsKeyDown(ImGuiKey_UpArrow, sceneCanvasId))
       {
         movement = add_vec3(movement, forwardOnGround);
       }
-      if (ImGui::IsKeyDown(ImGuiKey_DownArrow))
+      if (ImGui::IsKeyDown(ImGuiKey_DownArrow, sceneCanvasId))
       {
         movement = subtract_vec3(movement, forwardOnGround);
       }

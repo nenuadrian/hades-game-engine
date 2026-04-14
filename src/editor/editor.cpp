@@ -100,6 +100,7 @@ namespace hades
     sceneGizmoAxisScreenDirectionX_ = 0.0f;
     sceneGizmoAxisScreenDirectionY_ = 0.0f;
     sceneGizmoPixelsPerWorldUnit_ = 1.0f;
+    sceneCanvasKeyboardCapture_ = false;
     pendingSavedWorldRestore_ = false;
 
     activeWorkspacePath_.clear();
