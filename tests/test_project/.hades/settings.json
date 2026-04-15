@@ -1,12 +1,12 @@
 {
   "editor": {
     "sceneCamera": {
-      "distance": 34.0734977722168,
-      "pitchDegrees": -36.81504821777344,
+      "distance": 39.44020080566406,
+      "pitchDegrees": -45.56504821777344,
       "targetX": 8.454989433288574,
       "targetY": 0.0,
       "targetZ": -2.976780652999878,
-      "yawDegrees": 6.649960517883301
+      "yawDegrees": -10.150042533874512
     },
     "showDebugInfo": false
   },
@@ -44,6 +44,7 @@
     "debug": false,
     "entities": true,
     "export": false,
+    "neural-training": false,
     "properties": true,
     "workspace": true,
     "world": true

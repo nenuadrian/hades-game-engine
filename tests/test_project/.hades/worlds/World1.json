@@ -77,12 +77,14 @@
             {
               "className": "ArrowMovement",
               "enabled": true,
+              "modelPath": "",
               "publicFieldValues": {},
               "scriptPath": "ArrowMovement.cpp"
             },
             {
               "className": "Jump",
               "enabled": true,
+              "modelPath": "",
               "publicFieldValues": {},
               "scriptPath": "Jump.cpp"
             }
@@ -113,6 +115,7 @@
             {
               "className": "ClickDetection",
               "enabled": true,
+              "modelPath": "",
               "publicFieldValues": {},
               "scriptPath": "ClickDetection.cpp"
             }
@@ -140,6 +143,7 @@
             {
               "className": "WorldLoader",
               "enabled": true,
+              "modelPath": "",
               "publicFieldValues": {},
               "scriptPath": "WorldLoader.cpp"
             }

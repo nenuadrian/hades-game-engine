@@ -336,6 +336,8 @@ namespace hades
       }
     }
 
+    const bool cellHovered = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByPopup);
+
     if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID))
     {
       const std::string pathStr = node.path.string();
@@ -365,7 +367,11 @@ namespace hades
     }
 
     const std::string contextId = "wsctx_" + node.path.string();
-    if (ImGui::BeginPopupContextItem(contextId.c_str()))
+    if (cellHovered && ImGui::IsMouseReleased(ImGuiMouseButton_Right))
+    {
+      ImGui::OpenPopup(contextId.c_str());
+    }
+    if (ImGui::BeginPopup(contextId.c_str()))
     {
       if (node.directory)
       {
