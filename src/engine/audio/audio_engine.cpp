@@ -2,6 +2,9 @@
 
 #include <algorithm>
 
+#include <soloud_wav.h>
+#include <soloud_wavstream.h>
+
 #include "../core/log.hpp"
 
 namespace hades
@@ -33,16 +36,15 @@ namespace hades
       return true;
     }
 
-    const ma_engine_config config = ma_engine_config_init();
-    const ma_result result = ma_engine_init(&config, &engine);
-    if (result != MA_SUCCESS)
+    const SoLoud::result result = soloud.init();
+    if (result != SoLoud::SO_NO_ERROR)
     {
-      hades::Log::warn("failed to initialize miniaudio engine (%d)", result);
+      hades::Log::warn("failed to initialize SoLoud engine (%u)", result);
       return false;
     }
 
     initialized = true;
-    if (!ensure_groups())
+    if (!ensure_buses())
     {
       shutdown();
       return false;
@@ -65,13 +67,11 @@ namespace hades
     for (auto &entry : managedSources)
     {
       auto &managed = entry.second;
-      if (!managed.initialized)
+      if (managed.voiceHandle != 0)
       {
-        continue;
+        soloud.stop(managed.voiceHandle);
+        managed.voiceHandle = 0;
       }
-
-      ma_sound_stop(&managed.sound);
-      ma_sound_seek_to_pcm_frame(&managed.sound, 0);
       managed.autoplayConsumed = false;
     }
   }
@@ -86,9 +86,9 @@ namespace hades
         continue;
       }
 
-      if (it->second.initialized)
+      if (it->second.voiceHandle != 0)
       {
-        ma_sound_uninit(&it->second.sound);
+        soloud.stop(it->second.voiceHandle);
       }
       it = managedSources.erase(it);
     }
@@ -96,23 +96,42 @@ namespace hades
 
   void AudioEngine::set_master_volume(float volume)
   {
-    if (!groupsInitialized)
+    if (!initialized)
     {
       return;
     }
 
-    ma_sound_group_set_volume(&masterGroup, clamp_non_negative(volume));
+    soloud.setGlobalVolume(clamp_non_negative(volume));
   }
 
   void AudioEngine::set_bus_volume(AudioBus bus, float volume)
   {
-    ma_sound_group *group = group_for_bus(bus);
-    if (group == nullptr)
+    if (!busesInitialized)
     {
+      // Master volume is handled separately via set_master_volume.
+      if (bus == AudioBus::Master && initialized)
+      {
+        soloud.setGlobalVolume(clamp_non_negative(volume));
+      }
       return;
     }
 
-    ma_sound_group_set_volume(group, clamp_non_negative(volume));
+    const float clamped = clamp_non_negative(volume);
+    switch (bus)
+    {
+    case AudioBus::Master:
+      soloud.setGlobalVolume(clamped);
+      return;
+    case AudioBus::Music:
+      soloud.setVolume(musicBusHandle, clamped);
+      return;
+    case AudioBus::Sfx:
+      soloud.setVolume(sfxBusHandle, clamped);
+      return;
+    case AudioBus::Voice:
+      soloud.setVolume(voiceBusHandle, clamped);
+      return;
+    }
   }
 
   void AudioEngine::set_listener(const AudioListenerComponent &listener, const PositionComponent3D &position)
@@ -122,15 +141,12 @@ namespace hades
       return;
     }
 
-    ma_engine_listener_set_position(&engine, 0, position.x, position.y, position.z);
-    ma_engine_listener_set_direction(
-        &engine,
-        0,
-        listener.forwardX,
-        listener.forwardY,
-        listener.forwardZ);
-    ma_engine_listener_set_world_up(&engine, 0, listener.upX, listener.upY, listener.upZ);
-    ma_engine_listener_set_velocity(&engine, 0, 0.0f, 0.0f, 0.0f);
+    soloud.set3dListenerParameters(
+        position.x, position.y, position.z,
+        listener.forwardX, listener.forwardY, listener.forwardZ,
+        listener.upX, listener.upY, listener.upZ,
+        0.0f, 0.0f, 0.0f);
+    soloud.update3dAudio();
   }
 
   void AudioEngine::sync_source(
@@ -155,35 +171,68 @@ namespace hades
     }
 
     auto &managed = managedSources.at(entity);
-    ma_sound_set_volume(&managed.sound, clamp_non_negative(source.volume));
-    ma_sound_set_pitch(&managed.sound, clamp_positive(source.pitch, 1.0f));
-    ma_sound_set_looping(&managed.sound, source.looping ? MA_TRUE : MA_FALSE);
 
-    if (source.spatialized)
+    const float volume = clamp_non_negative(source.volume);
+    const float pitch = clamp_positive(source.pitch, 1.0f);
+    const float minDistance = clamp_positive(source.minDistance, 1.0f);
+    const float maxDistance = std::max(clamp_positive(source.maxDistance, minDistance), minDistance);
+    const float rolloff = clamp_positive(source.rolloff, 1.0f);
+
+    if (managed.audioSource)
     {
-      const float minDistance = clamp_positive(source.minDistance, 1.0f);
-      const float maxDistance = std::max(clamp_positive(source.maxDistance, minDistance), minDistance);
-      const PositionComponent3D origin = (position != nullptr) ? *position : PositionComponent3D();
-
-      ma_sound_set_position(&managed.sound, origin.x, origin.y, origin.z);
-      ma_sound_set_attenuation_model(&managed.sound, ma_attenuation_model_inverse);
-      ma_sound_set_rolloff(&managed.sound, clamp_positive(source.rolloff, 1.0f));
-      ma_sound_set_min_distance(&managed.sound, minDistance);
-      ma_sound_set_max_distance(&managed.sound, maxDistance);
+      managed.audioSource->setLooping(source.looping);
+      if (managed.spatialized)
+      {
+        managed.audioSource->set3dAttenuation(SoLoud::AudioSource::INVERSE_DISTANCE, rolloff);
+        managed.audioSource->set3dMinMaxDistance(minDistance, maxDistance);
+      }
     }
+
+    const PositionComponent3D origin = (position != nullptr) ? *position : PositionComponent3D();
 
     if (source.playOnStart && !managed.autoplayConsumed)
     {
-      if (ma_sound_start(&managed.sound) == MA_SUCCESS)
+      SoLoud::Bus *bus = bus_for(managed.bus);
+      if (bus != nullptr && managed.audioSource)
       {
+        if (managed.spatialized)
+        {
+          managed.voiceHandle = bus->play3d(
+              *managed.audioSource,
+              origin.x, origin.y, origin.z,
+              0.0f, 0.0f, 0.0f,
+              volume);
+        }
+        else
+        {
+          managed.voiceHandle = bus->play(*managed.audioSource, volume);
+        }
         managed.autoplayConsumed = true;
       }
     }
+
+    if (managed.voiceHandle != 0 && soloud.isValidVoiceHandle(managed.voiceHandle))
+    {
+      soloud.setVolume(managed.voiceHandle, volume);
+      soloud.setRelativePlaySpeed(managed.voiceHandle, pitch);
+      soloud.setLooping(managed.voiceHandle, source.looping);
+
+      if (managed.spatialized)
+      {
+        soloud.set3dSourcePosition(managed.voiceHandle, origin.x, origin.y, origin.z);
+        soloud.set3dSourceAttenuation(managed.voiceHandle, SoLoud::AudioSource::INVERSE_DISTANCE, rolloff);
+        soloud.set3dSourceMinMaxDistance(managed.voiceHandle, minDistance, maxDistance);
+      }
+    }
+    else
+    {
+      managed.voiceHandle = 0;
+    }
   }
 
-  ma_sound_group *AudioEngine::group_for_bus(AudioBus bus)
+  SoLoud::Bus *AudioEngine::bus_for(AudioBus bus)
   {
-    if (!groupsInitialized)
+    if (!busesInitialized)
     {
       return nullptr;
     }
@@ -191,105 +240,72 @@ namespace hades
     switch (bus)
     {
     case AudioBus::Master:
-      return &masterGroup;
+      // Playing directly into the master output is accomplished by routing
+      // through sfxBus; there is no dedicated master bus in SoLoud.
+      return &sfxBus;
     case AudioBus::Music:
-      return &musicGroup;
+      return &musicBus;
     case AudioBus::Sfx:
-      return &sfxGroup;
+      return &sfxBus;
     case AudioBus::Voice:
-      return &voiceGroup;
+      return &voiceBus;
     }
 
-    return &masterGroup;
+    return &sfxBus;
   }
 
-  ma_uint32 AudioEngine::source_flags(const AudioSourceComponent &source) const
-  {
-    ma_uint32 flags = MA_SOUND_FLAG_ASYNC;
-    if (source.streaming)
-    {
-      flags |= MA_SOUND_FLAG_STREAM;
-    }
-    if (!source.spatialized)
-    {
-      flags |= MA_SOUND_FLAG_NO_SPATIALIZATION;
-    }
-
-    return flags;
-  }
-
-  bool AudioEngine::ensure_groups()
+  bool AudioEngine::ensure_buses()
   {
     if (!initialized)
     {
       return false;
     }
-    if (groupsInitialized)
+    if (busesInitialized)
     {
       return true;
     }
 
-    const auto init_group = [this](ma_sound_group *group, ma_sound_group *parent, const char *name) -> bool
+    musicBusHandle = soloud.play(musicBus);
+    sfxBusHandle = soloud.play(sfxBus);
+    voiceBusHandle = soloud.play(voiceBus);
+
+    if (musicBusHandle == 0 || sfxBusHandle == 0 || voiceBusHandle == 0)
     {
-      const ma_result initResult = ma_sound_group_init(&engine, 0, parent, group);
-      if (initResult != MA_SUCCESS)
+      hades::Log::warn("failed to start one or more SoLoud audio buses");
+      if (musicBusHandle != 0)
       {
-        hades::Log::warn("failed to initialize %s audio group (%d)", name, initResult);
-        return false;
+        soloud.stop(musicBusHandle);
       }
-
-      const ma_result startResult = ma_sound_group_start(group);
-      if (startResult != MA_SUCCESS)
+      if (sfxBusHandle != 0)
       {
-        hades::Log::warn("failed to start %s audio group (%d)", name, startResult);
-        ma_sound_group_uninit(group);
-        return false;
+        soloud.stop(sfxBusHandle);
       }
-
-      return true;
-    };
-
-    if (!init_group(&masterGroup, nullptr, "master"))
-    {
-      return false;
-    }
-    if (!init_group(&musicGroup, &masterGroup, "music"))
-    {
-      ma_sound_group_uninit(&masterGroup);
-      return false;
-    }
-    if (!init_group(&sfxGroup, &masterGroup, "sfx"))
-    {
-      ma_sound_group_uninit(&musicGroup);
-      ma_sound_group_uninit(&masterGroup);
-      return false;
-    }
-    if (!init_group(&voiceGroup, &masterGroup, "voice"))
-    {
-      ma_sound_group_uninit(&sfxGroup);
-      ma_sound_group_uninit(&musicGroup);
-      ma_sound_group_uninit(&masterGroup);
+      if (voiceBusHandle != 0)
+      {
+        soloud.stop(voiceBusHandle);
+      }
+      musicBusHandle = sfxBusHandle = voiceBusHandle = 0;
       return false;
     }
 
-    groupsInitialized = true;
+    busesInitialized = true;
     return true;
   }
 
   bool AudioEngine::ensure_source(Entity::EntityId entity, const AudioSourceComponent &source)
   {
-    if (!groupsInitialized)
+    if (!busesInitialized)
     {
       return false;
     }
 
-    const ma_uint32 flags = source_flags(source);
     auto existing = managedSources.find(entity);
     if (existing != managedSources.end())
     {
-      const bool matchesConfig = existing->second.initialized &&
+      const bool matchesConfig = existing->second.audioSource &&
                                  existing->second.assetPath == source.assetPath &&
-                                 existing->second.flags == flags &&
+                                 existing->second.streaming == source.streaming &&
+                                 existing->second.spatialized == source.spatialized &&
                                  existing->second.bus == source.bus;
       if (matchesConfig)
       {
@@ -298,7 +314,8 @@ namespace hades
 
       const bool failedWithSameConfig = existing->second.failed &&
                                         existing->second.assetPath == source.assetPath &&
-                                        existing->second.flags == flags &&
+                                        existing->second.streaming == source.streaming &&
+                                        existing->second.spatialized == source.spatialized &&
                                         existing->second.bus == source.bus;
       if (failedWithSameConfig)
       {
@@ -311,29 +328,43 @@ namespace hades
     ManagedSource &managed = managedSources[entity];
     managed.assetPath = source.assetPath;
     managed.bus = source.bus;
-    managed.flags = flags;
+    managed.streaming = source.streaming;
+    managed.spatialized = source.spatialized;
 
-    const ma_result result = ma_sound_init_from_file(
-        &engine,
-        source.assetPath.c_str(),
-        flags,
-        group_for_bus(source.bus),
-        nullptr,
-        &managed.sound);
-    if (result != MA_SUCCESS)
+    SoLoud::result loadResult = SoLoud::SO_NO_ERROR;
+    if (source.streaming)
+    {
+      auto stream = std::make_unique<SoLoud::WavStream>();
+      loadResult = stream->load(source.assetPath.c_str());
+      if (loadResult == SoLoud::SO_NO_ERROR)
+      {
+        managed.audioSource = std::move(stream);
+      }
+    }
+    else
+    {
+      auto wav = std::make_unique<SoLoud::Wav>();
+      loadResult = wav->load(source.assetPath.c_str());
+      if (loadResult == SoLoud::SO_NO_ERROR)
+      {
+        managed.audioSource = std::move(wav);
+      }
+    }
+
+    if (loadResult != SoLoud::SO_NO_ERROR || !managed.audioSource)
     {
       managed.failed = true;
       hades::Log::warn(
-          "failed to load audio asset '%s' for entity %u (%d)",
+          "failed to load audio asset '%s' for entity %u (%u)",
           source.assetPath.c_str(),
           entity,
-          result);
+          loadResult);
       return false;
     }
 
-    managed.initialized = true;
     managed.failed = false;
     managed.autoplayConsumed = false;
+    managed.voiceHandle = 0;
     return true;
   }
 
@@ -345,9 +376,9 @@ namespace hades
       return;
     }
 
-    if (it->second.initialized)
+    if (it->second.voiceHandle != 0)
     {
-      ma_sound_uninit(&it->second.sound);
+      soloud.stop(it->second.voiceHandle);
     }
 
     managedSources.erase(it);
@@ -357,25 +388,34 @@ namespace hades
   {
     for (auto &entry : managedSources)
     {
-      if (entry.second.initialized)
+      if (entry.second.voiceHandle != 0)
       {
-        ma_sound_uninit(&entry.second.sound);
+        soloud.stop(entry.second.voiceHandle);
       }
     }
     managedSources.clear();
 
-    if (groupsInitialized)
+    if (busesInitialized)
     {
-      ma_sound_group_uninit(&voiceGroup);
-      ma_sound_group_uninit(&sfxGroup);
-      ma_sound_group_uninit(&musicGroup);
-      ma_sound_group_uninit(&masterGroup);
-      groupsInitialized = false;
+      if (musicBusHandle != 0)
+      {
+        soloud.stop(musicBusHandle);
+      }
+      if (sfxBusHandle != 0)
+      {
+        soloud.stop(sfxBusHandle);
+      }
+      if (voiceBusHandle != 0)
+      {
+        soloud.stop(voiceBusHandle);
+      }
+      musicBusHandle = sfxBusHandle = voiceBusHandle = 0;
+      busesInitialized = false;
     }
 
     if (initialized)
     {
-      ma_engine_uninit(&engine);
+      soloud.deinit();
       initialized = false;
     }
   }

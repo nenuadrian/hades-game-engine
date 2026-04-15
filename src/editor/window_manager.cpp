@@ -25,7 +25,6 @@
 #include "../engine/core/ecs/query.hpp"
 #include <nlohmann/json.hpp>
 #endif
-#include "../engine/assets/asset_manager.hpp"
 #include "../engine/core/log.hpp"
 #include "../engine/core/ecs/scene_serializer.hpp"
 #include "../engine/core/ecs/world_utils.hpp"
@@ -571,7 +570,6 @@ namespace hades
   WindowManager::~WindowManager()
   {
     scriptRuntime.stop();
-    AssetManager::instance().shutdown();
   }
 
   void WindowManager::request_quit()

@@ -56,10 +56,10 @@ clone_dep "Dear ImGui" \
   "$(cmake_tag HADES_IMGUI_TAG)" \
   "$LIB_DIR/imgui"
 
-clone_dep "miniaudio" \
-  "https://github.com/mackron/miniaudio.git" \
-  "$(cmake_tag HADES_MINIAUDIO_TAG)" \
-  "$LIB_DIR/miniaudio"
+clone_dep "SoLoud" \
+  "https://github.com/jarikomppa/soloud.git" \
+  "$(cmake_tag HADES_SOLOUD_TAG)" \
+  "$LIB_DIR/soloud"
 
 # SDL2 is expected at lib/imgui/lib/SDL2 per Dependencies.cmake
 mkdir -p "$LIB_DIR/imgui/lib"
@@ -67,11 +67,6 @@ clone_dep "SDL2" \
   "https://github.com/libsdl-org/SDL.git" \
   "$(cmake_tag HADES_SDL2_TAG)" \
   "$LIB_DIR/imgui/lib/SDL2"
-
-clone_dep "Assimp" \
-  "https://github.com/assimp/assimp.git" \
-  "$(cmake_tag HADES_ASSIMP_TAG)" \
-  "$LIB_DIR/assimp"
 
 clone_dep "ImGuiColorTextEdit" \
   "https://github.com/BalazsJako/ImGuiColorTextEdit.git" \

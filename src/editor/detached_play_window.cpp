@@ -7,7 +7,6 @@
 #include <SDL.h>
 
 #include "../engine/components/camera_component.hpp"
-#include "../engine/components/model_component.hpp"
 #include "../engine/components/position_component_3d.hpp"
 #include "../engine/components/primitive_component.hpp"
 #include "../engine/components/rotation_component_3d.hpp"
@@ -16,7 +15,6 @@
 #include "../engine/core/ecs/component_manager.hpp"
 #include "../engine/core/ecs/entity_manager.hpp"
 #include "../engine/core/ecs/world_utils.hpp"
-#include "../engine/rendering/model_preview.hpp"
 #include "../engine/rendering/scene_renderer.hpp"
 #include "../engine/rendering/vector_text.hpp"
 
@@ -337,119 +335,6 @@ namespace
     return visible;
   }
 
-  SDL_Color shaded_preview_color(
-      std::uint8_t red,
-      std::uint8_t green,
-      std::uint8_t blue,
-      float shade,
-      std::uint8_t alpha)
-  {
-    return SDL_Color{
-        hades::preview::scale_color_channel(red, shade),
-        hades::preview::scale_color_channel(green, shade),
-        hades::preview::scale_color_channel(blue, shade),
-        alpha};
-  }
-
-  bool draw_model_mesh(
-      SDL_Renderer *renderer,
-      const hades::PositionComponent3D &cameraPosition,
-      const hades::CameraComponent &camera,
-      int width,
-      int height,
-      const hades::PositionComponent3D &position,
-      const hades::ImportedModel &model,
-      const hades::RotationComponent3D *rotation = nullptr,
-      const hades::ScaleComponent3D *scale = nullptr)
-  {
-    const auto projectedTriangles = hades::preview::project_model_triangles(
-        model,
-        position,
-        [&](const hades::preview::Vec3 &worldPoint)
-        {
-          return hades::preview::make_vec3(
-              worldPoint.x - cameraPosition.x,
-              worldPoint.y - cameraPosition.y,
-              worldPoint.z - cameraPosition.z);
-        },
-        [&](const hades::preview::Vec3 &cameraPoint, hades::preview::Vec2 &screenPoint)
-        {
-          SDL_FPoint projectedPoint{};
-          if (!project_camera_space_point(
-                  make_vec3(cameraPoint.x, cameraPoint.y, cameraPoint.z),
-                  camera,
-                  width,
-                  height,
-                  projectedPoint))
-          {
-            return false;
-          }
-
-          screenPoint.x = projectedPoint.x;
-          screenPoint.y = projectedPoint.y;
-          return true;
-        },
-        nullptr,
-        rotation,
-        scale);
-
-    if (projectedTriangles.empty())
-    {
-      return false;
-    }
-
-    bool drewTriangle = false;
-    for (const auto &triangle : projectedTriangles)
-    {
-      const SDL_Color fillColor = shaded_preview_color(157, 172, 191, triangle.shade, 220);
-      const SDL_Color outlineColor = shaded_preview_color(226, 232, 238, std::min(triangle.shade + 0.1f, 1.0f), 255);
-      const SDL_Vertex vertices[3] = {
-          {
-              SDL_FPoint{triangle.points[0].x, triangle.points[0].y},
-              fillColor,
-              SDL_FPoint{0.0f, 0.0f},
-          },
-          {
-              SDL_FPoint{triangle.points[1].x, triangle.points[1].y},
-              fillColor,
-              SDL_FPoint{0.0f, 0.0f},
-          },
-          {
-              SDL_FPoint{triangle.points[2].x, triangle.points[2].y},
-              fillColor,
-              SDL_FPoint{0.0f, 0.0f},
-          }};
-
-      if (SDL_RenderGeometry(renderer, nullptr, vertices, 3, nullptr, 0) == 0)
-      {
-        drewTriangle = true;
-      }
-
-      SDL_SetRenderDrawColor(renderer, outlineColor.r, outlineColor.g, outlineColor.b, outlineColor.a);
-      SDL_RenderDrawLine(
-          renderer,
-          static_cast<int>(std::lround(triangle.points[0].x)),
-          static_cast<int>(std::lround(triangle.points[0].y)),
-          static_cast<int>(std::lround(triangle.points[1].x)),
-          static_cast<int>(std::lround(triangle.points[1].y)));
-      SDL_RenderDrawLine(
-          renderer,
-          static_cast<int>(std::lround(triangle.points[1].x)),
-          static_cast<int>(std::lround(triangle.points[1].y)),
-          static_cast<int>(std::lround(triangle.points[2].x)),
-          static_cast<int>(std::lround(triangle.points[2].y)));
-      SDL_RenderDrawLine(
-          renderer,
-          static_cast<int>(std::lround(triangle.points[2].x)),
-          static_cast<int>(std::lround(triangle.points[2].y)),
-          static_cast<int>(std::lround(triangle.points[0].x)),
-          static_cast<int>(std::lround(triangle.points[0].y)));
-      drewTriangle = true;
-    }
-
-    return drewTriangle;
-  }
-
   bool draw_vector_text(
       SDL_Renderer *renderer,
       const hades::PositionComponent3D &cameraPosition,
@@ -517,7 +402,6 @@ namespace
       int height)
   {
     const SDL_Color primitiveColor{223, 228, 235, 255};
-    const SDL_Color modelColor{179, 189, 202, 255};
     const SDL_Color textColor{227, 233, 240, 255};
 
     // Build a RenderList using the SceneRenderer for frustum culling.
@@ -559,42 +443,19 @@ namespace
                                                    ? &componentManager.getComponent<hades::ScaleComponent3D>(item.entity)
                                                    : nullptr;
 
-        if (item.isPrimitive)
+        if (item.primitiveType == hades::PrimitiveType::Cube)
         {
-          if (item.primitiveType == hades::PrimitiveType::Cube)
-          {
-            draw_wire_box(
-                renderer, cameraPosition, camera, width, height, position,
-                make_vec3(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT),
-                make_vec3(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT),
-                primitiveColor, rotation, scale);
-          }
-          else if (item.primitiveType == hades::PrimitiveType::Plane)
-          {
-            draw_wire_plane(
-                renderer, cameraPosition, camera, width, height, position,
-                primitiveColor, rotation, scale);
-          }
-        }
-        else if (item.model != nullptr)
-        {
-          if (hades::preview::has_renderable_geometry(*item.model) &&
-              draw_model_mesh(
-                  renderer, cameraPosition, camera, width, height, position,
-                  *item.model, rotation, scale))
-          {
-            continue;
-          }
-
-          const Vec3 minCorner = item.model->hasBounds
-                                     ? make_vec3(item.model->minX, item.model->minY, item.model->minZ)
-                                     : make_vec3(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT);
-          const Vec3 maxCorner = item.model->hasBounds
-                                     ? make_vec3(item.model->maxX, item.model->maxY, item.model->maxZ)
-                                     : make_vec3(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT);
           draw_wire_box(
               renderer, cameraPosition, camera, width, height, position,
-              minCorner, maxCorner, modelColor, rotation, scale);
+              make_vec3(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT),
+              make_vec3(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT),
+              primitiveColor, rotation, scale);
+        }
+        else if (item.primitiveType == hades::PrimitiveType::Plane)
+        {
+          draw_wire_plane(
+              renderer, cameraPosition, camera, width, height, position,
+              primitiveColor, rotation, scale);
         }
       }
     };

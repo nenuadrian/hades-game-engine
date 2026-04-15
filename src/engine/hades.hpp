@@ -21,7 +21,6 @@
 #include "components/collider_component.hpp"
 #include "components/light_component.hpp"
 #include "components/mesh_renderer_component.hpp"
-#include "components/model_component.hpp"
 #include "components/name_component.hpp"
 #include "components/position_component_2d.hpp"
 #include "components/position_component_3d.hpp"

@@ -224,7 +224,6 @@ namespace hades
 
     render_add_entity_dialog(entityManager, componentManager);
     handle_entity_creation_requests(entityManager, componentManager);
-    import_model(entityManager, componentManager);
     handle_play_mode_requests(entityManager, componentManager, scriptRuntime);
 
     EditorPluginContext pluginContext{

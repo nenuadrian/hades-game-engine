@@ -3,11 +3,9 @@
 #include <algorithm>
 #include <cmath>
 
-#include "../assets/imported_model.hpp"
 #include "../components/camera_component.hpp"
 #include "../components/light_component.hpp"
 #include "../components/mesh_renderer_component.hpp"
-#include "../components/model_component.hpp"
 #include "../components/position_component_3d.hpp"
 #include "../components/primitive_component.hpp"
 #include "../components/rotation_component_3d.hpp"
@@ -175,7 +173,7 @@ namespace hades
       EntityManager &entityManager,
       std::optional<Entity::EntityId> worldFilter)
   {
-    // Collect entities that have either ModelComponent or PrimitiveComponent.
+    // Collect entities with a PrimitiveComponent.
     for (Entity::EntityId entity : entityManager.getActiveEntities())
     {
       if (worldFilter.has_value() &&
@@ -184,10 +182,7 @@ namespace hades
         continue;
       }
 
-      bool hasModel = componentManager.hasComponent<ModelComponent>(entity);
-      bool hasPrimitive = componentManager.hasComponent<PrimitiveComponent>(entity);
-
-      if (!hasModel && !hasPrimitive)
+      if (!componentManager.hasComponent<PrimitiveComponent>(entity))
       {
         continue;
       }
@@ -220,25 +215,8 @@ namespace hades
       item.worldPosition = position;
       item.worldTransform = math::buildModelMatrix(position, rotation, scale);
 
-      if (hasModel)
-      {
-        const auto &mc = componentManager.getComponent<ModelComponent>(entity);
-        item.model = mc.modelAsset.get();
-        item.isPrimitive = false;
-
-        // Skip models that haven't loaded yet.
-        if (item.model == nullptr)
-        {
-          continue;
-        }
-      }
-      else
-      {
-        const auto &pc = componentManager.getComponent<PrimitiveComponent>(entity);
-        item.primitiveType = pc.type;
-        item.isPrimitive = true;
-        item.model = nullptr;
-      }
+      const auto &pc = componentManager.getComponent<PrimitiveComponent>(entity);
+      item.primitiveType = pc.type;
 
       // Read material if present.
       if (componentManager.hasComponent<MeshRendererComponent>(entity))
@@ -247,7 +225,7 @@ namespace hades
       }
 
       // Compute bounds.
-      item.boundsRadius = computeBoundsRadius(item.model, item.isPrimitive, scale);
+      item.boundsRadius = computeBoundsRadius(scale);
 
       // Frustum culling.
       if (!camera.frustum.containsSphere(position, item.boundsRadius))
@@ -259,16 +237,8 @@ namespace hades
       // Distance to camera for sorting.
       item.distanceToCamera = (position - camera.position).length();
 
-      // Count triangles.
-      if (item.model != nullptr)
-      {
-        list.totalTriangles += item.model->totalFaceCount;
-      }
-      else
-      {
-        // Cube: 12 triangles, Plane: 2 triangles.
-        list.totalTriangles += (item.primitiveType == PrimitiveType::Cube) ? 12 : 2;
-      }
+      // Count triangles. Cube: 12, Plane: 2.
+      list.totalTriangles += (item.primitiveType == PrimitiveType::Cube) ? 12 : 2;
 
       // Route to opaque or transparent list.
       if (item.isTransparent())
@@ -282,28 +252,10 @@ namespace hades
     }
   }
 
-  float SceneRenderer::computeBoundsRadius(
-      const ImportedModel *model,
-      bool isPrimitive,
-      const math::Vec3 &scale) const
+  float SceneRenderer::computeBoundsRadius(const math::Vec3 &scale) const
   {
     float maxScale = std::max({std::abs(scale.x), std::abs(scale.y), std::abs(scale.z)});
-
-    if (model != nullptr && model->hasBounds)
-    {
-      float dx = std::max(std::abs(model->minX), std::abs(model->maxX));
-      float dy = std::max(std::abs(model->minY), std::abs(model->maxY));
-      float dz = std::max(std::abs(model->minZ), std::abs(model->maxZ));
-      return std::sqrt(dx * dx + dy * dy + dz * dz) * maxScale;
-    }
-
-    if (isPrimitive)
-    {
-      // Cube: diagonal of unit cube = sqrt(3) * 0.5
-      return DEFAULT_CUBE_HALF_EXTENT * 1.732f * maxScale;
-    }
-
-    // Default fallback.
+    // Cube diagonal (sqrt(3) * 0.5) covers both Cube and the thinner Plane conservatively.
     return DEFAULT_CUBE_HALF_EXTENT * 1.732f * maxScale;
   }
 }

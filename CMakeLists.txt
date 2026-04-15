@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(Hades LANGUAGES CXX)
+project(Hades LANGUAGES C CXX)
 
 set(HADES_CXX_STANDARD 20)
 
@@ -125,17 +125,15 @@ if(EMSCRIPTEN)
   target_link_libraries(
     HadesEngine
     PUBLIC hades_imgui
-           assimp
            Jolt
-           miniaudio
+           hades_soloud
            nlohmann_json::nlohmann_json)
 else()
   target_link_libraries(
     HadesEngine
     PUBLIC hades_imgui
-           assimp
            Jolt
-           miniaudio
+           hades_soloud
            nlohmann_json::nlohmann_json
            Vulkan::Vulkan)
   if(WIN32)
@@ -156,7 +154,6 @@ target_link_libraries(
   ${PROJECT_NAME}
   PRIVATE HadesEngine
           CLI11::CLI11)
-hades_stage_runtime_dependency(${PROJECT_NAME} assimp)
 
 add_custom_command(
   TARGET ${PROJECT_NAME}
@@ -191,7 +188,6 @@ else()
     HadesRuntime
     PRIVATE HadesEngine
             CLI11::CLI11)
-  hades_stage_runtime_dependency(HadesRuntime assimp)
 
   add_custom_command(
     TARGET HadesRuntime
@@ -224,7 +220,6 @@ add_executable(hades_tests ${TEST_SOURCE_FILES} ${TEST_EDITOR_SUPPORT_SOURCES})
 hades_configure_cxx_standard(hades_tests PRIVATE)
 target_include_directories(hades_tests PRIVATE "${SRC_DIR}" "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(hades_tests PRIVATE HadesEngine gtest_main)
-hades_stage_runtime_dependency(hades_tests assimp)
 
 enable_testing()
 include(GoogleTest)

@@ -297,9 +297,9 @@ namespace
     // --- Native build path (macOS / Linux / Windows) ---
 
     // Step 1: CMake configure.
-    // Force BUILD_SHARED_LIBS=OFF so all dependencies (assimp, etc.) are
-    // statically linked, producing a self-contained binary with no external
-    // dylib/so dependencies that would need to be bundled alongside it.
+    // Force BUILD_SHARED_LIBS=OFF so all dependencies are statically linked,
+    // producing a self-contained binary with no external dylib/so dependencies
+    // that would need to be bundled alongside it.
     append_log(*state, "=== Configuring (cmake) ===\n");
     {
       std::vector<std::string> configureArgs = {
@@ -547,7 +547,7 @@ namespace
       }
 
 #ifdef _WIN32
-      // Copy DLLs that may be needed (assimp).
+      // Copy any runtime DLLs that may be needed.
       const std::filesystem::path dllDir = buildDir / "Release";
       if (std::filesystem::exists(dllDir))
       {

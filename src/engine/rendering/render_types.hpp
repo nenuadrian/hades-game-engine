@@ -10,8 +10,6 @@
 
 namespace hades
 {
-  struct ImportedModel;
-
   // -------------------------------------------------------------------------
   // RenderCamera — fully resolved camera for rendering
   // -------------------------------------------------------------------------
@@ -72,12 +70,8 @@ namespace hades
     math::Mat4 worldTransform;
     math::Vec3 worldPosition;
 
-    /// Pointer to model data (null for primitives). Not owned.
-    const ImportedModel *model = nullptr;
-
-    /// Primitive type (used when model is null).
+    /// Primitive shape to render.
     PrimitiveType primitiveType = PrimitiveType::Cube;
-    bool isPrimitive = false;
 
     /// Material for this item.
     Material material;

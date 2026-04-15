@@ -50,10 +50,7 @@ namespace hades
         EntityManager &entityManager,
         std::optional<Entity::EntityId> worldFilter);
 
-    float computeBoundsRadius(
-        const ImportedModel *model,
-        bool isPrimitive,
-        const math::Vec3 &scale) const;
+    float computeBoundsRadius(const math::Vec3 &scale) const;
   };
 }
 

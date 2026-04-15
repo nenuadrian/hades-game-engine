@@ -110,9 +110,6 @@ namespace hades
 
   private:
     bool dockLayoutInitialized = false;
-    bool openImportModelDialog = false;
-    std::array<char, 512> importModelPathBuffer{};
-    std::string importModelError;
     std::filesystem::path activeWorkspacePath_;
     std::optional<WorkspaceTreeNode> workspaceTreeRoot_;
     std::vector<std::string> workspaceScriptFiles_;
@@ -207,7 +204,6 @@ namespace hades
     float sceneGizmoDragStartScaleX_ = 1.0f;
     float sceneGizmoDragStartScaleY_ = 1.0f;
     float sceneGizmoDragStartScaleZ_ = 1.0f;
-    bool sceneDrawModelMeshes_ = true;
     bool sceneCanvasKeyboardCapture_ = false;
     bool pendingSavedWorldRestore_ = false;
 
@@ -258,14 +254,12 @@ namespace hades
     void set_default_world(Entity::EntityId world, EntityManager &entityManager, ComponentManager &componentManager);
     void request_entity_creation(EditorEntityPreset preset, Entity::EntityId parent);
     void request_add_entity_picker(Entity::EntityId parent);
-    void request_model_import(Entity::EntityId parent);
     void request_entity_deletion(Entity::EntityId entity);
     void select_entity(Entity::EntityId entity);
     void workspace(EntityManager &entityManager, ComponentManager &componentManager);
     void handle_entity_creation_requests(EntityManager &entityManager, ComponentManager &componentManager);
     void handle_entity_deletion_requests(EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime);
     void render_add_entity_dialog(EntityManager &entityManager, ComponentManager &componentManager);
-    void import_model(EntityManager &entityManager, ComponentManager &componentManager);
     void handle_play_mode_requests(EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime);
     void start_play_mode(EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime);
     void set_main_camera(Entity::EntityId entity, EntityManager &entityManager, ComponentManager &componentManager);

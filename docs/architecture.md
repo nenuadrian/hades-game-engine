@@ -37,7 +37,7 @@ and editor code stay easy to trace.
 
     `src/engine/audio`
 
-    miniaudio-based audio engine with 4-bus mixing (Master, Music, Sfx,
+    SoLoud-based audio engine with 4-bus mixing (Master, Music, Sfx,
     Voice) and 3D spatial audio support.
 
 -   ### Scripting Runtime

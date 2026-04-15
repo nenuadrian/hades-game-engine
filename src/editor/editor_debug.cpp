@@ -13,7 +13,6 @@
 #include "../engine/components/camera_component.hpp"
 #include "../engine/components/collider_component.hpp"
 #include "../engine/components/light_component.hpp"
-#include "../engine/components/model_component.hpp"
 #include "../engine/components/name_component.hpp"
 #include "../engine/components/position_component_3d.hpp"
 #include "../engine/components/primitive_component.hpp"
@@ -53,7 +52,6 @@ namespace hades
       std::size_t cameras = 0;
       std::size_t mainCameras = 0;
       std::size_t lights = 0;
-      std::size_t models = 0;
       std::size_t primitives = 0;
       std::size_t textEntities = 0;
       std::size_t scriptedEntities = 0;
@@ -171,10 +169,6 @@ namespace hades
         if (componentManager.hasComponent<LightComponent>(entity))
         {
           stats.lights += 1;
-        }
-        if (componentManager.hasComponent<ModelComponent>(entity))
-        {
-          stats.models += 1;
         }
         if (componentManager.hasComponent<PrimitiveComponent>(entity))
         {
@@ -525,7 +519,6 @@ namespace hades
       add_stat_row_label_value("Cameras", entityStats.cameras);
       add_stat_row_label_value("Main cameras", entityStats.mainCameras);
       add_stat_row_label_value("Lights", entityStats.lights);
-      add_stat_row_label_value("Model entities", entityStats.models);
       add_stat_row_label_value("Primitive entities", entityStats.primitives);
       add_stat_row_label_value("Text entities", entityStats.textEntities);
       add_stat_row_label_value("Scripted entities", entityStats.scriptedEntities);
@@ -549,7 +542,6 @@ namespace hades
       add_stat_row_label_value("Camera distance", sceneCameraDistance_);
       add_stat_row_label_value("Camera yaw", sceneCameraYawDegrees_, " deg");
       add_stat_row_label_value("Camera pitch", sceneCameraPitchDegrees_, " deg");
-      add_stat_row_label_value("Draw model meshes", sceneDrawModelMeshes_ ? "Yes" : "No");
       ImGui::EndTable();
     }
 

@@ -52,16 +52,10 @@ The purpose is educational and experimental, to explore the intriguing world of 
 
 **Audio**
 
-- miniaudio-based audio engine with 3D spatial audio
+- SoLoud-based audio engine with 3D spatial audio
 - 4 audio buses: Master, Music, Sfx, Voice with independent volume control
 - Per-source properties: volume, pitch, looping, streaming, spatialization
 - Distance-based attenuation with min/max range and rolloff control
-
-**Asset Importing**
-
-- 3D model loading via Assimp (FBX, glTF, OBJ, DAE, 3DS, Blender, USD, and 40+ formats)
-- Post-processing: triangulation, vertex deduplication, cache optimization
-- Bounding box computation for imported models
 
 **Editor**
 

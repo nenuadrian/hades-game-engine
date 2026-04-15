@@ -9,7 +9,6 @@
 #endif
 
 #include "engine/core/log.hpp"
-#include "engine/assets/asset_manager.hpp"
 #include "engine/audio/audio_engine.hpp"
 #include "engine/core/ecs/scene_serializer.hpp"
 #include "engine/core/ecs/world_utils.hpp"
@@ -107,7 +106,6 @@ namespace hades
 #ifndef HADES_PLATFORM_WEB
     scriptRuntime_.stop();
 #endif
-    AssetManager::instance().shutdown();
   }
 
   std::string GameRuntime::project_name() const

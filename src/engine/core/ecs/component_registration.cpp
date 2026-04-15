@@ -7,15 +7,12 @@
 
 #include "../log.hpp"
 
-#include "../../assets/asset_manager.hpp"
-#include "../../assets/model_importer.hpp"
 #include "../../components/audio_listener_component.hpp"
 #include "../../components/audio_source_component.hpp"
 #include "../../components/camera_component.hpp"
 #include "../../components/collider_component.hpp"
 #include "../../components/light_component.hpp"
 #include "../../components/mesh_renderer_component.hpp"
-#include "../../components/model_component.hpp"
 #include "../../components/name_component.hpp"
 #include "../../components/position_component_3d.hpp"
 #include "../../components/primitive_component.hpp"
@@ -328,39 +325,6 @@ namespace hades
                 c.attachments.push_back(std::move(attachment));
               }
               cm.addComponent(entity, c);
-              return true;
-            });
-
-        // ModelComponent
-        registry.registerComponent<ModelComponent>(
-            "model",
-            [](Entity::EntityId entity, ComponentManager &cm, json &out) -> bool
-            {
-              if (!cm.hasComponent<ModelComponent>(entity))
-                return false;
-              const auto &c = cm.getComponent<ModelComponent>(entity);
-              const auto *model = c.modelAsset.get();
-              if (model == nullptr)
-                return false;
-              out = {
-                  {"sourcePath", model->sourcePath},
-                  {"formatHint", model->formatHint}};
-              return true;
-            },
-            [](Entity::EntityId entity, ComponentManager &cm, const json &in, const auto &) -> bool
-            {
-              const std::string sourcePath = in["sourcePath"].get<std::string>();
-              auto handle = AssetManager::instance().load_model_sync(sourcePath);
-              if (handle.is_ready())
-              {
-                ModelComponent c;
-                c.modelAsset = std::move(handle);
-                cm.addComponent(entity, c);
-              }
-              else
-              {
-                hades::Log::warn("failed to re-import model from '%s'", sourcePath.c_str());
-              }
               return true;
             });
 

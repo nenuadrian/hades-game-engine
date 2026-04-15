@@ -9,7 +9,6 @@
 #include "../engine/components/audio_listener_component.hpp"
 #include "../engine/components/audio_source_component.hpp"
 #include "../engine/components/camera_component.hpp"
-#include "../engine/components/model_component.hpp"
 #include "../engine/components/name_component.hpp"
 #include "../engine/components/position_component_3d.hpp"
 #include "../engine/components/primitive_component.hpp"
@@ -179,30 +178,4 @@ namespace hades
     EXPECT_FALSE(componentManager.hasComponent<TransformHierarchyComponent>(invalidParent));
   }
 
-  TEST(EntityFactoryTest, CreateImportedModelAddsModelComponent)
-  {
-    EntityManager entityManager;
-    ComponentManager componentManager;
-
-    std::string errorMessage;
-    const auto entity = EntityFactory::createImportedModel(
-        entityManager,
-        componentManager,
-        test_support::backpack_model_path(),
-        std::nullopt,
-        &errorMessage);
-
-    ASSERT_TRUE(entity.has_value()) << errorMessage;
-    EXPECT_TRUE(componentManager.hasComponent<NameComponent>(*entity));
-    EXPECT_EQ(componentManager.getComponent<NameComponent>(*entity).value, "12305_backpack_v2_l3");
-    EXPECT_TRUE(componentManager.hasComponent<ModelComponent>(*entity));
-    EXPECT_FALSE(componentManager.getComponent<TransformHierarchyComponent>(*entity).hasParent());
-
-    const auto &modelComponent = componentManager.getComponent<ModelComponent>(*entity);
-    ASSERT_TRUE(modelComponent.modelAsset.is_ready());
-    const auto *model = modelComponent.modelAsset.get();
-    ASSERT_NE(model, nullptr);
-    EXPECT_FALSE(model->meshes.empty());
-    EXPECT_FALSE(model->materials.empty());
-  }
 }

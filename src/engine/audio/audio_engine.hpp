@@ -1,15 +1,23 @@
 #ifndef HADES_ENGINE_AUDIO_AUDIO_ENGINE_HPP
 #define HADES_ENGINE_AUDIO_AUDIO_ENGINE_HPP
 
+#include <memory>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 
-#include <miniaudio.h>
+#include <soloud.h>
+#include <soloud_bus.h>
 
 #include "../components/audio_listener_component.hpp"
 #include "../components/audio_source_component.hpp"
 #include "../components/position_component_3d.hpp"
 #include "../core/ecs/entity.hpp"
+
+namespace SoLoud
+{
+  class AudioSource;
+}
 
 namespace hades
 {
@@ -34,28 +42,30 @@ namespace hades
   private:
     struct ManagedSource
     {
-      ma_sound sound{};
+      std::unique_ptr<SoLoud::AudioSource> audioSource;
       std::string assetPath;
       AudioBus bus = AudioBus::Sfx;
-      ma_uint32 flags = 0;
-      bool initialized = false;
+      bool streaming = false;
+      bool spatialized = true;
       bool failed = false;
       bool autoplayConsumed = false;
+      SoLoud::handle voiceHandle = 0;
     };
 
-    ma_sound_group *group_for_bus(AudioBus bus);
-    ma_uint32 source_flags(const AudioSourceComponent &source) const;
-    bool ensure_groups();
+    SoLoud::Bus *bus_for(AudioBus bus);
+    bool ensure_buses();
     bool ensure_source(Entity::EntityId entity, const AudioSourceComponent &source);
     void release_source(Entity::EntityId entity);
     void shutdown();
 
-    ma_engine engine{};
-    ma_sound_group masterGroup{};
-    ma_sound_group musicGroup{};
-    ma_sound_group sfxGroup{};
-    ma_sound_group voiceGroup{};
-    bool groupsInitialized = false;
+    SoLoud::Soloud soloud{};
+    SoLoud::Bus musicBus{};
+    SoLoud::Bus sfxBus{};
+    SoLoud::Bus voiceBus{};
+    SoLoud::handle musicBusHandle = 0;
+    SoLoud::handle sfxBusHandle = 0;
+    SoLoud::handle voiceBusHandle = 0;
+    bool busesInitialized = false;
     bool initialized = false;
     std::unordered_map<Entity::EntityId, ManagedSource> managedSources;
   };

@@ -1,16 +1,11 @@
 #include "entity_factory.hpp"
 
-#include <filesystem>
-
-#include "../../assets/asset_manager.hpp"
-#include "../../assets/model_importer.hpp"
 #include "../../components/audio_listener_component.hpp"
 #include "../../components/light_component.hpp"
 #include "../../components/audio_source_component.hpp"
 #include "../../components/camera_component.hpp"
 #include "../../components/collider_component.hpp"
 #include "../../components/mesh_renderer_component.hpp"
-#include "../../components/model_component.hpp"
 #include "../../components/name_component.hpp"
 #include "../../components/position_component_3d.hpp"
 #include "../../components/primitive_component.hpp"
@@ -156,31 +151,6 @@ namespace hades
     light.innerConeAngle = 25.0f;
     light.outerConeAngle = 35.0f;
     componentManager.addComponent(entity, light);
-    return entity;
-  }
-
-  std::optional<Entity::EntityId> EntityFactory::createImportedModel(
-      EntityManager &entityManager,
-      ComponentManager &componentManager,
-      const std::filesystem::path &sourcePath,
-      std::optional<Entity::EntityId> parent,
-      std::string *errorMessage)
-  {
-    auto handle = AssetManager::instance().load_model_sync(sourcePath);
-    if (!handle.is_ready())
-    {
-      if (errorMessage != nullptr)
-      {
-        *errorMessage = handle.has_failed() ? handle.error() : "Failed to import model.";
-      }
-      return std::nullopt;
-    }
-
-    const std::string entityName = sourcePath.stem().string().empty() ? "Imported Model" : sourcePath.stem().string();
-    const auto entity = createBaseEntity(entityManager, componentManager, entityName, parent);
-    ModelComponent mc;
-    mc.modelAsset = std::move(handle);
-    componentManager.addComponent(entity, mc);
     return entity;
   }
 

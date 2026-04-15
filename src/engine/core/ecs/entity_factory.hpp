@@ -1,7 +1,6 @@
 #ifndef HADES_ENGINE_CORE_ECS_ENTITY_FACTORY_HPP
 #define HADES_ENGINE_CORE_ECS_ENTITY_FACTORY_HPP
 
-#include <filesystem>
 #include <optional>
 #include <string>
 
@@ -65,13 +64,6 @@ namespace hades
         EntityManager &entityManager,
         ComponentManager &componentManager,
         std::optional<Entity::EntityId> parent = std::nullopt);
-
-    static std::optional<Entity::EntityId> createImportedModel(
-        EntityManager &entityManager,
-        ComponentManager &componentManager,
-        const std::filesystem::path &sourcePath,
-        std::optional<Entity::EntityId> parent = std::nullopt,
-        std::string *errorMessage = nullptr);
 
   private:
     static Entity::EntityId createBaseEntity(

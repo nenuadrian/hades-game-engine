@@ -3,8 +3,6 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
-#include <cstdio>
-#include <filesystem>
 #include <string>
 #include <string_view>
 
@@ -16,7 +14,6 @@
 #include "../engine/components/camera_component.hpp"
 #include "../engine/components/collider_component.hpp"
 #include "../engine/components/mesh_renderer_component.hpp"
-#include "../engine/components/model_component.hpp"
 #include "../engine/components/name_component.hpp"
 #include "../engine/components/position_component_2d.hpp"
 #include "../engine/components/position_component_3d.hpp"
@@ -43,7 +40,6 @@ namespace hades
   {
     constexpr char ENTITY_WINDOW_TITLE[] = "Entities";
     constexpr char ADD_ENTITY_POPUP_TITLE[] = "Add Entity";
-    constexpr char IMPORT_MODEL_POPUP_TITLE[] = "Import Model";
 
     struct EntityPickerCategory
     {
@@ -60,28 +56,25 @@ namespace hades
       const char *icon;
       const char *categoryId;
       EditorEntityPreset preset = EditorEntityPreset::None;
-      bool opensImportDialog = false;
     };
 
-    constexpr std::array<EntityPickerCategory, 5> ENTITY_PICKER_CATEGORIES{{
+    constexpr std::array<EntityPickerCategory, 4> ENTITY_PICKER_CATEGORIES{{
         {"scene", "Scene", ICON_FA_LAYER_GROUP},
         {"primitives", "Primitives", ICON_FA_SHAPES},
         {"audio", "Audio", ICON_FA_VOLUME_HIGH},
         {"lighting", "Lighting", ICON_FA_LIGHTBULB},
-        {"assets", "Assets", ICON_FA_BOX_ARCHIVE},
     }};
 
-    constexpr std::array<EntityPickerOption, 10> ENTITY_PICKER_OPTIONS{{
-        {"Camera", "Adds a camera and audio listener.", "main view listener", ICON_FA_CAMERA, "scene", EditorEntityPreset::Camera, false},
-        {"Text", "Adds a text entity.", "ui label typography", ICON_FA_FONT, "scene", EditorEntityPreset::Text, false},
-        {"Cube", "Adds a renderable cube.", "box mesh primitive", ICON_FA_CUBE, "primitives", EditorEntityPreset::Cube, false},
-        {"Plane", "Adds a flat plane primitive.", "ground floor quad", ICON_FA_VECTOR_SQUARE, "primitives", EditorEntityPreset::Plane, false},
-        {"Physics Cube", "Adds a cube with rigid body and collider.", "physics rigid body collider", ICON_FA_WAND_MAGIC_SPARKLES, "primitives", EditorEntityPreset::PhysicsCube, false},
-        {"Audio Emitter", "Adds a positional audio source.", "speaker sound music", ICON_FA_VOLUME_HIGH, "audio", EditorEntityPreset::AudioEmitter, false},
-        {"Directional Light", "Adds a sun-style directional light.", "sun light shadow", ICON_FA_SUN, "lighting", EditorEntityPreset::DirectionalLight, false},
-        {"Point Light", "Adds an omni-directional point light.", "bulb omni light", ICON_FA_LIGHTBULB, "lighting", EditorEntityPreset::PointLight, false},
-        {"Spot Light", "Adds a cone-shaped spot light.", "flashlight cone beam", ICON_FA_DRAW_POLYGON, "lighting", EditorEntityPreset::SpotLight, false},
-        {"Import Model...", "Imports a model asset and creates an entity for it.", "mesh asset obj fbx gltf glb", ICON_FA_FILE_IMPORT, "assets", EditorEntityPreset::None, true},
+    constexpr std::array<EntityPickerOption, 9> ENTITY_PICKER_OPTIONS{{
+        {"Camera", "Adds a camera and audio listener.", "main view listener", ICON_FA_CAMERA, "scene", EditorEntityPreset::Camera},
+        {"Text", "Adds a text entity.", "ui label typography", ICON_FA_FONT, "scene", EditorEntityPreset::Text},
+        {"Cube", "Adds a renderable cube.", "box mesh primitive", ICON_FA_CUBE, "primitives", EditorEntityPreset::Cube},
+        {"Plane", "Adds a flat plane primitive.", "ground floor quad", ICON_FA_VECTOR_SQUARE, "primitives", EditorEntityPreset::Plane},
+        {"Physics Cube", "Adds a cube with rigid body and collider.", "physics rigid body collider", ICON_FA_WAND_MAGIC_SPARKLES, "primitives", EditorEntityPreset::PhysicsCube},
+        {"Audio Emitter", "Adds a positional audio source.", "speaker sound music", ICON_FA_VOLUME_HIGH, "audio", EditorEntityPreset::AudioEmitter},
+        {"Directional Light", "Adds a sun-style directional light.", "sun light shadow", ICON_FA_SUN, "lighting", EditorEntityPreset::DirectionalLight},
+        {"Point Light", "Adds an omni-directional point light.", "bulb omni light", ICON_FA_LIGHTBULB, "lighting", EditorEntityPreset::PointLight},
+        {"Spot Light", "Adds a cone-shaped spot light.", "flashlight cone beam", ICON_FA_DRAW_POLYGON, "lighting", EditorEntityPreset::SpotLight},
     }};
 
     std::string to_lower(std::string_view text)
@@ -209,7 +202,6 @@ namespace hades
       remove_component_if_present<PrimitiveComponent>(componentManager, entity);
       remove_component_if_present<TextComponent>(componentManager, entity);
       remove_component_if_present<AudioSourceComponent>(componentManager, entity);
-      remove_component_if_present<ModelComponent>(componentManager, entity);
       remove_component_if_present<RenderComponent>(componentManager, entity);
       remove_component_if_present<LightComponent>(componentManager, entity);
       remove_component_if_present<ScriptComponent>(componentManager, entity);
@@ -298,22 +290,6 @@ namespace hades
     addEntitySearchBuffer_[0] = '\0';
     focusAddEntitySearch_ = true;
     openAddEntityDialog_ = true;
-  }
-
-  void Editor::request_model_import(Entity::EntityId parent)
-  {
-    state.selectedEntity = parent;
-    if (importModelPathBuffer[0] == '\0')
-    {
-      std::snprintf(
-          importModelPathBuffer.data(),
-          importModelPathBuffer.size(),
-          "%s",
-          "src/tests/backpack/12305_backpack_v2_l3.obj");
-    }
-
-    importModelError.clear();
-    openImportModelDialog = true;
   }
 
   void Editor::request_entity_deletion(Entity::EntityId entity)
@@ -434,14 +410,7 @@ namespace hades
 
         if (ImGui::IsItemClicked())
         {
-          if (option.opensImportDialog)
-          {
-            request_model_import(*pendingAddEntityParent_);
-          }
-          else
-          {
-            request_entity_creation(option.preset, *pendingAddEntityParent_);
-          }
+          request_entity_creation(option.preset, *pendingAddEntityParent_);
 
           reset_add_entity_dialog();
           ImGui::CloseCurrentPopup();
@@ -610,60 +579,6 @@ namespace hades
         state.selectedEntity = state.loadedWorld;
       }
     }
-  }
-
-  void Editor::import_model(EntityManager &entityManager, ComponentManager &componentManager)
-  {
-    if (openImportModelDialog)
-    {
-      ImGui::OpenPopup(IMPORT_MODEL_POPUP_TITLE);
-      openImportModelDialog = false;
-    }
-
-    if (!ImGui::BeginPopupModal(IMPORT_MODEL_POPUP_TITLE, nullptr, ImGuiWindowFlags_AlwaysAutoResize))
-    {
-      return;
-    }
-
-    ImGui::TextWrapped("Import Model");
-    ImGui::InputText("Path", importModelPathBuffer.data(), importModelPathBuffer.size());
-
-    if (!importModelError.empty())
-    {
-      ImGui::TextColored(ImVec4(0.88f, 0.42f, 0.42f, 1.0f), "%s", importModelError.c_str());
-    }
-
-    if (ImGui::Button("Import"))
-    {
-      std::string errorMessage;
-      const auto parent = get_selected_parent(entityManager, componentManager);
-      const auto createdEntity = EntityFactory::createImportedModel(
-          entityManager,
-          componentManager,
-          std::filesystem::path(importModelPathBuffer.data()),
-          parent,
-          &errorMessage);
-
-      if (createdEntity.has_value())
-      {
-        select_entity(*createdEntity);
-        importModelError.clear();
-        ImGui::CloseCurrentPopup();
-      }
-      else
-      {
-        importModelError = errorMessage.empty() ? "Model import failed." : errorMessage;
-      }
-    }
-
-    ImGui::SameLine();
-    if (ImGui::Button("Cancel"))
-    {
-      importModelError.clear();
-      ImGui::CloseCurrentPopup();
-    }
-
-    ImGui::EndPopup();
   }
 
   void Editor::handle_play_mode_requests(

@@ -26,9 +26,4 @@ namespace hades::test_support
         std::chrono::high_resolution_clock::now().time_since_epoch().count());
     return std::filesystem::temp_directory_path() / (std::string(prefix) + "-" + uniqueSuffix);
   }
-
-  inline std::filesystem::path backpack_model_path()
-  {
-    return std::filesystem::path(__FILE__).parent_path() / "backpack/12305_backpack_v2_l3.obj";
-  }
 }

@@ -15,11 +15,12 @@ set(HADES_CLI11_TAG "v2.4.2" CACHE STRING "CLI11 git tag or branch.")
 set(HADES_GOOGLETEST_TAG "v1.15.2" CACHE STRING "GoogleTest git tag or branch.")
 # Docking APIs live on Dear ImGui's docking release branch.
 set(HADES_IMGUI_TAG "v1.91.4-docking" CACHE STRING "Dear ImGui git tag or branch.")
-set(HADES_MINIAUDIO_TAG "0.11.25" CACHE STRING "miniaudio git tag or branch.")
+# SoLoud does not ship tagged releases on a regular cadence; track master like
+# ImGuiColorTextEdit does.
+set(HADES_SOLOUD_TAG "master" CACHE STRING "SoLoud git tag or branch.")
 # The vendored SDL snapshot is 2.31.0, which was a prerelease line.
 # Use the nearest stable release tag for on-demand downloads.
 set(HADES_SDL2_TAG "release-2.32.0" CACHE STRING "SDL2 git tag or branch.")
-set(HADES_ASSIMP_TAG "v6.0.4" CACHE STRING "Assimp git tag or branch.")
 set(HADES_IMGUI_TEXTEDIT_TAG "master" CACHE STRING "ImGuiColorTextEdit git tag or branch.")
 set(HADES_NLOHMANN_JSON_TAG "v3.11.3" CACHE STRING "nlohmann/json git tag or branch.")
 set(HADES_JOLTPHYSICS_TAG "v5.3.0" CACHE STRING "JoltPhysics git tag or branch.")
@@ -50,9 +51,8 @@ function(hades_configure_dependencies)
   hades_prefer_local_source(cli11 "${CMAKE_SOURCE_DIR}/lib/CLI11")
   hades_prefer_local_source(googletest "${CMAKE_SOURCE_DIR}/lib/googletest")
   hades_prefer_local_source(imgui "${CMAKE_SOURCE_DIR}/lib/imgui")
-  hades_prefer_local_source(miniaudio "${CMAKE_SOURCE_DIR}/lib/miniaudio")
+  hades_prefer_local_source(soloud "${CMAKE_SOURCE_DIR}/lib/soloud")
   hades_prefer_local_source(sdl2 "${CMAKE_SOURCE_DIR}/lib/imgui/lib/SDL2")
-  hades_prefer_local_source(assimp "${CMAKE_SOURCE_DIR}/lib/assimp")
   hades_prefer_local_source(imgui_color_text_edit "${CMAKE_SOURCE_DIR}/lib/ImGuiColorTextEdit")
   hades_prefer_local_source(nlohmann_json "${CMAKE_SOURCE_DIR}/lib/json")
   hades_prefer_local_source(joltphysics "${CMAKE_SOURCE_DIR}/lib/JoltPhysics")
@@ -74,40 +74,9 @@ function(hades_configure_dependencies)
   set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
   set(SDL_TESTS OFF CACHE BOOL "" FORCE)
 
-  set(MINIAUDIO_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-  set(MINIAUDIO_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-  set(MINIAUDIO_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
-  set(MINIAUDIO_INSTALL OFF CACHE BOOL "" FORCE)
-  set(MINIAUDIO_NO_EXTRA_NODES ON CACHE BOOL "" FORCE)
-  set(MINIAUDIO_NO_LIBVORBIS ON CACHE BOOL "" FORCE)
-
-  # Force assimp (and its bundled zlib) to build as a static library.
-  # Assimp defaults BUILD_SHARED_LIBS to ON, which also makes its internal
-  # zlib shared — producing a DLL that is not staged alongside the binary,
-  # causing 0xC0000135 (DLL Not Found) on Windows CI.
+  # Keep static linkage for our bundled dependencies (no stray DLLs to stage
+  # alongside the binary on Windows).
   set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-
-  set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-  set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
-  # Assimp's bundled zlib is too old for modern macOS SDKs (fdopen macro
-  # conflict), so use the platform zlib there.  On other platforms the bundled
-  # zlib keeps source-only builds self-contained.
-  if(APPLE)
-    set(ASSIMP_BUILD_ZLIB OFF CACHE BOOL "" FORCE)
-  else()
-    set(ASSIMP_BUILD_ZLIB ON CACHE BOOL "" FORCE)
-  endif()
-  # Always build minizip from assimp's bundled contrib/unzip sources rather
-  # than discovering Homebrew's minizip via pkg-config (it can ship an
-  # incompatible libminizip.a on macOS).  This is a regular variable, not a
-  # cache entry, because assimp's CMakeLists.txt checks it with a plain IF().
-  set(ASSIMP_BUILD_MINIZIP TRUE)
-  set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
-  set(ASSIMP_WARNINGS_AS_ERRORS OFF CACHE BOOL "" FORCE)
-  set(ASSIMP_INJECT_DEBUG_POSTFIX OFF CACHE BOOL "" FORCE)
-  # Disable the 3MF exporter to avoid building contrib/zip/src/zip.c, which
-  # triggers false positives in some antivirus software (e.g. Avast).
-  set(ASSIMP_BUILD_3MF_EXPORTER OFF CACHE BOOL "" FORCE)
 
   FetchContent_Declare(
     cli11
@@ -125,19 +94,14 @@ function(hades_configure_dependencies)
     GIT_TAG ${HADES_IMGUI_TAG}
     GIT_SHALLOW TRUE)
   FetchContent_Declare(
-    miniaudio
-    GIT_REPOSITORY https://github.com/mackron/miniaudio.git
-    GIT_TAG ${HADES_MINIAUDIO_TAG}
+    soloud
+    GIT_REPOSITORY https://github.com/jarikomppa/soloud.git
+    GIT_TAG ${HADES_SOLOUD_TAG}
     GIT_SHALLOW TRUE)
   FetchContent_Declare(
     sdl2
     GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
     GIT_TAG ${HADES_SDL2_TAG}
-    GIT_SHALLOW TRUE)
-  FetchContent_Declare(
-    assimp
-    GIT_REPOSITORY https://github.com/assimp/assimp.git
-    GIT_TAG ${HADES_ASSIMP_TAG}
     GIT_SHALLOW TRUE)
   FetchContent_Declare(
     imgui_color_text_edit
@@ -189,9 +153,52 @@ function(hades_configure_dependencies)
   if(EMSCRIPTEN)
     # Emscripten provides SDL2 as a built-in port (-sUSE_SDL=2).
     # Skip SDL2 FetchContent and GoogleTest/CLI11 (not needed for web runtime).
-    FetchContent_MakeAvailable(miniaudio assimp nlohmann_json joltphysics)
+    FetchContent_MakeAvailable(nlohmann_json joltphysics)
   else()
-    FetchContent_MakeAvailable(cli11 googletest miniaudio sdl2 assimp imgui_color_text_edit nlohmann_json joltphysics httplib)
+    FetchContent_MakeAvailable(cli11 googletest sdl2 imgui_color_text_edit nlohmann_json joltphysics httplib)
+  endif()
+
+  # SoLoud has no top-level CMakeLists.txt, so we populate the sources and
+  # build a static library ourselves (same pattern as Dear ImGui below).
+  FetchContent_GetProperties(soloud)
+  if(NOT soloud_POPULATED)
+    cmake_policy(PUSH)
+    if(POLICY CMP0169)
+      cmake_policy(SET CMP0169 OLD)
+    endif()
+    FetchContent_Populate(soloud)
+    cmake_policy(POP)
+  endif()
+
+  if(NOT TARGET hades_soloud)
+    file(GLOB SOLOUD_CORE_SOURCES CONFIGURE_DEPENDS
+      "${soloud_SOURCE_DIR}/src/core/*.cpp")
+    file(GLOB SOLOUD_AUDIOSOURCE_WAV_SOURCES CONFIGURE_DEPENDS
+      "${soloud_SOURCE_DIR}/src/audiosource/wav/*.cpp"
+      "${soloud_SOURCE_DIR}/src/audiosource/wav/*.c")
+    set(SOLOUD_BACKEND_SOURCES
+      "${soloud_SOURCE_DIR}/src/backend/sdl2_static/soloud_sdl2_static.cpp")
+
+    add_library(
+      hades_soloud STATIC
+      ${SOLOUD_CORE_SOURCES}
+      ${SOLOUD_AUDIOSOURCE_WAV_SOURCES}
+      ${SOLOUD_BACKEND_SOURCES})
+
+    target_include_directories(
+      hades_soloud
+      PUBLIC "${soloud_SOURCE_DIR}/include")
+    target_compile_definitions(
+      hades_soloud
+      PUBLIC WITH_SDL2_STATIC)
+
+    if(EMSCRIPTEN)
+      # Emscripten supplies SDL2 via -sUSE_SDL=2.
+      target_compile_options(hades_soloud PUBLIC -sUSE_SDL=2)
+      target_link_options(hades_soloud PUBLIC -sUSE_SDL=2)
+    else()
+      target_link_libraries(hades_soloud PUBLIC SDL2::SDL2)
+    endif()
   endif()
 
   FetchContent_GetProperties(imgui)
