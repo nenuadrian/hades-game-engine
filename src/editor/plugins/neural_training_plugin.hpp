@@ -14,6 +14,11 @@
 #include <hne/training/trainer_config.hpp>
 #include <hne/training/metrics.hpp>
 
+#ifdef HADES_HAS_HNE_WANDB
+#include <hne/imgui/wandb_panel.hpp>
+#include <hne/wandb/callback.hpp>
+#endif
+
 #include "editor_plugin.hpp"
 
 namespace hades
@@ -92,6 +97,13 @@ namespace hades
 
     std::string lastError_;
     std::string lastInfo_;
+
+#ifdef HADES_HAS_HNE_WANDB
+    // Persistent wandb panel state. The callback (once created by the user
+    // clicking "Start" in the panel) is attached to the next trainer started
+    // and kept alive for the run duration.
+    hne::imgui::WandbPanelState wandbState_;
+#endif
   };
 }
 

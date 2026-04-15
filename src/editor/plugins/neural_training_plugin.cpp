@@ -10,6 +10,11 @@
 #include <hne/training/callbacks.hpp>
 #include <nlohmann/json.hpp>
 
+#ifdef HADES_HAS_HNE_WANDB
+#include <hne/imgui/wandb_panel.hpp>
+#include <hne/wandb/callback.hpp>
+#endif
+
 #include "imgui.h"
 
 #include "../../engine/core/ecs/scene_serializer.hpp"
@@ -149,6 +154,15 @@ namespace hades
     // ---- Trainer config -----------------------------------------------------
     ImGui::SeparatorText("Hyperparameters");
     hne::imgui::render_trainer_config_editor(config_);
+
+#ifdef HADES_HAS_HNE_WANDB
+    // ---- Weights & Biases ---------------------------------------------------
+    ImGui::SeparatorText("Weights & Biases");
+    // Attach the current trainer config as hyperparameters so it lands on the
+    // run's config blob when the user clicks Start inside the panel.
+    nlohmann::json hyperparams = config_;
+    (void)hne::imgui::render_wandb_panel(wandbState_, &hyperparams);
+#endif
 
     // ---- Controls -----------------------------------------------------------
     ImGui::SeparatorText("Controls");
@@ -329,6 +343,17 @@ namespace hades
       }
     };
     trainer_->add_callback(cb);
+
+#ifdef HADES_HAS_HNE_WANDB
+    // If the user Start-ed a wandb run from the panel above, forward every
+    // metric/eval/checkpoint to it. The callback lifetime is tied to
+    // wandbState_; it survives across retrained runs until the user stops
+    // it from the panel.
+    if (wandbState_.callback)
+    {
+      trainer_->add_callback(wandbState_.callback);
+    }
+#endif
 
     // Clear the UI buffers for the new run.
     {

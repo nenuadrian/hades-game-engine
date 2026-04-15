@@ -64,6 +64,8 @@ option(HADES_ENABLE_HNE_INFERENCE
   "Build neural-engine inference runtime and link it into HadesEngine." ON)
 option(HADES_ENABLE_HNE_WIDGETS
   "Build neural-engine ImGui widgets and link them into the editor." ON)
+option(HADES_ENABLE_HNE_WANDB
+  "Build neural-engine Weights & Biases client (requires libcurl)." ON)
 
 if(EMSCRIPTEN)
   # LibTorch is unavailable on the web; force everything off regardless of the
@@ -71,6 +73,7 @@ if(EMSCRIPTEN)
   set(HADES_ENABLE_HNE_TRAINING OFF CACHE BOOL "" FORCE)
   set(HADES_ENABLE_HNE_INFERENCE OFF CACHE BOOL "" FORCE)
   set(HADES_ENABLE_HNE_WIDGETS OFF CACHE BOOL "" FORCE)
+  set(HADES_ENABLE_HNE_WANDB OFF CACHE BOOL "" FORCE)
 endif()
 
 # Auto-provision LibTorch (CPU) when training or inference is enabled and no
@@ -113,6 +116,7 @@ endif()
 set(HNE_BUILD_TRAINING ${HADES_ENABLE_HNE_TRAINING} CACHE BOOL "" FORCE)
 set(HNE_BUILD_INFERENCE ${HADES_ENABLE_HNE_INFERENCE} CACHE BOOL "" FORCE)
 set(HNE_BUILD_IMGUI_WIDGETS ${HADES_ENABLE_HNE_WIDGETS} CACHE BOOL "" FORCE)
+set(HNE_BUILD_WANDB ${HADES_ENABLE_HNE_WANDB} CACHE BOOL "" FORCE)
 set(HNE_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(HNE_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 
@@ -253,6 +257,10 @@ endif()
 if(HADES_ENABLE_HNE_WIDGETS AND TARGET hne_imgui)
   target_link_libraries(${PROJECT_NAME} PRIVATE hne_imgui)
   target_compile_definitions(${PROJECT_NAME} PRIVATE HADES_HAS_HNE_WIDGETS=1)
+endif()
+if(HADES_ENABLE_HNE_WANDB AND TARGET hne_wandb)
+  target_link_libraries(${PROJECT_NAME} PRIVATE hne_wandb)
+  target_compile_definitions(${PROJECT_NAME} PRIVATE HADES_HAS_HNE_WANDB=1)
 endif()
 
 add_custom_command(

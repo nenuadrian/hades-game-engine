@@ -207,3 +207,204 @@ All script-related errors are routed to the **Debug Console** panel
 - Compilation happens when play starts; there is no hot reload
 - A crash in script code will crash the editor (no sandboxing)
 - Only one world is active during play mode
+
+## Neural Scripts
+
+Hades integrates the `hades-neural-engine` (HNE) for reinforcement learning.
+Scripts can opt into RL by subclassing `hades::NeuralScript` instead of
+`hades::HadesScript`. A neural script declares its observation and action
+spaces, reads observations from the ECS, applies actions, emits a per-step
+reward, and signals episode termination. The editor's `Window > Neural Training`
+panel trains a PPO policy against the live world; exported policies plug back
+into the attachment so the script can run inference at play time.
+
+### Include
+
+```cpp
+#include "engine/hades.hpp"
+#include "engine/hades_neural.hpp"   // NeuralScript + normalization helpers
+```
+
+`engine/hades_neural.hpp` pulls in the `NeuralScript` base, the normalization
+helpers (`hades::normalize`, `hades::unnormalize`, `hades::write_obs`,
+`hades::write_vec3`), and the HNE core types (`hades::BoxSpace`,
+`hades::DiscreteSpace`, `hades::Tensor`, `hades::Action`, ...). For direct HNE
+use you can `#include <hne/hne.hpp>`.
+
+### Virtual Hooks
+
+| Method | Purpose |
+|--------|---------|
+| `hne::SpaceSpec observationSpace() const` | Declares the observation shape (usually `BoxSpace`). Must be stable across calls. |
+| `hne::SpaceSpec actionSpace() const` | Declares the action space (`DiscreteSpace`, `MultiDiscreteSpace`, or `BoxSpace`). |
+| `void readObservation(ScriptContext&, hne::Tensor& out)` | Fills the observation tensor from the current ECS state. |
+| `void applyAction(ScriptContext&, const hne::Action&, float dt)` | Applies the policy's / training step's action to the world. |
+| `float computeReward(ScriptContext&, float dt)` | Per-step scalar reward. Default returns `0`. |
+| `bool isDone(ScriptContext&)` | `true` ends the episode. Default returns `false`. |
+| `void onReset(ScriptContext&)` | Called at the start of each training episode. Default does nothing. |
+
+`onStart` / `onUpdate` still exist but are **not** called in `Inference` or
+`TrainingOwned` mode; use `applyAction` for per-step work instead.
+
+### Dispatch Modes
+
+When play starts, `ScriptRuntime` assigns each neural attachment one of three
+modes:
+
+- `Legacy` -- attachment uses plain `HadesScript`; `onUpdate` runs each frame.
+- `Inference` -- attachment is a `NeuralScript` with a non-empty `Model Path`.
+  The policy is loaded via `PolicyRegistry::get_validated(...)` with the
+  declared obs/action spaces; each frame: `readObservation` ->
+  `policy->evaluate` -> `applyAction`.
+- `TrainingOwned` -- attachment is a `NeuralScript` with an empty `Model Path`
+  inside a training host. The training loop drives the script; per-frame
+  `update` is skipped.
+
+A `NeuralScript` with an empty `Model Path` outside a training host is a
+**loud failure**: `start()` returns `false` and the Debug Console shows an
+error. A mismatched policy file (wrong obs shape, wrong action space) is the
+same kind of loud failure -- the engine never silently falls back to
+`onUpdate`.
+
+### Linking a Trained Policy
+
+Each `ScriptAttachment` has a `Model Path` string (relative to the workspace
+root). Set it from the inspector or edit the world JSON directly, e.g.:
+
+```
+.hades/policies/pole_v1/policy.pt
+```
+
+Empty means "legacy `onUpdate`, or training-owned when inside a training host".
+
+### Training via the Editor
+
+1. Open `Window > Neural Training`.
+2. Enter a **Run Name** (a subdirectory will be created under
+   `.hades/policies/<runName>/`).
+3. Pick the **World** containing your training subject.
+4. Fill in **Entity** and **Attachment Class** for the entity carrying the
+   `NeuralScript`.
+5. Adjust PPO hyperparameters in the config editor (rollout length, entropy
+   coefficient, learning rate, etc.).
+6. Click **Start**. The panel streams reward curves and loss/entropy metrics
+   live.
+7. Click **Export Policy**. This writes:
+   - `.hades/policies/<run>/policy.pt` -- the TorchScript policy.
+   - `.hades/policies/<run>/policy.meta.json` -- a sidecar with the obs/action
+     specs, trainer config, run name, subject entity, and export timestamp.
+   - `.hades/policies/<run>/trainer.ckpt` -- trainer checkpoint (for resume).
+8. Paste `.hades/policies/<run>/policy.pt` into the attachment's **Model Path**
+   and press `Play`. The script now runs in `Inference` mode.
+
+### Worked Example -- PoleBalance
+
+`tests/test_project/PoleBalance.cpp` is a classic cart-pole benchmark
+(`BoxSpace({4})` observation, `DiscreteSpace(2)` action):
+
+```cpp
+#include "engine/hades.hpp"
+#include "engine/hades_neural.hpp"
+
+class PoleBalance : public hades::NeuralScript
+{
+public:
+  hades::SpaceSpec observationSpace() const override
+  {
+    hades::BoxSpace box;
+    box.shape = {4};
+    box.low   = {-1.0f, -1.0f, -1.0f, -1.0f};
+    box.high  = { 1.0f,  1.0f,  1.0f,  1.0f};
+    return box;
+  }
+
+  hades::SpaceSpec actionSpace() const override
+  {
+    hades::DiscreteSpace d;
+    d.n = 2;
+    return d;
+  }
+
+  void readObservation(hades::ScriptContext&, hades::Tensor& out) override
+  {
+    hades::write_obs(out, 0, hades::normalize(cartX_,   -2.4f, 2.4f));
+    hades::write_obs(out, 1, hades::normalize(cartVel_, -3.0f, 3.0f));
+    hades::write_obs(out, 2, hades::normalize(angle_,   -0.21f, 0.21f));
+    hades::write_obs(out, 3, hades::normalize(angVel_,  -4.0f, 4.0f));
+  }
+
+  void applyAction(hades::ScriptContext& ctx,
+                   const hades::Action& action, float dt) override
+  {
+    const int dir = action.as_discrete() == 0 ? -1 : 1;
+    // ... cart-pole dynamics update cartX_, angle_, etc.
+    auto& pos = ctx.componentManager
+                   .getComponent<hades::PositionComponent3D>(ctx.entityId);
+    pos.x = cartX_;
+  }
+
+  float computeReward(hades::ScriptContext&, float) override { return 1.0f; }
+
+  bool isDone(hades::ScriptContext&) override
+  {
+    return std::abs(cartX_) > 2.4f || std::abs(angle_) > 0.21f;
+  }
+
+  void onReset(hades::ScriptContext& ctx) override
+  {
+    cartX_ = cartVel_ = angVel_ = 0.0f;
+    angle_ = 0.02f;
+    auto& pos = ctx.componentManager
+                   .getComponent<hades::PositionComponent3D>(ctx.entityId);
+    pos.x = 0.0f;
+  }
+
+private:
+  float cartX_ = 0, cartVel_ = 0, angle_ = 0.02f, angVel_ = 0;
+};
+
+HADES_REGISTER_SCRIPT(PoleBalance)
+```
+
+Train with the default PPO config for ~200k steps, export, set `Model Path`
+on the Cart entity, and hit `Play`: the cart self-balances.
+
+### Shared Normalization Helpers
+
+All neural scripts should use the helpers from `engine/hades_neural.hpp` so
+observations use a consistent `[-1, 1]` scale across scripts and trained
+policies remain portable:
+
+- `hades::normalize(v, lo, hi)` -- maps `[lo, hi]` to `[-1, 1]` (clamped).
+- `hades::unnormalize(v, lo, hi)` -- inverse.
+- `hades::write_obs(tensor, i, v)` -- bounds-checked tensor write.
+- `hades::write_vec3(tensor, base, vec3)` -- writes three consecutive floats.
+
+### Advanced -- Direct HNE Inference
+
+For custom inference setups (e.g. an ensemble or an externally-trained policy)
+you can drop into HNE directly:
+
+```cpp
+#include <hne/hne.hpp>
+
+hne::InferenceRuntime rt("path/to/policy.pt");
+hne::Tensor obs; obs.data.assign(4, 0.0f); obs.shape = {4};
+hne::Action a = rt.evaluate(obs, /*deterministic=*/true);
+```
+
+`PolicyRegistry` (`src/engine/runtime/policy_registry.hpp`) is the
+engine-managed, thread-safe cache used by `Inference` mode; external code is
+free to hold its own `InferenceRuntime` directly.
+
+### Neural Key Source Files
+
+| File | Purpose |
+|------|---------|
+| `src/engine/hades_neural.hpp` | Convenience header (base class + helpers + HNE types re-exports) |
+| `src/engine/runtime/hades_neural_script.hpp` | `NeuralScript` base class |
+| `src/engine/runtime/hades_neural_api.hpp` | `normalize` / `write_obs` / `write_vec3` helpers |
+| `src/engine/runtime/policy_registry.hpp` | Lazy thread-safe policy cache with spec validation |
+| `src/engine/training/hades_script_env.hpp` | `hne::IEnvironment` adapter used by the training panel |
+| `src/editor/plugins/neural_training_plugin.cpp` | `Window > Neural Training` panel |
+| `tests/test_project/PoleBalance.cpp` | Worked cart-pole example |
