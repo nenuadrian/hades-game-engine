@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <chrono>
 #include <fstream>
+#include <numeric>
 
 #include <hne/imgui/training_widgets.hpp>
 #include <hne/training/callbacks.hpp>
@@ -173,7 +174,13 @@ namespace hades
           const bool sel = (i == selectedEntityIdx_);
           if (ImGui::Selectable(scriptEntities_[i].c_str(), sel))
           {
-            selectedEntityIdx_ = i;
+            if (selectedEntityIdx_ != i)
+            {
+              selectedEntityIdx_ = i;
+              // Reset the attachment class selection since the list changes
+              // with the entity.
+              selectedClassIdx_ = 0;
+            }
           }
           if (sel)
           {
@@ -187,8 +194,45 @@ namespace hades
       // and the export metadata continue to use it unchanged.
       const auto &sel = scriptEntities_[selectedEntityIdx_];
       std::snprintf(entityName_, sizeof(entityName_), "%s", sel.c_str());
+
+      // Attachment class dropdown — populated from the selected entity's
+      // script.attachments so the user doesn't have to remember/type the class.
+      const auto &classes = entityAttachmentClasses_[selectedEntityIdx_];
+      if (classes.empty())
+      {
+        attachmentClass_[0] = '\0';
+        ImGui::TextDisabled("Selected entity has no script attachments.");
+      }
+      else
+      {
+        if (selectedClassIdx_ < 0 ||
+            selectedClassIdx_ >= static_cast<int>(classes.size()))
+        {
+          selectedClassIdx_ = 0;
+        }
+        const char *clsPreview = classes[selectedClassIdx_].c_str();
+        if (ImGui::BeginCombo("Attachment Class", clsPreview))
+        {
+          for (int i = 0; i < static_cast<int>(classes.size()); ++i)
+          {
+            ImGui::PushID(i);
+            const bool s = (i == selectedClassIdx_);
+            if (ImGui::Selectable(classes[i].c_str(), s))
+            {
+              selectedClassIdx_ = i;
+            }
+            if (s)
+            {
+              ImGui::SetItemDefaultFocus();
+            }
+            ImGui::PopID();
+          }
+          ImGui::EndCombo();
+        }
+        std::snprintf(attachmentClass_, sizeof(attachmentClass_), "%s",
+                      classes[selectedClassIdx_].c_str());
+      }
     }
-    ImGui::InputText("Attachment Class", attachmentClass_, sizeof(attachmentClass_));
     ImGui::TextDisabled(
         "Entity + attachment class must resolve to a NeuralScript in the world.");
 
@@ -337,7 +381,9 @@ namespace hades
       const std::filesystem::path &workspacePath)
   {
     scriptEntities_.clear();
+    entityAttachmentClasses_.clear();
     selectedEntityIdx_ = -1;
+    selectedClassIdx_ = -1;
     loadedEntitiesWorldIdx_ = selectedWorldIdx_;
 
     if (selectedWorldIdx_ < 0 ||
@@ -395,12 +441,43 @@ namespace hades
       {
         continue;
       }
+      std::vector<std::string> classes;
+      for (const auto &att : *attachIt)
+      {
+        const auto classIt = att.find("className");
+        if (classIt != att.end() && classIt->is_string())
+        {
+          classes.push_back(classIt->get<std::string>());
+        }
+      }
+      if (classes.empty())
+      {
+        continue;
+      }
       scriptEntities_.push_back(valueIt->get<std::string>());
+      entityAttachmentClasses_.push_back(std::move(classes));
     }
-    std::sort(scriptEntities_.begin(), scriptEntities_.end());
+    // Sort entities alphabetically while keeping the classes[i] lockstep with
+    // scriptEntities_[i] so the Attachment Class dropdown stays in sync.
+    std::vector<std::size_t> order(scriptEntities_.size());
+    std::iota(order.begin(), order.end(), 0);
+    std::sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b)
+              { return scriptEntities_[a] < scriptEntities_[b]; });
+    std::vector<std::string> sortedEnts;
+    std::vector<std::vector<std::string>> sortedClasses;
+    sortedEnts.reserve(order.size());
+    sortedClasses.reserve(order.size());
+    for (auto idx : order)
+    {
+      sortedEnts.push_back(std::move(scriptEntities_[idx]));
+      sortedClasses.push_back(std::move(entityAttachmentClasses_[idx]));
+    }
+    scriptEntities_ = std::move(sortedEnts);
+    entityAttachmentClasses_ = std::move(sortedClasses);
     if (!scriptEntities_.empty())
     {
       selectedEntityIdx_ = 0;
+      selectedClassIdx_ = 0;
     }
   }
 

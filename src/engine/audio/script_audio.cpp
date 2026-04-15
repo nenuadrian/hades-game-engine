@@ -162,8 +162,8 @@ namespace hades
       // roughly 20ms of audio so very low frequencies still produce enough
       // samples for SoLoud's resampler.
       const float minSeconds = 0.02f;
-      const int cycles = std::max(1, static_cast<int>(std::ceil(freqHz * minSeconds)));
-      const int samplesPerCycle = std::max(4, static_cast<int>(kSampleRate / freqHz));
+      const int cycles = (std::max)(1, static_cast<int>(std::ceil(freqHz * minSeconds)));
+      const int samplesPerCycle = (std::max)(4, static_cast<int>(kSampleRate / freqHz));
       const int totalSamples = samplesPerCycle * cycles;
 
       std::vector<float> buffer(static_cast<size_t>(totalSamples));

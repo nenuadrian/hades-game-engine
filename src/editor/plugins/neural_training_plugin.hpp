@@ -94,7 +94,11 @@ namespace hades
     // Entities in the selected world that have at least one script attached.
     // Refreshed when the selected world changes.
     std::vector<std::string> scriptEntities_;
+    // Parallel to scriptEntities_: the attachment className list for each entity,
+    // so the Attachment Class dropdown doesn't need the user to remember/type them.
+    std::vector<std::vector<std::string>> entityAttachmentClasses_;
     int selectedEntityIdx_ = -1;
+    int selectedClassIdx_ = -1;
     int loadedEntitiesWorldIdx_ = -2;
 
     // Trainer + config

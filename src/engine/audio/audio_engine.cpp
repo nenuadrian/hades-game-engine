@@ -175,7 +175,7 @@ namespace hades
     const float volume = clamp_non_negative(source.volume);
     const float pitch = clamp_positive(source.pitch, 1.0f);
     const float minDistance = clamp_positive(source.minDistance, 1.0f);
-    const float maxDistance = std::max(clamp_positive(source.maxDistance, minDistance), minDistance);
+    const float maxDistance = (std::max)(clamp_positive(source.maxDistance, minDistance), minDistance);
     const float rolloff = clamp_positive(source.rolloff, 1.0f);
 
     if (managed.audioSource)

@@ -27,7 +27,7 @@
     "web": {
       "enableHadesAPI": false,
       "enableHeadless": false,
-      "outputPath": "",
+      "outputPath": "/Users/adriannenu/Desktop/web/",
       "projectName": "test_project"
     },
     "windows": {

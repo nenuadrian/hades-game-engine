@@ -137,7 +137,19 @@ if(TARGET nlohmann_json::nlohmann_json)
   get_target_property(
     _hades_njson_includes nlohmann_json::nlohmann_json INTERFACE_INCLUDE_DIRECTORIES)
   if(_hades_njson_includes)
-    list(GET _hades_njson_includes 0 HADES_NLOHMANN_JSON_INCLUDE_DIR)
+    # INTERFACE_INCLUDE_DIRECTORIES entries are often wrapped in generator
+    # expressions (e.g. `$<BUILD_INTERFACE:/abs/path>`), which configure_file
+    # does not evaluate. Unwrap the BUILD_INTERFACE path manually; fall back
+    # to the first plain entry if no wrapped one is found.
+    foreach(_hades_njson_entry IN LISTS _hades_njson_includes)
+      if(_hades_njson_entry MATCHES "^\\$<BUILD_INTERFACE:(.+)>$")
+        set(HADES_NLOHMANN_JSON_INCLUDE_DIR "${CMAKE_MATCH_1}")
+        break()
+      elseif(NOT _hades_njson_entry MATCHES "^\\$<")
+        set(HADES_NLOHMANN_JSON_INCLUDE_DIR "${_hades_njson_entry}")
+        break()
+      endif()
+    endforeach()
   endif()
 endif()
 
@@ -231,6 +243,7 @@ else()
            nlohmann_json::nlohmann_json
            Vulkan::Vulkan)
   if(WIN32)
+    target_compile_definitions(HadesEngine PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
     target_link_libraries(HadesEngine PUBLIC Ole32 uuid)
   else()
     target_link_libraries(HadesEngine PUBLIC dl)

@@ -27,6 +27,22 @@ namespace hades
         const std::string &contents,
         std::string *errorMessage)
     {
+      // Skip the write (and leave mtime untouched) when the existing file
+      // already has identical contents. The caller relies on the registry's
+      // mtime as a compilation-cache invalidation signal, so touching it
+      // unconditionally would defeat the "dylib already fresh" short-circuit.
+      std::ifstream existing(path, std::ios::binary);
+      if (existing)
+      {
+        std::string current(
+            (std::istreambuf_iterator<char>(existing)),
+            std::istreambuf_iterator<char>());
+        if (current == contents)
+        {
+          return true;
+        }
+      }
+
       std::ofstream file(path, std::ios::binary | std::ios::trunc);
       if (!file)
       {
@@ -158,6 +174,48 @@ namespace hades
       return false;
     }
 
+    const std::string libName = "HadesScripts" + shared_lib_extension();
+    const std::filesystem::path outputPath = outputDir / libName;
+
+    // Skip the expensive clang invocation when the dylib is already newer
+    // than every input. Multiple training envs spin up the same script
+    // runtime back-to-back and would otherwise each pay a full recompile;
+    // cache hits take this from seconds per env to microseconds.
+    {
+      std::error_code mtec;
+      const auto libExists = std::filesystem::exists(outputPath, mtec);
+      if (libExists && !mtec)
+      {
+        const auto libMtime = std::filesystem::last_write_time(outputPath, mtec);
+        if (!mtec)
+        {
+          auto latestInput = std::filesystem::last_write_time(registryPath, mtec);
+          bool inputsOk = !mtec;
+          if (inputsOk)
+          {
+            for (const auto &src : sourceFiles)
+            {
+              const auto srcMtime = std::filesystem::last_write_time(src, mtec);
+              if (mtec)
+              {
+                inputsOk = false;
+                break;
+              }
+              if (srcMtime > latestInput)
+              {
+                latestInput = srcMtime;
+              }
+            }
+          }
+          if (inputsOk && libMtime >= latestInput)
+          {
+            libraryPath_ = outputPath;
+            return true;
+          }
+        }
+      }
+    }
+
     // Build compiler command line.
     const std::string compiler = build_config::cxx_compiler;
     const std::string compilerId = build_config::cxx_compiler_id;
@@ -165,9 +223,6 @@ namespace hades
     const std::string includeArg = sourceDir + "/src";
     const std::string hneIncludeArg = build_config::hne_include_dir;
     const std::string njsonIncludeArg = build_config::nlohmann_json_include_dir;
-
-    const std::string libName = "HadesScripts" + shared_lib_extension();
-    const std::filesystem::path outputPath = outputDir / libName;
 
     std::vector<std::string> args;
 

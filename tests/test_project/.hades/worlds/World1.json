@@ -7,7 +7,8 @@
             1,
             2,
             3,
-            4
+            4,
+            5
           ],
           "parent": null
         },
@@ -151,6 +152,37 @@
         }
       },
       "id": 4
+    },
+    {
+      "components": {
+        "hierarchy": {
+          "children": [],
+          "parent": 0
+        },
+        "name": {
+          "value": "Cart"
+        },
+        "position3d": {
+          "x": 0.0,
+          "y": 2.0,
+          "z": 0.0
+        },
+        "primitive": {
+          "type": 0
+        },
+        "script": {
+          "attachments": [
+            {
+              "className": "PoleBalance",
+              "enabled": true,
+              "modelPath": "",
+              "publicFieldValues": {},
+              "scriptPath": "PoleBalance.cpp"
+            }
+          ]
+        }
+      },
+      "id": 5
     }
   ],
   "version": 1

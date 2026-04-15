@@ -11,7 +11,7 @@ namespace hades
   public:
     using EntityId = uint32_t;
 
-    static constexpr EntityId INVALID = std::numeric_limits<EntityId>::max();
+    static constexpr EntityId INVALID = (std::numeric_limits<EntityId>::max)();
 
   private:
     EntityId id;
