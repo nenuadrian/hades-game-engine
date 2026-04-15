@@ -4,8 +4,8 @@
       "components": {
         "hierarchy": {
           "children": [
-            9,
-            10
+            1,
+            2
           ],
           "parent": null
         },
@@ -16,7 +16,7 @@
           "isDefault": false
         }
       },
-      "id": 8
+      "id": 0
     },
     {
       "components": {
@@ -37,7 +37,7 @@
         },
         "hierarchy": {
           "children": [],
-          "parent": 8
+          "parent": 0
         },
         "name": {
           "value": "Camera"
@@ -54,13 +54,13 @@
           "qz": 0.0
         }
       },
-      "id": 9
+      "id": 1
     },
     {
       "components": {
         "hierarchy": {
           "children": [],
-          "parent": 8
+          "parent": 0
         },
         "name": {
           "value": "Cart"
@@ -85,7 +85,7 @@
           ]
         }
       },
-      "id": 10
+      "id": 2
     }
   ],
   "version": 1

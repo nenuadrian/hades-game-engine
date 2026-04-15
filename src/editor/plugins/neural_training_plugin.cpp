@@ -18,6 +18,8 @@
 
 #include "imgui.h"
 
+#include "../../editor/editor.hpp"
+#include "../../editor/types.h"
 #include "../../engine/core/ecs/scene_serializer.hpp"
 #include "../../engine/runtime/policy_registry.hpp"
 #include "../../engine/training/hades_script_env.hpp"
@@ -323,6 +325,71 @@ namespace hades
       }
     }
 
+    // ---- Policy Preview -----------------------------------------------------
+    // Load a saved `.pt` and run it against the selected NeuralScript
+    // attachment in live play mode. Reuses the world/entity/class dropdowns
+    // above — Preview is just "Start Play, but with a specific world + a
+    // policy injected into one attachment".
+    ImGui::SeparatorText("Policy Preview");
+    if (previewPolicies_.empty())
+    {
+      refresh_preview_policies(workspacePath);
+    }
+    if (previewPolicies_.empty())
+    {
+      ImGui::TextDisabled("No .pt files found under .hades/policies.");
+    }
+    else
+    {
+      if (selectedPreviewPolicyIdx_ < 0 ||
+          selectedPreviewPolicyIdx_ >= static_cast<int>(previewPolicies_.size()))
+      {
+        selectedPreviewPolicyIdx_ = 0;
+      }
+      const char *pp = previewPolicyLabels_[selectedPreviewPolicyIdx_].c_str();
+      if (ImGui::BeginCombo("Policy", pp))
+      {
+        for (int i = 0; i < static_cast<int>(previewPolicies_.size()); ++i)
+        {
+          ImGui::PushID(i);
+          const bool s = (i == selectedPreviewPolicyIdx_);
+          if (ImGui::Selectable(previewPolicyLabels_[i].c_str(), s))
+          {
+            selectedPreviewPolicyIdx_ = i;
+          }
+          if (s)
+          {
+            ImGui::SetItemDefaultFocus();
+          }
+          ImGui::PopID();
+        }
+        ImGui::EndCombo();
+      }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Refresh##PreviewPolicies"))
+    {
+      refresh_preview_policies(workspacePath);
+    }
+
+    const bool canPreview = !context.editor.state.isPlaying &&
+                            selectedPreviewPolicyIdx_ >= 0 &&
+                            entityName_[0] != '\0' &&
+                            attachmentClass_[0] != '\0' &&
+                            selectedWorldIdx_ >= 0;
+    ImGui::BeginDisabled(!canPreview);
+    if (ImGui::Button("Preview Policy"))
+    {
+      start_preview(context);
+    }
+    ImGui::EndDisabled();
+    if (context.editor.state.isPreviewing)
+    {
+      ImGui::SameLine();
+      ImGui::TextColored(ImVec4(0.4f, 0.9f, 1.0f, 1.0f),
+                         "(previewing — Stop Play to exit)");
+    }
+
     // ---- Status -------------------------------------------------------------
     if (!lastError_.empty())
     {
@@ -498,6 +565,80 @@ namespace hades
       }
     }
     std::sort(policyFiles_.begin(), policyFiles_.end());
+  }
+
+  void NeuralTrainingPlugin::refresh_preview_policies(
+      const std::filesystem::path &workspacePath)
+  {
+    previewPolicies_.clear();
+    previewPolicyLabels_.clear();
+    selectedPreviewPolicyIdx_ = -1;
+
+    const auto root = policies_root(workspacePath);
+    std::error_code ec;
+    if (!std::filesystem::is_directory(root, ec))
+    {
+      return;
+    }
+    for (const auto &entry : std::filesystem::recursive_directory_iterator(root, ec))
+    {
+      if (ec)
+      {
+        break;
+      }
+      if (!entry.is_regular_file(ec))
+      {
+        continue;
+      }
+      if (entry.path().extension() != ".pt")
+      {
+        continue;
+      }
+      previewPolicies_.push_back(entry.path());
+      // Label as "<runFolder>/<filename>" so multiple runs' checkpoints are
+      // distinguishable at a glance.
+      const auto rel = std::filesystem::relative(entry.path(), root, ec);
+      previewPolicyLabels_.push_back(ec ? entry.path().filename().string()
+                                        : rel.generic_string());
+    }
+    if (!previewPolicies_.empty())
+    {
+      selectedPreviewPolicyIdx_ = 0;
+    }
+  }
+
+  void NeuralTrainingPlugin::start_preview(EditorPluginContext &context)
+  {
+    lastError_.clear();
+    lastInfo_.clear();
+
+    if (selectedPreviewPolicyIdx_ < 0 ||
+        selectedPreviewPolicyIdx_ >= static_cast<int>(previewPolicies_.size()))
+    {
+      lastError_ = "Pick a policy (.pt) before previewing.";
+      return;
+    }
+    if (selectedWorldIdx_ < 0 ||
+        selectedWorldIdx_ >= static_cast<int>(worldNames_.size()))
+    {
+      lastError_ = "Pick a world before previewing.";
+      return;
+    }
+    if (entityName_[0] == '\0' || attachmentClass_[0] == '\0')
+    {
+      lastError_ = "Subject entity and attachment class must be set.";
+      return;
+    }
+
+    PreviewRequest req;
+    req.worldName = worldNames_[selectedWorldIdx_];
+    req.entityName = std::string(entityName_);
+    req.className = std::string(attachmentClass_);
+    req.modelPath = previewPolicies_[selectedPreviewPolicyIdx_].string();
+
+    context.editor.state.pendingPreviewRequest = std::move(req);
+    context.editor.state.pendingPlayAction = EditorPlayAction::Start;
+    lastInfo_ = "Preview requested — entering play mode.";
   }
 
   void NeuralTrainingPlugin::start_training(const std::filesystem::path &workspacePath)

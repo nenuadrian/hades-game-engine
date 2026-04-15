@@ -23,7 +23,7 @@
       "outputPath": "/Users/adriannenu/Desktop/asdasd/",
       "projectName": "test_project"
     },
-    "selectedPlatform": 0,
+    "selectedPlatform": 3,
     "web": {
       "enableHadesAPI": false,
       "enableHeadless": false,
@@ -43,7 +43,7 @@
   "plugins": {
     "debug": false,
     "entities": true,
-    "export": false,
+    "export": true,
     "neural-training": true,
     "properties": true,
     "workspace": true,

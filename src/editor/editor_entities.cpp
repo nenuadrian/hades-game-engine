@@ -616,7 +616,90 @@ namespace hades
     prePlaySelectedEntity_ = state.selectedEntity;
     prePlayLoadedWorld_ = state.loadedWorld;
 
-    const auto startupWorld = normalize_default_world(entityManager, componentManager);
+    // Policy Preview path: caller set state.pendingPreviewRequest before
+    // firing EditorPlayAction::Start. Locate the requested world by name,
+    // inject the .pt path into the matching ScriptAttachment so
+    // ScriptRuntime::start promotes it to Inference mode, and use that world
+    // as the startup world instead of the project default. The snapshot we
+    // just took reverts every mutation on stop_play_mode, so there is nothing
+    // to undo explicitly.
+    std::optional<Entity::EntityId> startupWorld;
+    if (state.pendingPreviewRequest.has_value())
+    {
+      const auto &req = *state.pendingPreviewRequest;
+      std::optional<Entity::EntityId> matchedWorld;
+      for (Entity::EntityId world : find_world_entities(entityManager, componentManager))
+      {
+        if (componentManager.hasComponent<NameComponent>(world) &&
+            componentManager.getComponent<NameComponent>(world).value == req.worldName)
+        {
+          matchedWorld = world;
+          break;
+        }
+      }
+      if (!matchedWorld.has_value())
+      {
+        state.isPlaying = false;
+        state.activeWorld.reset();
+        state.activeCamera.reset();
+        state.playModeMessage = "Preview world not found: " + req.worldName;
+        log_error("Preview failed: " + state.playModeMessage);
+        state.pendingPreviewRequest.reset();
+        return;
+      }
+
+      bool injected = false;
+      for (Entity::EntityId entity : entityManager.getActiveEntities())
+      {
+        if (!hierarchy_contains_entity(*matchedWorld, entity, componentManager))
+        {
+          continue;
+        }
+        if (!componentManager.hasComponent<NameComponent>(entity) ||
+            !componentManager.hasComponent<ScriptComponent>(entity))
+        {
+          continue;
+        }
+        if (componentManager.getComponent<NameComponent>(entity).value != req.entityName)
+        {
+          continue;
+        }
+        auto &script = componentManager.getComponent<ScriptComponent>(entity);
+        for (auto &attachment : script.attachments)
+        {
+          if (attachment.className == req.className)
+          {
+            attachment.modelPath = req.modelPath;
+            injected = true;
+            break;
+          }
+        }
+        if (injected)
+        {
+          break;
+        }
+      }
+      if (!injected)
+      {
+        state.isPlaying = false;
+        state.activeWorld.reset();
+        state.activeCamera.reset();
+        state.playModeMessage =
+            "Preview attachment not found: " + req.entityName + "/" + req.className;
+        log_error("Preview failed: " + state.playModeMessage);
+        state.pendingPreviewRequest.reset();
+        return;
+      }
+
+      startupWorld = matchedWorld;
+      state.loadedWorld = matchedWorld;
+      state.isPreviewing = true;
+    }
+    else
+    {
+      startupWorld = normalize_default_world(entityManager, componentManager);
+    }
+
     if (!startupWorld.has_value())
     {
       state.isPlaying = false;
@@ -696,6 +779,8 @@ namespace hades
     state.activeWorld.reset();
     state.activeCamera.reset();
     state.playModeMessage.clear();
+    state.pendingPreviewRequest.reset();
+    state.isPreviewing = false;
   }
 
   void Editor::set_main_camera(Entity::EntityId entity, EntityManager &entityManager, ComponentManager &componentManager)

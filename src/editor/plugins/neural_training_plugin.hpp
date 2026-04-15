@@ -69,6 +69,8 @@ namespace hades
     void poll_worlds_dir(const std::filesystem::path &workspacePath);
     void refresh_script_entities(const std::filesystem::path &workspacePath);
     void refresh_policies(const std::filesystem::path &workspacePath);
+    void refresh_preview_policies(const std::filesystem::path &workspacePath);
+    void start_preview(EditorPluginContext &context);
     void start_training(const std::filesystem::path &workspacePath);
     void stop_training();
     void save_checkpoint(const std::filesystem::path &workspacePath);
@@ -110,6 +112,13 @@ namespace hades
     mutable std::mutex metricsMutex_;
     std::deque<hne::TrainingMetrics> history_;
     std::deque<float> evalRewards_;
+
+    // Policy Preview: scans the workspace's .hades/policies tree for any
+    // `.pt` exports and lets the user pick one to drive the selected
+    // NeuralScript attachment in live play mode (free-fly editor camera).
+    std::vector<std::filesystem::path> previewPolicies_;
+    std::vector<std::string> previewPolicyLabels_;
+    int selectedPreviewPolicyIdx_ = -1;
 
     std::string lastError_;
     std::string lastInfo_;
