@@ -108,12 +108,9 @@ namespace hades
 
     // ---- Run setup ----------------------------------------------------------
     ImGui::SeparatorText("Run");
-    ImGui::InputText("Run Name", runName_, sizeof(runName_));
 
-    if (worldNames_.empty() || ImGui::Button("Refresh Worlds"))
-    {
-      refresh_worlds(workspacePath);
-    }
+    // Auto-detect newly saved worlds by watching the worlds directory mtime.
+    poll_worlds_dir(workspacePath);
 
     if (worldNames_.empty())
     {
@@ -148,7 +145,49 @@ namespace hades
       }
     }
 
-    ImGui::InputText("Subject Entity", entityName_, sizeof(entityName_));
+    // Re-parse the selected world for entities-with-scripts whenever the
+    // world selection changes.
+    if (selectedWorldIdx_ != loadedEntitiesWorldIdx_)
+    {
+      refresh_script_entities(workspacePath);
+    }
+
+    if (scriptEntities_.empty())
+    {
+      ImGui::TextDisabled("No entities with scripts in the selected world.");
+      entityName_[0] = '\0';
+    }
+    else
+    {
+      if (selectedEntityIdx_ < 0 ||
+          selectedEntityIdx_ >= static_cast<int>(scriptEntities_.size()))
+      {
+        selectedEntityIdx_ = 0;
+      }
+      const char *entPreview = scriptEntities_[selectedEntityIdx_].c_str();
+      if (ImGui::BeginCombo("Subject Entity", entPreview))
+      {
+        for (int i = 0; i < static_cast<int>(scriptEntities_.size()); ++i)
+        {
+          ImGui::PushID(i);
+          const bool sel = (i == selectedEntityIdx_);
+          if (ImGui::Selectable(scriptEntities_[i].c_str(), sel))
+          {
+            selectedEntityIdx_ = i;
+          }
+          if (sel)
+          {
+            ImGui::SetItemDefaultFocus();
+          }
+          ImGui::PopID();
+        }
+        ImGui::EndCombo();
+      }
+      // Mirror the selected entity name into entityName_ so start_training
+      // and the export metadata continue to use it unchanged.
+      const auto &sel = scriptEntities_[selectedEntityIdx_];
+      std::snprintf(entityName_, sizeof(entityName_), "%s", sel.c_str());
+    }
     ImGui::InputText("Attachment Class", attachmentClass_, sizeof(attachmentClass_));
     ImGui::TextDisabled(
         "Entity + attachment class must resolve to a NeuralScript in the world.");
@@ -164,6 +203,13 @@ namespace hades
     // run's config blob when the user clicks Start inside the panel.
     nlohmann::json hyperparams = config_;
     (void)hne::imgui::render_wandb_panel(wandbState_, &hyperparams);
+    // The wandb panel's Run Name field is the single source of truth for the
+    // run identifier; mirror it onto runName_ so the local artifacts folder
+    // and export metadata stay in sync.
+    if (wandbState_.run_name_buf[0] != '\0')
+    {
+      std::snprintf(runName_, sizeof(runName_), "%s", wandbState_.run_name_buf);
+    }
 #endif
 
     // ---- Controls -----------------------------------------------------------
@@ -258,6 +304,103 @@ namespace hades
              selectedWorldIdx_ >= static_cast<int>(worldNames_.size()))
     {
       selectedWorldIdx_ = 0;
+    }
+  }
+
+  void NeuralTrainingPlugin::poll_worlds_dir(const std::filesystem::path &workspacePath)
+  {
+    const auto dir = workspacePath / ".hades" / "worlds";
+    std::error_code ec;
+    if (!std::filesystem::is_directory(dir, ec))
+    {
+      if (!worldNames_.empty())
+      {
+        worldNames_.clear();
+        selectedWorldIdx_ = -1;
+      }
+      worldsMtime_ = std::filesystem::file_time_type{};
+      return;
+    }
+    const auto mtime = std::filesystem::last_write_time(dir, ec);
+    if (ec)
+    {
+      return;
+    }
+    if (worldNames_.empty() || mtime != worldsMtime_)
+    {
+      refresh_worlds(workspacePath);
+      worldsMtime_ = mtime;
+    }
+  }
+
+  void NeuralTrainingPlugin::refresh_script_entities(
+      const std::filesystem::path &workspacePath)
+  {
+    scriptEntities_.clear();
+    selectedEntityIdx_ = -1;
+    loadedEntitiesWorldIdx_ = selectedWorldIdx_;
+
+    if (selectedWorldIdx_ < 0 ||
+        selectedWorldIdx_ >= static_cast<int>(worldNames_.size()))
+    {
+      return;
+    }
+
+    const auto path = workspacePath / ".hades" / "worlds" /
+                      (worldNames_[selectedWorldIdx_] + ".json");
+    std::ifstream in(path);
+    if (!in)
+    {
+      return;
+    }
+    nlohmann::json doc;
+    try
+    {
+      in >> doc;
+    }
+    catch (const std::exception &)
+    {
+      return;
+    }
+    const auto entsIt = doc.find("entities");
+    if (entsIt == doc.end() || !entsIt->is_array())
+    {
+      return;
+    }
+    for (const auto &ent : *entsIt)
+    {
+      const auto compsIt = ent.find("components");
+      if (compsIt == ent.end() || !compsIt->is_object())
+      {
+        continue;
+      }
+      const auto scriptIt = compsIt->find("script");
+      if (scriptIt == compsIt->end() || !scriptIt->is_object())
+      {
+        continue;
+      }
+      const auto attachIt = scriptIt->find("attachments");
+      if (attachIt == scriptIt->end() || !attachIt->is_array() ||
+          attachIt->empty())
+      {
+        continue;
+      }
+      const auto nameIt = compsIt->find("name");
+      if (nameIt == compsIt->end())
+      {
+        continue;
+      }
+      const auto valueIt = nameIt->find("value");
+      if (valueIt == nameIt->end() || !valueIt->is_string())
+      {
+        continue;
+      }
+      scriptEntities_.push_back(valueIt->get<std::string>());
+    }
+    std::sort(scriptEntities_.begin(), scriptEntities_.end());
+    if (!scriptEntities_.empty())
+    {
+      selectedEntityIdx_ = 0;
     }
   }
 

@@ -66,6 +66,8 @@ namespace hades
   private:
     void draw_panel(EditorPluginContext &context);
     void refresh_worlds(const std::filesystem::path &workspacePath);
+    void poll_worlds_dir(const std::filesystem::path &workspacePath);
+    void refresh_script_entities(const std::filesystem::path &workspacePath);
     void refresh_policies(const std::filesystem::path &workspacePath);
     void start_training(const std::filesystem::path &workspacePath);
     void stop_training();
@@ -84,6 +86,16 @@ namespace hades
     std::vector<std::string> worldNames_;
     int selectedWorldIdx_ = -1;
     std::vector<std::string> policyFiles_;
+
+    // Auto-refresh of worlds — re-listed when the worlds directory mtime
+    // changes so newly saved worlds show up without a manual button.
+    std::filesystem::file_time_type worldsMtime_{};
+
+    // Entities in the selected world that have at least one script attached.
+    // Refreshed when the selected world changes.
+    std::vector<std::string> scriptEntities_;
+    int selectedEntityIdx_ = -1;
+    int loadedEntitiesWorldIdx_ = -2;
 
     // Trainer + config
     hne::TrainerConfig config_;
