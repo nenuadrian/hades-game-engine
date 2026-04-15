@@ -55,13 +55,93 @@ if(NOT EXISTS "${HADES_NEURAL_ENGINE_DIR}/CMakeLists.txt")
       "Run 'git submodule update --init --recursive' and reconfigure.")
 endif()
 
-# Keep HNE integration lightweight until the engine starts linking against it.
-set(HNE_BUILD_TRAINING OFF CACHE BOOL "Build Hades Neural Engine training targets.")
-set(HNE_BUILD_INFERENCE OFF CACHE BOOL "Build Hades Neural Engine inference targets.")
-set(HNE_BUILD_IMGUI_WIDGETS OFF CACHE BOOL "Build Hades Neural Engine ImGui widgets.")
-set(HNE_BUILD_TESTS OFF CACHE BOOL "Build Hades Neural Engine tests.")
-set(HNE_BUILD_EXAMPLES OFF CACHE BOOL "Build Hades Neural Engine examples.")
+# ---------------------------------------------------------------------------
+# Hades Neural Engine integration
+# ---------------------------------------------------------------------------
+option(HADES_ENABLE_HNE_TRAINING
+  "Build neural-engine training targets and link them into the editor." ON)
+option(HADES_ENABLE_HNE_INFERENCE
+  "Build neural-engine inference runtime and link it into HadesEngine." ON)
+option(HADES_ENABLE_HNE_WIDGETS
+  "Build neural-engine ImGui widgets and link them into the editor." ON)
+
+if(EMSCRIPTEN)
+  # LibTorch is unavailable on the web; force everything off regardless of the
+  # cached values from a prior native configure.
+  set(HADES_ENABLE_HNE_TRAINING OFF CACHE BOOL "" FORCE)
+  set(HADES_ENABLE_HNE_INFERENCE OFF CACHE BOOL "" FORCE)
+  set(HADES_ENABLE_HNE_WIDGETS OFF CACHE BOOL "" FORCE)
+endif()
+
+# Auto-provision LibTorch (CPU) when training or inference is enabled and no
+# explicit Torch_DIR was supplied. We try Python's torch.utils.cmake_prefix_path
+# first (the developer-friendly path: `pip install torch`), then fall back to a
+# pre-downloaded snapshot under lib/libtorch.
+if((HADES_ENABLE_HNE_TRAINING OR HADES_ENABLE_HNE_INFERENCE) AND NOT Torch_DIR)
+  # Try CMake's Python3 find first, then fall back to whatever `python3` or
+  # `python` is on PATH — pyenv shims often don't get picked up by find_package.
+  find_package(Python3 COMPONENTS Interpreter QUIET)
+  set(_hades_py "")
+  if(Python3_Interpreter_FOUND)
+    set(_hades_py "${Python3_EXECUTABLE}")
+  else()
+    find_program(_hades_py_path NAMES python3 python)
+    if(_hades_py_path)
+      set(_hades_py "${_hades_py_path}")
+    endif()
+  endif()
+  if(_hades_py)
+    execute_process(
+      COMMAND "${_hades_py}" -c
+              "import torch.utils; print(torch.utils.cmake_prefix_path)"
+      OUTPUT_VARIABLE _hades_torch_prefix
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      RESULT_VARIABLE _hades_torch_query_rc
+      ERROR_QUIET)
+    if(_hades_torch_query_rc EQUAL 0 AND _hades_torch_prefix)
+      list(APPEND CMAKE_PREFIX_PATH "${_hades_torch_prefix}")
+      message(STATUS "Hades: discovered LibTorch via Python at ${_hades_torch_prefix}")
+    endif()
+  endif()
+  if(EXISTS "${CMAKE_SOURCE_DIR}/lib/libtorch")
+    list(APPEND CMAKE_PREFIX_PATH "${CMAKE_SOURCE_DIR}/lib/libtorch")
+    message(STATUS "Hades: using bundled LibTorch at ${CMAKE_SOURCE_DIR}/lib/libtorch")
+  endif()
+endif()
+
+# Map Hades-side flags onto the HNE-side flags consumed by the submodule.
+set(HNE_BUILD_TRAINING ${HADES_ENABLE_HNE_TRAINING} CACHE BOOL "" FORCE)
+set(HNE_BUILD_INFERENCE ${HADES_ENABLE_HNE_INFERENCE} CACHE BOOL "" FORCE)
+set(HNE_BUILD_IMGUI_WIDGETS ${HADES_ENABLE_HNE_WIDGETS} CACHE BOOL "" FORCE)
+set(HNE_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(HNE_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+
+# HNE's hne_imgui target looks for an `imgui` (then `imgui_lib`) target to link
+# against. We expose hades_imgui under that name so the link succeeds without
+# editing the submodule.
+if(HADES_ENABLE_HNE_WIDGETS AND TARGET hades_imgui AND NOT TARGET imgui)
+  add_library(imgui ALIAS hades_imgui)
+endif()
+
 add_subdirectory("${HADES_NEURAL_ENGINE_DIR}")
+
+# Capture the nlohmann_json include directory so the runtime script compiler
+# can pass it as a `-I` flag — user scripts that include hne headers transitively
+# need <nlohmann/json.hpp>.
+set(HADES_NLOHMANN_JSON_INCLUDE_DIR "")
+if(TARGET nlohmann_json::nlohmann_json)
+  get_target_property(
+    _hades_njson_includes nlohmann_json::nlohmann_json INTERFACE_INCLUDE_DIRECTORIES)
+  if(_hades_njson_includes)
+    list(GET _hades_njson_includes 0 HADES_NLOHMANN_JSON_INCLUDE_DIR)
+  endif()
+endif()
+
+if(HADES_ENABLE_HNE_INFERENCE)
+  set(HADES_HNE_HAS_INFERENCE_INT 1)
+else()
+  set(HADES_HNE_HAS_INFERENCE_INT 0)
+endif()
 
 configure_file(
   "${CMAKE_SOURCE_DIR}/cmake/build_config.hpp.in"
@@ -85,7 +165,8 @@ if(EMSCRIPTEN)
     "${SRC_DIR}/engine/runtime/script_runtime.cpp"
     "${SRC_DIR}/engine/runtime/script_compiler.cpp"
     "${SRC_DIR}/engine/runtime/script_loader.cpp"
-    "${SRC_DIR}/engine/runtime/subprocess.cpp")
+    "${SRC_DIR}/engine/runtime/subprocess.cpp"
+    "${SRC_DIR}/engine/training/hades_script_env.cpp")
 else()
   # For native builds: remove WebGPU renderer (only usable with Emscripten).
   list(REMOVE_ITEM ENGINE_SOURCE_FILES
@@ -143,6 +224,16 @@ else()
   endif()
 endif()
 
+# hne_core is LibTorch-free and carries the obs/action space types used by
+# NeuralScript; link unconditionally on native builds.
+if(NOT EMSCRIPTEN AND TARGET hne_core)
+  target_link_libraries(HadesEngine PUBLIC hne_core)
+endif()
+if(HADES_ENABLE_HNE_INFERENCE AND TARGET hne_inference)
+  target_link_libraries(HadesEngine PUBLIC hne_inference)
+  target_compile_definitions(HadesEngine PUBLIC HADES_HAS_HNE_INFERENCE=1)
+endif()
+
 # ---------------------------------------------------------------------------
 # Hades editor executable (native builds only)
 # ---------------------------------------------------------------------------
@@ -154,6 +245,15 @@ target_link_libraries(
   ${PROJECT_NAME}
   PRIVATE HadesEngine
           CLI11::CLI11)
+
+if(HADES_ENABLE_HNE_TRAINING AND TARGET hne_training)
+  target_link_libraries(${PROJECT_NAME} PRIVATE hne_training)
+  target_compile_definitions(${PROJECT_NAME} PRIVATE HADES_HAS_HNE_TRAINING=1)
+endif()
+if(HADES_ENABLE_HNE_WIDGETS AND TARGET hne_imgui)
+  target_link_libraries(${PROJECT_NAME} PRIVATE hne_imgui)
+  target_compile_definitions(${PROJECT_NAME} PRIVATE HADES_HAS_HNE_WIDGETS=1)
+endif()
 
 add_custom_command(
   TARGET ${PROJECT_NAME}
@@ -220,6 +320,11 @@ add_executable(hades_tests ${TEST_SOURCE_FILES} ${TEST_EDITOR_SUPPORT_SOURCES})
 hades_configure_cxx_standard(hades_tests PRIVATE)
 target_include_directories(hades_tests PRIVATE "${SRC_DIR}" "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(hades_tests PRIVATE HadesEngine gtest_main)
+
+if(HADES_ENABLE_HNE_TRAINING AND TARGET hne_training)
+  target_link_libraries(hades_tests PRIVATE hne_training)
+  target_compile_definitions(hades_tests PRIVATE HADES_HAS_HNE_TRAINING=1)
+endif()
 
 enable_testing()
 include(GoogleTest)

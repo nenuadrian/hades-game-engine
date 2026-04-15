@@ -13,6 +13,12 @@ namespace hades
     std::string className;
     bool enabled = true;
     std::map<std::string, std::string> publicFieldValues;
+
+    // Relative path (from the workspace root) to a trained `.pt` policy that
+    // drives this attachment at play time, e.g. `.hades/policies/pole_v1/policy.pt`.
+    // Empty = legacy `onUpdate` behaviour (or training-owned when the script
+    // is the training subject).
+    std::string modelPath;
   };
 
   struct ScriptComponent

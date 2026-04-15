@@ -8,6 +8,20 @@ namespace hades::build_config
   inline constexpr const char *cmake_generator = "@CMAKE_GENERATOR@";
   inline constexpr const char *cxx_compiler = "@CMAKE_CXX_COMPILER@";
   inline constexpr const char *cxx_compiler_id = "@CMAKE_CXX_COMPILER_ID@";
+
+  // Include path for nlohmann/json — used by the runtime script compiler so
+  // user scripts that pull in HNE headers can resolve <nlohmann/json.hpp>.
+  inline constexpr const char *nlohmann_json_include_dir =
+      "@HADES_NLOHMANN_JSON_INCLUDE_DIR@";
+
+  // Root include directory for the hades-neural-engine submodule. Scripts can
+  // `#include <hne/hne.hpp>` once this is added to the compiler invocation.
+  inline constexpr const char *hne_include_dir = "@HADES_NEURAL_ENGINE_DIR@/include";
+
+  // True when HadesEngine was built with hne_inference linked in. Scripts can
+  // gate `#if HADES_HAS_HNE_INFERENCE` checks on this define (the script
+  // compiler also passes -DHADES_HAS_HNE_INFERENCE=1 when this is true).
+  inline constexpr bool hne_has_inference = @HADES_HNE_HAS_INFERENCE_INT@ != 0;
 }
 
 #endif

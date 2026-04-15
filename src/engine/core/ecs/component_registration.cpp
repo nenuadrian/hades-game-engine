@@ -307,6 +307,7 @@ namespace hades
                 attachment["className"] = a.className;
                 attachment["enabled"] = a.enabled;
                 attachment["publicFieldValues"] = a.publicFieldValues;
+                attachment["modelPath"] = a.modelPath;
                 attachments.push_back(attachment);
               }
               out = {{"attachments", attachments}};
@@ -322,6 +323,7 @@ namespace hades
                 attachment.className = a["className"].get<std::string>();
                 attachment.enabled = a["enabled"].get<bool>();
                 attachment.publicFieldValues = a["publicFieldValues"].get<std::map<std::string, std::string>>();
+                attachment.modelPath = a.value("modelPath", std::string{});
                 c.attachments.push_back(std::move(attachment));
               }
               cm.addComponent(entity, c);

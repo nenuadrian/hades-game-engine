@@ -466,6 +466,9 @@ namespace hades
     add_plugin_toggle_item(windows, ICON_FA_GEAR "  Properties", "properties");
     add_plugin_toggle_item(windows, ICON_FA_FILE "  World", "world");
     add_plugin_toggle_item(windows, ICON_FA_CHART_LINE "  Debug Console", "debug-console");
+#ifdef HADES_HAS_HNE_TRAINING
+    add_plugin_toggle_item(windows, ICON_FA_BRAIN "  Neural Training", "neural-training");
+#endif
     gui->menu_bar_items.push_back(std::move(windows));
 
     MenuBarItem help;

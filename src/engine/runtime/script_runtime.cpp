@@ -14,7 +14,9 @@
 #include "../core/ecs/component_manager.hpp"
 #include "../core/ecs/entity_manager.hpp"
 #include "../core/ecs/world_utils.hpp"
+#include "hades_neural_script.hpp"
 #include "hades_script.hpp"
+#include "policy_registry.hpp"
 #include "script_compiler.hpp"
 #include "script_loader.hpp"
 
@@ -22,11 +24,17 @@ namespace hades
 {
   namespace
   {
+    struct ScriptedAttachment
+    {
+      std::string className;
+      std::string modelPath; // relative to workspace root, empty for legacy
+    };
+
     struct ScriptedEntity
     {
       Entity::EntityId entity = Entity::INVALID;
       std::string name;
-      std::vector<std::string> classNames;
+      std::vector<ScriptedAttachment> attachments;
     };
 
     std::string default_class_name(const std::string &scriptPath)
@@ -67,6 +75,22 @@ namespace hades
       }
 
       return absoluteWorkspacePath.lexically_normal() / ".hades";
+    }
+
+    std::filesystem::path resolve_policy_path(
+        const std::string &modelPath,
+        const std::filesystem::path &workspaceRoot)
+    {
+      const std::filesystem::path raw(modelPath);
+      if (raw.is_absolute())
+      {
+        return raw.lexically_normal();
+      }
+      if (!workspaceRoot.empty())
+      {
+        return (workspaceRoot / raw).lexically_normal();
+      }
+      return std::filesystem::absolute(raw).lexically_normal();
     }
 
     bool collect_scripted_entities(
@@ -159,7 +183,7 @@ namespace hades
             return false;
           }
 
-          scriptedEntity.classNames.push_back(resolvedClassName);
+          scriptedEntity.attachments.push_back({resolvedClassName, attachment.modelPath});
 
           const std::string normalizedPath = sourcePath.lexically_normal().string();
           if (seenPaths.insert(normalizedPath).second)
@@ -168,7 +192,7 @@ namespace hades
           }
         }
 
-        if (!scriptedEntity.classNames.empty())
+        if (!scriptedEntity.attachments.empty())
         {
           scriptedEntities.push_back(std::move(scriptedEntity));
         }
@@ -178,27 +202,82 @@ namespace hades
     }
   }
 
+  struct ScriptInstance
+  {
+    std::unique_ptr<HadesScript> script;
+    ScriptInstanceMode mode = ScriptInstanceMode::Legacy;
+#if defined(HADES_HAS_HNE_INFERENCE)
+    std::shared_ptr<hne::InferenceRuntime> policy;
+    hne::Tensor obsBuffer;
+#endif
+  };
+
+  struct EntityInstances
+  {
+    Entity::EntityId entity = Entity::INVALID;
+    std::vector<ScriptInstance> scripts;
+  };
+
   struct ScriptRuntime::Impl
   {
     std::vector<ScriptedEntity> trackedEntities;
     ScriptCompiler compiler;
     ScriptLoader loader;
-    std::vector<std::pair<Entity::EntityId, std::vector<std::unique_ptr<HadesScript>>>> instances;
+    std::vector<EntityInstances> instances;
     ComponentManager *componentManager = nullptr;
     EntityManager *entityManager = nullptr;
+    std::filesystem::path workspaceRoot;
     std::string lastError;
     bool running = false;
     bool faulted = false;
     float viewportWidth = 0.0f;
     float viewportHeight = 0.0f;
 
+    ScriptRuntimeRole role = ScriptRuntimeRole::Editor;
+    PolicyRegistry localPolicies;
+    PolicyRegistry *policies = nullptr; // non-owning; defaults to &localPolicies
+
     ScriptContext makeContext(Entity::EntityId entityId)
     {
       return {entityId, *componentManager, *entityManager, viewportWidth, viewportHeight};
     }
+
+    EntityInstances *find_entity(Entity::EntityId entityId)
+    {
+      for (auto &entry : instances)
+      {
+        if (entry.entity == entityId)
+        {
+          return &entry;
+        }
+      }
+      return nullptr;
+    }
+
+    const EntityInstances *find_entity(Entity::EntityId entityId) const
+    {
+      for (const auto &entry : instances)
+      {
+        if (entry.entity == entityId)
+        {
+          return &entry;
+        }
+      }
+      return nullptr;
+    }
   };
 
-  ScriptRuntime::ScriptRuntime() : impl_(std::make_unique<Impl>()) {}
+  ScriptRuntime::ScriptRuntime() : impl_(std::make_unique<Impl>())
+  {
+    impl_->policies = &impl_->localPolicies;
+  }
+
+  ScriptRuntime::ScriptRuntime(ScriptRuntimeRole role) : impl_(std::make_unique<Impl>())
+  {
+    impl_->role = role;
+    impl_->policies = &impl_->localPolicies;
+  }
+
   ScriptRuntime::~ScriptRuntime()
   {
     stop();
@@ -209,7 +288,7 @@ namespace hades
       EntityManager &entityManager,
       std::string *errorMessage)
   {
-    return start(componentManager, entityManager, std::filesystem::path(), std::nullopt, errorMessage);
+    return start(componentManager, entityManager, std::filesystem::path(), std::nullopt, nullptr, errorMessage);
   }
 
   bool ScriptRuntime::start(
@@ -218,7 +297,7 @@ namespace hades
       const std::filesystem::path &workspaceRoot,
       std::string *errorMessage)
   {
-    return start(componentManager, entityManager, workspaceRoot, std::nullopt, errorMessage);
+    return start(componentManager, entityManager, workspaceRoot, std::nullopt, nullptr, errorMessage);
   }
 
   bool ScriptRuntime::start(
@@ -228,7 +307,21 @@ namespace hades
       std::optional<Entity::EntityId> worldRoot,
       std::string *errorMessage)
   {
+    return start(componentManager, entityManager, workspaceRoot, worldRoot, nullptr, errorMessage);
+  }
+
+  bool ScriptRuntime::start(
+      ComponentManager &componentManager,
+      EntityManager &entityManager,
+      const std::filesystem::path &workspaceRoot,
+      std::optional<Entity::EntityId> worldRoot,
+      PolicyRegistry *sharedPolicies,
+      std::string *errorMessage)
+  {
     stop();
+
+    impl_->workspaceRoot = workspaceRoot;
+    impl_->policies = (sharedPolicies != nullptr) ? sharedPolicies : &impl_->localPolicies;
 
     std::vector<ScriptedEntity> scriptedEntities;
     std::vector<std::filesystem::path> sourceFiles;
@@ -279,6 +372,15 @@ namespace hades
       return false;
     }
 
+    // Best-effort write of compile_commands.json / .clangd so clangd-based IDEs
+    // pick up the engine and HNE include paths automatically. Failure here is
+    // not fatal — it only degrades IDE autocomplete.
+    if (!workspaceRoot.empty())
+    {
+      std::string ccErr;
+      (void)impl_->compiler.writeCompileCommands(sourceFiles, workspaceRoot, &ccErr);
+    }
+
     // Load the compiled library.
     if (!impl_->loader.load(impl_->compiler.libraryPath(), &localError))
     {
@@ -291,19 +393,21 @@ namespace hades
       return false;
     }
 
-    // Instantiate scripts for each entity.
+    // Instantiate scripts for each entity and assign dispatch modes.
     impl_->instances.clear();
     for (const auto &trackedEntity : impl_->trackedEntities)
     {
-      std::vector<std::unique_ptr<HadesScript>> entityScripts;
+      EntityInstances entityEntry;
+      entityEntry.entity = trackedEntity.entity;
 
-      for (const auto &className : trackedEntity.classNames)
+      for (const auto &attachment : trackedEntity.attachments)
       {
-        HadesScript *script = impl_->loader.createScript(className);
-        if (script == nullptr)
+        HadesScript *raw = impl_->loader.createScript(attachment.className);
+        if (raw == nullptr)
         {
-          localError = "Script class not found: " + className +
-                       ". Ensure the script uses HADES_REGISTER_SCRIPT(" + className + ").";
+          localError = "Script class not found: " + attachment.className +
+                       ". Ensure the script uses HADES_REGISTER_SCRIPT(" +
+                       attachment.className + ").";
           impl_->lastError = localError;
           impl_->faulted = true;
           if (errorMessage != nullptr)
@@ -313,19 +417,100 @@ namespace hades
           return false;
         }
 
-        entityScripts.emplace_back(script);
+        ScriptInstance instance;
+        instance.script.reset(raw);
+        instance.mode = ScriptInstanceMode::Legacy;
+
+        auto *neural = dynamic_cast<NeuralScript *>(raw);
+        if (neural != nullptr)
+        {
+          if (!attachment.modelPath.empty())
+          {
+#if defined(HADES_HAS_HNE_INFERENCE)
+            const auto absPath = resolve_policy_path(attachment.modelPath, workspaceRoot);
+            const auto obsSpec = neural->observationSpace();
+            const auto actSpec = neural->actionSpace();
+            auto result = impl_->policies->get_validated(absPath, obsSpec, actSpec);
+            if (!result.runtime)
+            {
+              localError =
+                  "Neural script '" + attachment.className + "' on entity '" +
+                  trackedEntity.name + "': " + result.error;
+              impl_->lastError = localError;
+              impl_->faulted = true;
+              if (errorMessage != nullptr)
+              {
+                *errorMessage = localError;
+              }
+              return false;
+            }
+            instance.policy = result.runtime;
+            instance.obsBuffer.data.assign(static_cast<std::size_t>(hne::flat_size(obsSpec)), 0.0f);
+            instance.obsBuffer.shape = std::visit(
+                [](const auto &s) -> std::vector<int32_t>
+                {
+                  using T = std::decay_t<decltype(s)>;
+                  if constexpr (std::is_same_v<T, hne::BoxSpace>)
+                  {
+                    return s.shape;
+                  }
+                  else
+                  {
+                    return {hne::flat_size(hne::SpaceSpec{s})};
+                  }
+                },
+                obsSpec);
+            instance.mode = ScriptInstanceMode::Inference;
+#else
+            localError =
+                "Neural script '" + attachment.className + "' on entity '" +
+                trackedEntity.name +
+                "' declares modelPath but HadesEngine was built without HNE inference support.";
+            impl_->lastError = localError;
+            impl_->faulted = true;
+            if (errorMessage != nullptr)
+            {
+              *errorMessage = localError;
+            }
+            return false;
+#endif
+          }
+          else if (impl_->role == ScriptRuntimeRole::TrainingHost)
+          {
+            // Will be promoted explicitly via mark_training_owned() once the
+            // env adapter knows which entity is the subject.
+            instance.mode = ScriptInstanceMode::Legacy;
+          }
+          else
+          {
+            localError =
+                "Neural script '" + attachment.className + "' on entity '" +
+                trackedEntity.name +
+                "' has no modelPath. Either train and attach a policy (.hades/policies/<run>/policy.pt)"
+                " or attach this entity via the Neural Training panel.";
+            impl_->lastError = localError;
+            impl_->faulted = true;
+            if (errorMessage != nullptr)
+            {
+              *errorMessage = localError;
+            }
+            return false;
+          }
+        }
+
+        entityEntry.scripts.push_back(std::move(instance));
       }
 
-      impl_->instances.emplace_back(trackedEntity.entity, std::move(entityScripts));
+      impl_->instances.push_back(std::move(entityEntry));
     }
 
     // Call onStart on all script instances.
-    for (auto &[entityId, scripts] : impl_->instances)
+    for (auto &entry : impl_->instances)
     {
-      ScriptContext ctx{entityId, componentManager, entityManager, impl_->viewportWidth, impl_->viewportHeight};
-      for (auto &script : scripts)
+      ScriptContext ctx{entry.entity, componentManager, entityManager, impl_->viewportWidth, impl_->viewportHeight};
+      for (auto &instance : entry.scripts)
       {
-        script->onStart(ctx);
+        instance.script->onStart(ctx);
       }
     }
 
@@ -350,12 +535,38 @@ namespace hades
       return;
     }
 
-    for (auto &[entityId, scripts] : impl_->instances)
+    // TODO(batching): when multiple instances share the same policy pointer,
+    // group their observation tensors and call `policy->evaluate_batch(...)`
+    // once per unique policy. Benchmark first — MVP does per-instance calls.
+    for (auto &entry : impl_->instances)
     {
-      ScriptContext ctx{entityId, componentManager, entityManager, impl_->viewportWidth, impl_->viewportHeight};
-      for (auto &script : scripts)
+      ScriptContext ctx{entry.entity, componentManager, entityManager, impl_->viewportWidth, impl_->viewportHeight};
+      for (auto &instance : entry.scripts)
       {
-        script->onUpdate(ctx, deltaTime);
+        switch (instance.mode)
+        {
+        case ScriptInstanceMode::Legacy:
+          instance.script->onUpdate(ctx, deltaTime);
+          break;
+
+        case ScriptInstanceMode::Inference:
+        {
+#if defined(HADES_HAS_HNE_INFERENCE)
+          auto *neural = static_cast<NeuralScript *>(instance.script.get());
+          neural->readObservation(ctx, instance.obsBuffer);
+          if (instance.policy)
+          {
+            hne::Action action = instance.policy->evaluate(instance.obsBuffer, /*deterministic=*/true);
+            neural->applyAction(ctx, action, deltaTime);
+          }
+#endif
+          break;
+        }
+
+        case ScriptInstanceMode::TrainingOwned:
+          // The training env adapter drives this script directly; skip.
+          break;
+        }
       }
     }
   }
@@ -396,12 +607,12 @@ namespace hades
       return;
     }
 
-    for (auto &[entityId, scripts] : impl_->instances)
+    for (auto &entry : impl_->instances)
     {
-      ScriptContext ctx = impl_->makeContext(entityId);
-      for (auto &script : scripts)
+      ScriptContext ctx = impl_->makeContext(entry.entity);
+      for (auto &instance : entry.scripts)
       {
-        script->onKeyDown(ctx, keyCode);
+        instance.script->onKeyDown(ctx, keyCode);
       }
     }
   }
@@ -414,12 +625,12 @@ namespace hades
       return;
     }
 
-    for (auto &[entityId, scripts] : impl_->instances)
+    for (auto &entry : impl_->instances)
     {
-      ScriptContext ctx = impl_->makeContext(entityId);
-      for (auto &script : scripts)
+      ScriptContext ctx = impl_->makeContext(entry.entity);
+      for (auto &instance : entry.scripts)
       {
-        script->onKeyUp(ctx, keyCode);
+        instance.script->onKeyUp(ctx, keyCode);
       }
     }
   }
@@ -432,12 +643,12 @@ namespace hades
       return;
     }
 
-    for (auto &[entityId, scripts] : impl_->instances)
+    for (auto &entry : impl_->instances)
     {
-      ScriptContext ctx = impl_->makeContext(entityId);
-      for (auto &script : scripts)
+      ScriptContext ctx = impl_->makeContext(entry.entity);
+      for (auto &instance : entry.scripts)
       {
-        script->onMouseDown(ctx, button, screenX, screenY);
+        instance.script->onMouseDown(ctx, button, screenX, screenY);
       }
     }
   }
@@ -450,12 +661,12 @@ namespace hades
       return;
     }
 
-    for (auto &[entityId, scripts] : impl_->instances)
+    for (auto &entry : impl_->instances)
     {
-      ScriptContext ctx = impl_->makeContext(entityId);
-      for (auto &script : scripts)
+      ScriptContext ctx = impl_->makeContext(entry.entity);
+      for (auto &instance : entry.scripts)
       {
-        script->onMouseUp(ctx, button, screenX, screenY);
+        instance.script->onMouseUp(ctx, button, screenX, screenY);
       }
     }
   }
@@ -468,12 +679,12 @@ namespace hades
       return;
     }
 
-    for (auto &[entityId, scripts] : impl_->instances)
+    for (auto &entry : impl_->instances)
     {
-      ScriptContext ctx = impl_->makeContext(entityId);
-      for (auto &script : scripts)
+      ScriptContext ctx = impl_->makeContext(entry.entity);
+      for (auto &instance : entry.scripts)
       {
-        script->onMouseMove(ctx, screenX, screenY);
+        instance.script->onMouseMove(ctx, screenX, screenY);
       }
     }
   }
@@ -511,5 +722,38 @@ namespace hades
     ScriptCompiler compiler;
     const auto buildDir = std::filesystem::temp_directory_path() / "hades-script-compile-check";
     return compiler.compile(sourceFiles, buildDir, errorMessage);
+  }
+
+  HadesScript *ScriptRuntime::find_script(Entity::EntityId entityId) const
+  {
+    const auto *entry = impl_->find_entity(entityId);
+    if (entry == nullptr || entry->scripts.empty())
+    {
+      return nullptr;
+    }
+    return entry->scripts.front().script.get();
+  }
+
+  void ScriptRuntime::mark_training_owned(Entity::EntityId entityId)
+  {
+    auto *entry = impl_->find_entity(entityId);
+    if (entry == nullptr)
+    {
+      return;
+    }
+    for (auto &instance : entry->scripts)
+    {
+      instance.mode = ScriptInstanceMode::TrainingOwned;
+    }
+  }
+
+  ScriptInstanceMode ScriptRuntime::mode_for(Entity::EntityId entityId) const
+  {
+    const auto *entry = impl_->find_entity(entityId);
+    if (entry == nullptr || entry->scripts.empty())
+    {
+      return ScriptInstanceMode::Legacy;
+    }
+    return entry->scripts.front().mode;
   }
 }

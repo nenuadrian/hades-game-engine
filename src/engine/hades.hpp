@@ -38,4 +38,7 @@
 #include "components/transform_hierarchy_component.hpp"
 #include "components/world_component.hpp"
 
+// Neural / RL scripting API
+#include "hades_neural.hpp"
+
 #endif

@@ -648,6 +648,22 @@ namespace hades
             ImGui::EndCombo();
           }
 
+          // Model Path — path to a trained `.pt` policy that drives this
+          // attachment at play time. Empty = legacy onUpdate (or training-owned
+          // when the script is the subject of the Neural Training panel).
+          {
+            std::array<char, 512> modelBuffer{};
+            std::snprintf(modelBuffer.data(), modelBuffer.size(), "%s",
+                          attachment.modelPath.c_str());
+            if (ImGui::InputText("Model Path", modelBuffer.data(), modelBuffer.size()))
+            {
+              attachment.modelPath = modelBuffer.data();
+            }
+            ImGui::TextDisabled(
+                "Empty = legacy onUpdate, or training-owned. "
+                "Set to e.g. .hades/policies/<run>/policy.pt after training.");
+          }
+
           if (ImGui::Button("Remove Script Component"))
           {
             removeAttachmentIndex = index;

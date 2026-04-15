@@ -163,6 +163,8 @@ namespace hades
     const std::string compilerId = build_config::cxx_compiler_id;
     const std::string sourceDir = build_config::cmake_source_dir;
     const std::string includeArg = sourceDir + "/src";
+    const std::string hneIncludeArg = build_config::hne_include_dir;
+    const std::string njsonIncludeArg = build_config::nlohmann_json_include_dir;
 
     const std::string libName = "HadesScripts" + shared_lib_extension();
     const std::filesystem::path outputPath = outputDir / libName;
@@ -177,6 +179,15 @@ namespace hades
       args.push_back("/EHsc");
       args.push_back("/O2");
       args.push_back("/I" + includeArg);
+      args.push_back("/I" + hneIncludeArg);
+      if (!njsonIncludeArg.empty())
+      {
+        args.push_back("/I" + njsonIncludeArg);
+      }
+      if (build_config::hne_has_inference)
+      {
+        args.push_back("/DHADES_HAS_HNE_INFERENCE=1");
+      }
 
       for (const auto &src : sourceFiles)
       {
@@ -194,6 +205,15 @@ namespace hades
       args.push_back("-fPIC");
       args.push_back("-O2");
       args.push_back("-I" + includeArg);
+      args.push_back("-I" + hneIncludeArg);
+      if (!njsonIncludeArg.empty())
+      {
+        args.push_back("-I" + njsonIncludeArg);
+      }
+      if (build_config::hne_has_inference)
+      {
+        args.push_back("-DHADES_HAS_HNE_INFERENCE=1");
+      }
 #if defined(__APPLE__)
       // Allow scripts to reference engine symbols resolved at dlopen time.
       args.push_back("-undefined");
@@ -232,6 +252,121 @@ namespace hades
     }
 
     libraryPath_ = outputPath;
+    return true;
+  }
+
+  bool ScriptCompiler::writeCompileCommands(
+      const std::vector<std::filesystem::path> &sourceFiles,
+      const std::filesystem::path &workspaceRoot,
+      std::string *errorMessage)
+  {
+    if (workspaceRoot.empty())
+    {
+      if (errorMessage != nullptr)
+      {
+        *errorMessage = "writeCompileCommands requires a non-empty workspaceRoot.";
+      }
+      return false;
+    }
+
+    std::error_code ec;
+    const auto hadesDir = workspaceRoot / ".hades";
+    std::filesystem::create_directories(hadesDir, ec);
+    if (ec)
+    {
+      if (errorMessage != nullptr)
+      {
+        *errorMessage = "Failed to create " + hadesDir.string() + ": " + ec.message();
+      }
+      return false;
+    }
+
+    const std::string compiler = build_config::cxx_compiler;
+    const std::string compilerId = build_config::cxx_compiler_id;
+    const std::string sourceDir = build_config::cmake_source_dir;
+    const std::string includeArg = sourceDir + "/src";
+    const std::string hneIncludeArg = build_config::hne_include_dir;
+    const std::string njsonIncludeArg = build_config::nlohmann_json_include_dir;
+    const bool msvc = is_msvc_compiler(compilerId);
+    const std::string inc = msvc ? "/I" : "-I";
+    const std::string def = msvc ? "/D" : "-D";
+    const std::string std20 = msvc ? "/std:c++20" : "-std=c++20";
+
+    std::ostringstream oss;
+    oss << "[\n";
+    bool first = true;
+    for (const auto &src : sourceFiles)
+    {
+      if (!first)
+      {
+        oss << ",\n";
+      }
+      first = false;
+
+      const auto srcAbs = std::filesystem::absolute(src, ec).lexically_normal();
+      const std::string srcStr = srcAbs.string();
+
+      oss << "  {\n";
+      oss << "    \"directory\": \"" << workspaceRoot.string() << "\",\n";
+      oss << "    \"file\": \"" << srcStr << "\",\n";
+      oss << "    \"arguments\": [";
+      auto push = [&oss, firstArg = true](const std::string &arg) mutable
+      {
+        if (!firstArg)
+        {
+          oss << ", ";
+        }
+        firstArg = false;
+        // Escape backslashes and quotes for JSON.
+        std::string escaped;
+        escaped.reserve(arg.size());
+        for (char c : arg)
+        {
+          if (c == '\\' || c == '"')
+          {
+            escaped.push_back('\\');
+          }
+          escaped.push_back(c);
+        }
+        oss << "\"" << escaped << "\"";
+      };
+
+      push(compiler);
+      push(std20);
+      push(inc + includeArg);
+      push(inc + hneIncludeArg);
+      if (!njsonIncludeArg.empty())
+      {
+        push(inc + njsonIncludeArg);
+      }
+      if (build_config::hne_has_inference)
+      {
+        push(def + std::string("HADES_HAS_HNE_INFERENCE=1"));
+      }
+      push("-c");
+      push(srcStr);
+      oss << "]\n";
+      oss << "  }";
+    }
+    oss << "\n]\n";
+
+    const auto ccPath = hadesDir / "compile_commands.json";
+    if (!write_text_file(ccPath, oss.str(), errorMessage))
+    {
+      return false;
+    }
+
+    const auto clangdPath = workspaceRoot / ".clangd";
+    if (!std::filesystem::exists(clangdPath))
+    {
+      const std::string clangdBody =
+          "CompileFlags:\n"
+          "  CompilationDatabase: .hades/\n";
+      // Best-effort — don't fail the build if the user's VCS has this file
+      // checked in read-only.
+      (void)write_text_file(clangdPath, clangdBody, nullptr);
+    }
+
     return true;
   }
 }

@@ -1,0 +1,99 @@
+#ifndef HADES_EDITOR_PLUGINS_NEURAL_TRAINING_PLUGIN_HPP
+#define HADES_EDITOR_PLUGINS_NEURAL_TRAINING_PLUGIN_HPP
+
+#ifdef HADES_HAS_HNE_TRAINING
+
+#include <deque>
+#include <filesystem>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <vector>
+
+#include <hne/training/trainer.hpp>
+#include <hne/training/trainer_config.hpp>
+#include <hne/training/metrics.hpp>
+
+#include "editor_plugin.hpp"
+
+namespace hades
+{
+  class PolicyRegistry;
+
+  /// Editor panel that drives PPO training of a NeuralScript attached to a
+  /// saved world. Owns a background `hne::Trainer` and a shared
+  /// `PolicyRegistry` so parallel envs reuse loaded policies. Metrics are
+  /// fed through a lambda callback into a bounded mutex-guarded buffer;
+  /// the UI thread drains and renders via `hne::imgui` widgets.
+  class NeuralTrainingPlugin : public EditorPlugin
+  {
+  public:
+    NeuralTrainingPlugin();
+    ~NeuralTrainingPlugin() override;
+
+    std::string_view id() const override { return "neural-training"; }
+    std::string_view display_name() const override { return "Neural Training"; }
+    int order() const override { return 60; }
+
+    bool visible(const Editor &editor) const override
+    {
+      (void)editor;
+      return visible_;
+    }
+
+    void set_visible(Editor &editor, bool visible) override
+    {
+      (void)editor;
+      visible_ = visible;
+      if (visible)
+      {
+        focusRequested_ = true;
+      }
+    }
+
+    void activate(Editor &editor) override
+    {
+      set_visible(editor, true);
+    }
+
+    void render(EditorPluginContext &context) override;
+
+  private:
+    void draw_panel(EditorPluginContext &context);
+    void refresh_worlds(const std::filesystem::path &workspacePath);
+    void refresh_policies(const std::filesystem::path &workspacePath);
+    void start_training(const std::filesystem::path &workspacePath);
+    void stop_training();
+    void save_checkpoint(const std::filesystem::path &workspacePath);
+    void export_policy(const std::filesystem::path &workspacePath);
+
+    bool visible_ = false;
+    bool focusRequested_ = false;
+
+    // UI inputs
+    char runName_[64] = "run1";
+    char entityName_[128] = "";
+    char attachmentClass_[128] = "";
+
+    // Cached directory listings
+    std::vector<std::string> worldNames_;
+    int selectedWorldIdx_ = -1;
+    std::vector<std::string> policyFiles_;
+
+    // Trainer + config
+    hne::TrainerConfig config_;
+    std::unique_ptr<hne::Trainer> trainer_;
+    std::unique_ptr<PolicyRegistry> sharedPolicies_;
+
+    // Metrics buffer — populated by trainer callback thread, drained by UI.
+    mutable std::mutex metricsMutex_;
+    std::deque<hne::TrainingMetrics> history_;
+    std::deque<float> evalRewards_;
+
+    std::string lastError_;
+    std::string lastInfo_;
+  };
+}
+
+#endif // HADES_HAS_HNE_TRAINING
+#endif
