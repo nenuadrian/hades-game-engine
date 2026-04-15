@@ -237,8 +237,20 @@ namespace hades
       // Distance to camera for sorting.
       item.distanceToCamera = (position - camera.position).length();
 
-      // Count triangles. Cube: 12, Plane: 2.
-      list.totalTriangles += (item.primitiveType == PrimitiveType::Cube) ? 12 : 2;
+      // Count triangles. Cube: 12, Plane: 2, Sphere: ~224 (16 segments × 14 rings).
+      switch (item.primitiveType)
+      {
+      case PrimitiveType::Cube:
+        list.totalTriangles += 12;
+        break;
+      case PrimitiveType::Sphere:
+        list.totalTriangles += 224;
+        break;
+      case PrimitiveType::Plane:
+      default:
+        list.totalTriangles += 2;
+        break;
+      }
 
       // Route to opaque or transparent list.
       if (item.isTransparent())

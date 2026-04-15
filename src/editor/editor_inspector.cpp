@@ -40,6 +40,10 @@ namespace hades
       {
       case PrimitiveType::Cube:
         return "Cube";
+      case PrimitiveType::Plane:
+        return "Panel";
+      case PrimitiveType::Sphere:
+        return "Sphere";
       }
 
       return "Unknown";

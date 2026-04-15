@@ -41,6 +41,8 @@ namespace hades
     constexpr float PI = 3.14159265358979323846f;
     constexpr float CUBE_HALF_EXTENT = 0.5f;
     constexpr float PLANE_HALF_EXTENT = 0.5f;
+    constexpr float SPHERE_RADIUS = 0.5f;
+    constexpr int SPHERE_GREAT_CIRCLE_SEGMENTS = 24;
     constexpr int PLANE_EDGES[6][2] = {
         {0, 1}, {1, 2}, {2, 3}, {3, 0},
         {0, 2}, {1, 3},
@@ -786,6 +788,101 @@ namespace hades
       return true;
     }
 
+    bool draw_wire_sphere(
+        ImDrawList *drawList,
+        const EditorSceneViewCamera &sceneCamera,
+        const CameraComponent &camera,
+        const ImVec2 &canvasOrigin,
+        const ImVec2 &canvasSize,
+        const PositionComponent3D &position,
+        ImU32 lineColor,
+        float thickness,
+        const std::string *label = nullptr,
+        ImU32 labelColor = IM_COL32(205, 210, 218, 255),
+        const RotationComponent3D *rotation = nullptr,
+        const ScaleComponent3D *scale = nullptr)
+    {
+      const Vec3 pos = make_vec3(position);
+
+      auto circle_point = [&](int axis, float angle) -> Vec3
+      {
+        const float s = std::sin(angle) * SPHERE_RADIUS;
+        const float c = std::cos(angle) * SPHERE_RADIUS;
+        Vec3 local{};
+        switch (axis)
+        {
+        case 0:  // XY plane (Z = 0)
+          local = make_vec3(c, s, 0.0f);
+          break;
+        case 1:  // XZ plane (Y = 0)
+          local = make_vec3(c, 0.0f, s);
+          break;
+        case 2:  // YZ plane (X = 0)
+        default:
+          local = make_vec3(0.0f, c, s);
+          break;
+        }
+        if (scale != nullptr)
+        {
+          local = make_vec3(local.x * scale->x, local.y * scale->y, local.z * scale->z);
+        }
+        if (rotation != nullptr)
+        {
+          local = rotate_vec3_by_quaternion(local, *rotation);
+        }
+        return add_vec3(pos, local);
+      };
+
+      int drawnSegmentCount = 0;
+      for (int axis = 0; axis < 3; ++axis)
+      {
+        for (int i = 0; i < SPHERE_GREAT_CIRCLE_SEGMENTS; ++i)
+        {
+          const float angle0 = (static_cast<float>(i) / SPHERE_GREAT_CIRCLE_SEGMENTS) * 2.0f * PI;
+          const float angle1 = (static_cast<float>(i + 1) / SPHERE_GREAT_CIRCLE_SEGMENTS) * 2.0f * PI;
+          const Vec3 p0 = circle_point(axis, angle0);
+          const Vec3 p1 = circle_point(axis, angle1);
+
+          ImVec2 lineStart;
+          ImVec2 lineEnd;
+          if (!project_line_segment(
+                  p0,
+                  p1,
+                  sceneCamera,
+                  camera,
+                  canvasOrigin,
+                  canvasSize,
+                  lineStart,
+                  lineEnd))
+          {
+            continue;
+          }
+
+          drawList->AddLine(lineStart, lineEnd, lineColor, thickness);
+          ++drawnSegmentCount;
+        }
+      }
+
+      if (drawnSegmentCount == 0)
+      {
+        return false;
+      }
+
+      if (label != nullptr)
+      {
+        ImVec2 centerPoint;
+        if (project_point(pos, sceneCamera, camera, canvasOrigin, canvasSize, centerPoint))
+        {
+          drawList->AddText(
+              ImVec2(centerPoint.x + 6.0f, centerPoint.y + 6.0f),
+              labelColor,
+              label->c_str());
+        }
+      }
+
+      return true;
+    }
+
     bool draw_vector_text(
         ImDrawList *drawList,
         const EditorSceneViewCamera &sceneCamera,
@@ -1363,14 +1460,26 @@ namespace hades
         if (componentManager.hasComponent<PrimitiveComponent>(entity))
         {
           const auto &primitive = componentManager.getComponent<PrimitiveComponent>(entity);
-          if (primitive.type == PrimitiveType::Cube || primitive.type == PrimitiveType::Plane)
+          if (primitive.type == PrimitiveType::Cube ||
+              primitive.type == PrimitiveType::Plane ||
+              primitive.type == PrimitiveType::Sphere)
           {
             hasPreviewGeometry = true;
-            const float halfY = (primitive.type == PrimitiveType::Cube) ? CUBE_HALF_EXTENT : 0.0f;
+            float halfY = 0.0f;
+            float halfXZ = PLANE_HALF_EXTENT;
+            if (primitive.type == PrimitiveType::Cube)
+            {
+              halfY = CUBE_HALF_EXTENT;
+            }
+            else if (primitive.type == PrimitiveType::Sphere)
+            {
+              halfY = SPHERE_RADIUS;
+              halfXZ = SPHERE_RADIUS;
+            }
             if (const auto rect = project_box_screen_rect(
                     box_corners(
-                        make_vec3(-PLANE_HALF_EXTENT, -halfY, -PLANE_HALF_EXTENT),
-                        make_vec3(PLANE_HALF_EXTENT, halfY, PLANE_HALF_EXTENT),
+                        make_vec3(-halfXZ, -halfY, -halfXZ),
+                        make_vec3(halfXZ, halfY, halfXZ),
                         position,
                         pickRotation),
                     sceneCamera,
@@ -1653,6 +1762,22 @@ namespace hades
         else if (item.primitiveType == PrimitiveType::Plane)
         {
           drawn = draw_wire_plane(
+              drawList,
+              sceneCamera,
+              camera,
+              canvasOrigin,
+              canvasSize,
+              position,
+              isSelected ? selectedColor : IM_COL32(223, 228, 235, 255),
+              isSelected ? 2.5f : 1.5f,
+              get_label(),
+              isSelected ? selectedLabelColor : IM_COL32(205, 210, 218, 255),
+              rotation,
+              scale);
+        }
+        else if (item.primitiveType == PrimitiveType::Sphere)
+        {
+          drawn = draw_wire_sphere(
               drawList,
               sceneCamera,
               camera,

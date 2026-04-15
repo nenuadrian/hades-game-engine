@@ -230,6 +230,22 @@ namespace hades
     }
   }
 
+  SoLoud::Bus &AudioEngine::bus_raw(AudioBus bus)
+  {
+    switch (bus)
+    {
+    case AudioBus::Master:
+      return sfxBus;
+    case AudioBus::Music:
+      return musicBus;
+    case AudioBus::Sfx:
+      return sfxBus;
+    case AudioBus::Voice:
+      return voiceBus;
+    }
+    return sfxBus;
+  }
+
   SoLoud::Bus *AudioEngine::bus_for(AudioBus bus)
   {
     if (!busesInitialized)

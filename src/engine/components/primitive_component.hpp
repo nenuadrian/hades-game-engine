@@ -7,6 +7,7 @@ namespace hades
   {
     Cube,
     Plane,
+    Sphere,
   };
 
   struct PrimitiveComponent

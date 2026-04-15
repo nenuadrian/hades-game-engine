@@ -26,6 +26,7 @@ namespace hades
     AudioEmitter,
     PhysicsCube,
     Plane,
+    Sphere,
     DirectionalLight,
     PointLight,
     SpotLight,

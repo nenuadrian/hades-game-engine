@@ -176,6 +176,24 @@ function(hades_configure_dependencies)
     file(GLOB SOLOUD_AUDIOSOURCE_WAV_SOURCES CONFIGURE_DEPENDS
       "${soloud_SOURCE_DIR}/src/audiosource/wav/*.cpp"
       "${soloud_SOURCE_DIR}/src/audiosource/wav/*.c")
+    # Procedural audio sources (sfxr, noise, speech, tedsid, openmpt, monotone,
+    # vic, vizsn). Globbed so new upstream files are picked up automatically.
+    file(GLOB SOLOUD_AUDIOSOURCE_PROC_SOURCES CONFIGURE_DEPENDS
+      "${soloud_SOURCE_DIR}/src/audiosource/sfxr/*.cpp"
+      "${soloud_SOURCE_DIR}/src/audiosource/sfxr/*.c"
+      "${soloud_SOURCE_DIR}/src/audiosource/noise/*.cpp"
+      "${soloud_SOURCE_DIR}/src/audiosource/noise/*.c"
+      "${soloud_SOURCE_DIR}/src/audiosource/speech/*.cpp"
+      "${soloud_SOURCE_DIR}/src/audiosource/speech/*.c"
+      "${soloud_SOURCE_DIR}/src/audiosource/tedsid/*.cpp"
+      "${soloud_SOURCE_DIR}/src/audiosource/tedsid/*.c"
+      "${soloud_SOURCE_DIR}/src/audiosource/monotone/*.cpp"
+      "${soloud_SOURCE_DIR}/src/audiosource/vic/*.cpp"
+      "${soloud_SOURCE_DIR}/src/audiosource/vizsn/*.cpp")
+    # All core filters: biquad, echo, freeverb, lofi, flanger, bassboost,
+    # robotize, waveshaper, fft, eq, duck.
+    file(GLOB SOLOUD_FILTER_SOURCES CONFIGURE_DEPENDS
+      "${soloud_SOURCE_DIR}/src/filter/*.cpp")
     set(SOLOUD_BACKEND_SOURCES
       "${soloud_SOURCE_DIR}/src/backend/sdl2_static/soloud_sdl2_static.cpp")
 
@@ -183,6 +201,8 @@ function(hades_configure_dependencies)
       hades_soloud STATIC
       ${SOLOUD_CORE_SOURCES}
       ${SOLOUD_AUDIOSOURCE_WAV_SOURCES}
+      ${SOLOUD_AUDIOSOURCE_PROC_SOURCES}
+      ${SOLOUD_FILTER_SOURCES}
       ${SOLOUD_BACKEND_SOURCES})
 
     target_include_directories(

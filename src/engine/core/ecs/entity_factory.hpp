@@ -39,6 +39,11 @@ namespace hades
         ComponentManager &componentManager,
         std::optional<Entity::EntityId> parent = std::nullopt);
 
+    static Entity::EntityId createSphere(
+        EntityManager &entityManager,
+        ComponentManager &componentManager,
+        std::optional<Entity::EntityId> parent = std::nullopt);
+
     static Entity::EntityId createPhysicsCube(
         EntityManager &entityManager,
         ComponentManager &componentManager,

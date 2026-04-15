@@ -76,6 +76,21 @@ namespace hades
     EXPECT_FALSE(componentManager.hasComponent<AudioSourceComponent>(entity));
   }
 
+  TEST(EntityFactoryTest, CreateSphereAddsSpherePrimitive)
+  {
+    EntityManager entityManager;
+    ComponentManager componentManager;
+
+    const auto entity = EntityFactory::createSphere(entityManager, componentManager);
+
+    EXPECT_TRUE(componentManager.hasComponent<NameComponent>(entity));
+    EXPECT_EQ(componentManager.getComponent<NameComponent>(entity).value, "Sphere");
+    EXPECT_TRUE(componentManager.hasComponent<TransformHierarchyComponent>(entity));
+    EXPECT_TRUE(componentManager.hasComponent<PositionComponent3D>(entity));
+    EXPECT_TRUE(componentManager.hasComponent<PrimitiveComponent>(entity));
+    EXPECT_EQ(componentManager.getComponent<PrimitiveComponent>(entity).type, PrimitiveType::Sphere);
+  }
+
   TEST(EntityFactoryTest, CreateAudioEmitterAddsAudioSourceComponent)
   {
     EntityManager entityManager;

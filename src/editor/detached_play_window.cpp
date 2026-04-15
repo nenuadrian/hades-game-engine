@@ -26,6 +26,9 @@ namespace
   constexpr float PI = 3.14159265358979323846f;
   constexpr float CUBE_HALF_EXTENT = 0.5f;
   constexpr float PLANE_HALF_EXTENT = 0.5f;
+  constexpr float SPHERE_RADIUS = 0.5f;
+  constexpr int SPHERE_GREAT_CIRCLE_SEGMENTS = 24;
+  constexpr float SPHERE_PI = 3.14159265358979323846f;
   constexpr int BOX_EDGES[12][2] = {
       {0, 1}, {1, 2}, {2, 3}, {3, 0},
       {4, 5}, {5, 6}, {6, 7}, {7, 4},
@@ -335,6 +338,80 @@ namespace
     return visible;
   }
 
+  bool draw_wire_sphere(
+      SDL_Renderer *renderer,
+      const hades::PositionComponent3D &cameraPosition,
+      const hades::CameraComponent &camera,
+      int width,
+      int height,
+      const hades::PositionComponent3D &position,
+      const SDL_Color &color,
+      const hades::RotationComponent3D *rotation = nullptr,
+      const hades::ScaleComponent3D *scale = nullptr)
+  {
+    const Vec3 pos = make_vec3(position);
+
+    auto circle_point = [&](int axis, float angle) -> Vec3
+    {
+      const float s = std::sin(angle) * SPHERE_RADIUS;
+      const float c = std::cos(angle) * SPHERE_RADIUS;
+      Vec3 local{};
+      switch (axis)
+      {
+      case 0:
+        local = make_vec3(c, s, 0.0f);
+        break;
+      case 1:
+        local = make_vec3(c, 0.0f, s);
+        break;
+      case 2:
+      default:
+        local = make_vec3(0.0f, c, s);
+        break;
+      }
+      if (scale != nullptr)
+      {
+        local = make_vec3(local.x * scale->x, local.y * scale->y, local.z * scale->z);
+      }
+      if (rotation != nullptr)
+      {
+        local = rotate_vec3_by_quaternion(local, *rotation);
+      }
+      return add_vec3(pos, local);
+    };
+
+    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+
+    bool visible = false;
+    for (int axis = 0; axis < 3; ++axis)
+    {
+      for (int i = 0; i < SPHERE_GREAT_CIRCLE_SEGMENTS; ++i)
+      {
+        const float angle0 = (static_cast<float>(i) / SPHERE_GREAT_CIRCLE_SEGMENTS) * 2.0f * SPHERE_PI;
+        const float angle1 = (static_cast<float>(i + 1) / SPHERE_GREAT_CIRCLE_SEGMENTS) * 2.0f * SPHERE_PI;
+        const Vec3 p0 = circle_point(axis, angle0);
+        const Vec3 p1 = circle_point(axis, angle1);
+
+        SDL_FPoint screenStart{};
+        SDL_FPoint screenEnd{};
+        if (!project_segment(p0, p1, cameraPosition, camera, width, height, screenStart, screenEnd))
+        {
+          continue;
+        }
+
+        visible = true;
+        SDL_RenderDrawLine(
+            renderer,
+            static_cast<int>(std::lround(screenStart.x)),
+            static_cast<int>(std::lround(screenStart.y)),
+            static_cast<int>(std::lround(screenEnd.x)),
+            static_cast<int>(std::lround(screenEnd.y)));
+      }
+    }
+
+    return visible;
+  }
+
   bool draw_vector_text(
       SDL_Renderer *renderer,
       const hades::PositionComponent3D &cameraPosition,
@@ -454,6 +531,12 @@ namespace
         else if (item.primitiveType == hades::PrimitiveType::Plane)
         {
           draw_wire_plane(
+              renderer, cameraPosition, camera, width, height, position,
+              primitiveColor, rotation, scale);
+        }
+        else if (item.primitiveType == hades::PrimitiveType::Sphere)
+        {
+          draw_wire_sphere(
               renderer, cameraPosition, camera, width, height, position,
               primitiveColor, rotation, scale);
         }

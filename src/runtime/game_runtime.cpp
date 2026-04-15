@@ -10,6 +10,7 @@
 
 #include "engine/core/log.hpp"
 #include "engine/audio/audio_engine.hpp"
+#include "engine/audio/script_audio.hpp"
 #include "engine/core/ecs/scene_serializer.hpp"
 #include "engine/core/ecs/world_utils.hpp"
 #include "engine/physics/physics_world.hpp"
@@ -187,6 +188,9 @@ namespace hades
       Log::warn("audio engine is unavailable. Audio playback has been disabled.");
       audioEngine_.reset();
     }
+    // Publish the live AudioEngine so scripts can reach SoLoud via
+    // hades::Audio / hades::HadesAPI::audioEngine() for procedural audio.
+    register_script_audio_engine(audioEngine_.get());
 
     if (!physicsWorld_->init())
     {
@@ -413,6 +417,7 @@ namespace hades
       {
         audioEngine_->stop_all();
       }
+      register_script_audio_engine(nullptr);
       return EXIT_SUCCESS;
     }
 #endif
@@ -444,6 +449,7 @@ namespace hades
     {
       audioEngine_->stop_all();
     }
+    register_script_audio_engine(nullptr);
 #endif
 
     return EXIT_SUCCESS;

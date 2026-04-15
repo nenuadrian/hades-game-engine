@@ -89,6 +89,17 @@ namespace hades
     return entity;
   }
 
+  Entity::EntityId EntityFactory::createSphere(
+      EntityManager &entityManager,
+      ComponentManager &componentManager,
+      std::optional<Entity::EntityId> parent)
+  {
+    const auto entity = createBaseEntity(entityManager, componentManager, "Sphere", parent);
+    componentManager.addComponent(entity, PrimitiveComponent{PrimitiveType::Sphere});
+    componentManager.addComponent(entity, MeshRendererComponent{});
+    return entity;
+  }
+
   Entity::EntityId EntityFactory::createPhysicsCube(
       EntityManager &entityManager,
       ComponentManager &componentManager,

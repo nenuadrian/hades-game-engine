@@ -6,6 +6,10 @@
 #include "runtime/hades_script_registration.hpp"
 #include "runtime/hades_keycodes.hpp"
 
+// Procedural audio facade
+#include "audio/script_audio.hpp"
+#include "audio/audio_bus.hpp"
+
 // ECS
 #include "core/ecs/entity.hpp"
 #include "core/ecs/component_manager.hpp"

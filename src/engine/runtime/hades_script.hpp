@@ -16,6 +16,8 @@
 
 namespace hades
 {
+  class AudioEngine;
+
   struct ScriptContext
   {
     Entity::EntityId entityId;
@@ -78,6 +80,22 @@ namespace hades
       std::lock_guard<std::mutex> lock(mutex_);
       observations_.clear();
       pendingWorldLoad_.reset();
+    }
+
+    // --- Audio engine access ---
+    // The running game registers its AudioEngine before scripts execute, so
+    // scripts (or the hades::Audio facade) can reach the live SoLoud instance
+    // for procedural sound generation. Returns nullptr if audio is unavailable.
+    static void setAudioEngine(AudioEngine *engine)
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      audioEngine_ = engine;
+    }
+
+    static AudioEngine *audioEngine()
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      return audioEngine_;
     }
 
     // --- World loading ---
@@ -184,6 +202,7 @@ namespace hades
     static inline std::mutex mutex_;
     static inline std::unordered_map<std::string, ObsValue> observations_;
     static inline std::optional<std::string> pendingWorldLoad_;
+    static inline AudioEngine *audioEngine_ = nullptr;
   };
 }
 

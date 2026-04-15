@@ -39,6 +39,12 @@ namespace hades
         const AudioSourceComponent &source,
         const PositionComponent3D *position);
 
+    // Escape hatches for scripts that want direct SoLoud access (procedural
+    // sources, custom filters, etc.). Returns the live engine handles --
+    // callers must respect AudioEngine's lifecycle (valid while init()d).
+    SoLoud::Soloud &raw() { return soloud; }
+    SoLoud::Bus &bus_raw(AudioBus bus);
+
   private:
     struct ManagedSource
     {

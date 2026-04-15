@@ -31,6 +31,7 @@
 #include "../engine/runtime/main_camera_selection.hpp"
 #include "../engine/runtime/script_runtime.hpp"
 #include "../engine/audio/audio_engine.hpp"
+#include "../engine/audio/script_audio.hpp"
 #include "../engine/rendering/renderer.hpp"
 #include "../engine/profiling/frame_metrics.hpp"
 #include "../engine/rendering/vulkan.hpp"
@@ -570,6 +571,9 @@ namespace hades
   WindowManager::~WindowManager()
   {
     scriptRuntime.stop();
+    // Release the AudioEngine pointer from the scripting facade before the
+    // unique_ptr tears it down, so any lingering Audio::* calls are no-ops.
+    register_script_audio_engine(nullptr);
   }
 
   void WindowManager::request_quit()
@@ -1247,6 +1251,9 @@ namespace hades
       Log::warn("audio engine is unavailable. Audio playback has been disabled.");
       audio_engine.reset();
     }
+    // Expose the live AudioEngine to scripts for procedural audio via the
+    // hades::Audio facade and hades::HadesAPI::audioEngine().
+    register_script_audio_engine(audio_engine.get());
 
     if (!physics_world->init())
     {

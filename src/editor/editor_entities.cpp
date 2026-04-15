@@ -65,11 +65,12 @@ namespace hades
         {"lighting", "Lighting", ICON_FA_LIGHTBULB},
     }};
 
-    constexpr std::array<EntityPickerOption, 9> ENTITY_PICKER_OPTIONS{{
+    constexpr std::array<EntityPickerOption, 10> ENTITY_PICKER_OPTIONS{{
         {"Camera", "Adds a camera and audio listener.", "main view listener", ICON_FA_CAMERA, "scene", EditorEntityPreset::Camera},
         {"Text", "Adds a text entity.", "ui label typography", ICON_FA_FONT, "scene", EditorEntityPreset::Text},
         {"Cube", "Adds a renderable cube.", "box mesh primitive", ICON_FA_CUBE, "primitives", EditorEntityPreset::Cube},
-        {"Plane", "Adds a flat plane primitive.", "ground floor quad", ICON_FA_VECTOR_SQUARE, "primitives", EditorEntityPreset::Plane},
+        {"Panel", "Adds a flat panel primitive.", "plane ground floor quad", ICON_FA_VECTOR_SQUARE, "primitives", EditorEntityPreset::Plane},
+        {"Sphere", "Adds a renderable sphere.", "ball orb round primitive", ICON_FA_CIRCLE, "primitives", EditorEntityPreset::Sphere},
         {"Physics Cube", "Adds a cube with rigid body and collider.", "physics rigid body collider", ICON_FA_WAND_MAGIC_SPARKLES, "primitives", EditorEntityPreset::PhysicsCube},
         {"Audio Emitter", "Adds a positional audio source.", "speaker sound music", ICON_FA_VOLUME_HIGH, "audio", EditorEntityPreset::AudioEmitter},
         {"Directional Light", "Adds a sun-style directional light.", "sun light shadow", ICON_FA_SUN, "lighting", EditorEntityPreset::DirectionalLight},
@@ -318,7 +319,7 @@ namespace hades
       reset_add_entity_dialog();
     }
 
-    ImGui::SetNextWindowSize(ImVec2(440.0f, 420.0f), ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(ImVec2(560.0f, 520.0f), ImGuiCond_Appearing);
     if (!ImGui::BeginPopupModal(ADD_ENTITY_POPUP_TITLE, nullptr, ImGuiWindowFlags_NoResize))
     {
       return;
@@ -355,77 +356,115 @@ namespace hades
     ImGui::Spacing();
     ImGui::BeginChild("AddEntityList", ImVec2(0.0f, -ImGui::GetFrameHeightWithSpacing() - 8.0f), true);
 
+    constexpr int PICKER_COLUMNS = 5;
+    const char *filter = addEntitySearchBuffer_.data();
+
     bool pickedEntity = false;
+    bool hasVisibleOptions = false;
+
     for (const auto &category : ENTITY_PICKER_CATEGORIES)
     {
-      if (!category_has_matches(category, addEntitySearchBuffer_.data()))
+      if (!category_has_matches(category, filter))
       {
         continue;
       }
+      hasVisibleOptions = true;
 
-      if (addEntitySearchBuffer_[0] != '\0')
+      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.78f, 0.82f, 0.90f, 1.0f));
+      ImGui::TextUnformatted((std::string(category.icon) + "  " + category.label).c_str());
+      ImGui::PopStyleColor();
+      ImGui::Separator();
+
+      const std::string tableId = std::string("##picker_") + category.id;
+      if (ImGui::BeginTable(
+              tableId.c_str(),
+              PICKER_COLUMNS,
+              ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoPadInnerX))
       {
-        ImGui::SetNextItemOpen(true, ImGuiCond_Always);
+        int columnIndex = 0;
+        for (const auto &option : ENTITY_PICKER_OPTIONS)
+        {
+          if (std::string_view(option.categoryId) != category.id ||
+              !entity_picker_option_matches(option, filter))
+          {
+            continue;
+          }
+
+          if (columnIndex == 0)
+          {
+            ImGui::TableNextRow();
+          }
+          ImGui::TableSetColumnIndex(columnIndex);
+
+          ImGui::PushID(option.label);
+
+          const float cellWidth = ImGui::GetContentRegionAvail().x;
+          const float textLineHeight = ImGui::GetTextLineHeight();
+          const float iconScale = 2.5f;
+          const float iconHeight = textLineHeight * iconScale;
+          const float cellPaddingY = 8.0f;
+          const float cellHeight = cellPaddingY + iconHeight + 6.0f + textLineHeight + cellPaddingY;
+
+          const ImVec2 cellStart = ImGui::GetCursorPos();
+
+          if (ImGui::Selectable("##tile", false, ImGuiSelectableFlags_None, ImVec2(cellWidth, cellHeight)))
+          {
+            request_entity_creation(option.preset, *pendingAddEntityParent_);
+            reset_add_entity_dialog();
+            ImGui::CloseCurrentPopup();
+            pickedEntity = true;
+          }
+
+          if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) && option.description[0] != '\0')
+          {
+            ImGui::SetTooltip("%s", option.description);
+          }
+
+          // Big icon centered.
+          {
+            const float origScale = ImGui::GetFont()->Scale;
+            ImGui::GetFont()->Scale = iconScale;
+            ImGui::PushFont(ImGui::GetFont());
+
+            const ImVec2 iconSize = ImGui::CalcTextSize(option.icon);
+            const float iconX = cellStart.x + (cellWidth - iconSize.x) * 0.5f;
+            const float iconY = cellStart.y + cellPaddingY;
+            ImGui::SetCursorPos(ImVec2(iconX, iconY));
+            ImGui::TextUnformatted(option.icon);
+
+            ImGui::GetFont()->Scale = origScale;
+            ImGui::PopFont();
+          }
+
+          // Label centered below, ellipsized past 14 chars.
+          {
+            std::string displayName = option.label;
+            if (displayName.size() > 14)
+            {
+              displayName = displayName.substr(0, 11) + "...";
+            }
+
+            const ImVec2 textSize = ImGui::CalcTextSize(displayName.c_str());
+            const float textX = cellStart.x + (cellWidth - textSize.x) * 0.5f;
+            const float textY = cellStart.y + cellPaddingY + iconHeight + 6.0f;
+            ImGui::SetCursorPos(ImVec2(textX, textY));
+            ImGui::TextUnformatted(displayName.c_str());
+          }
+
+          ImGui::PopID();
+
+          if (pickedEntity)
+          {
+            break;
+          }
+
+          columnIndex = (columnIndex + 1) % PICKER_COLUMNS;
+        }
+
+        ImGui::EndTable();
       }
 
-      const bool open = ImGui::TreeNodeEx(
-          category.id,
-          ImGuiTreeNodeFlags_OpenOnArrow |
-              ImGuiTreeNodeFlags_OpenOnDoubleClick |
-              ImGuiTreeNodeFlags_SpanAvailWidth |
-              ImGuiTreeNodeFlags_DefaultOpen,
-          "%s %s",
-          category.icon,
-          category.label);
-
-      if (!open)
-      {
-        continue;
-      }
-
-      for (const auto &option : ENTITY_PICKER_OPTIONS)
-      {
-        if (std::string_view(option.categoryId) != category.id ||
-            !entity_picker_option_matches(option, addEntitySearchBuffer_.data()))
-        {
-          continue;
-        }
-
-        ImGui::PushID(option.label);
-        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 6.0f));
-        ImGui::TreeNodeEx(
-            "entity_option",
-            ImGuiTreeNodeFlags_Leaf |
-                ImGuiTreeNodeFlags_NoTreePushOnOpen |
-                ImGuiTreeNodeFlags_SpanAvailWidth,
-            "%s %s",
-            option.icon,
-            option.label);
-        ImGui::PopStyleVar();
-
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) && option.description[0] != '\0')
-        {
-          ImGui::SetTooltip("%s", option.description);
-        }
-
-        if (ImGui::IsItemClicked())
-        {
-          request_entity_creation(option.preset, *pendingAddEntityParent_);
-
-          reset_add_entity_dialog();
-          ImGui::CloseCurrentPopup();
-          pickedEntity = true;
-        }
-
-        ImGui::PopID();
-
-        if (pickedEntity)
-        {
-          break;
-        }
-      }
-
-      ImGui::TreePop();
+      ImGui::Spacing();
 
       if (pickedEntity)
       {
@@ -433,22 +472,9 @@ namespace hades
       }
     }
 
-    if (!pickedEntity)
+    if (!pickedEntity && !hasVisibleOptions)
     {
-      bool hasVisibleOptions = false;
-      for (const auto &category : ENTITY_PICKER_CATEGORIES)
-      {
-        if (category_has_matches(category, addEntitySearchBuffer_.data()))
-        {
-          hasVisibleOptions = true;
-          break;
-        }
-      }
-
-      if (!hasVisibleOptions)
-      {
-        ImGui::TextDisabled("No entity types match that search.");
-      }
+      ImGui::TextDisabled("No entity types match that search.");
     }
 
     ImGui::EndChild();
@@ -488,6 +514,9 @@ namespace hades
       break;
     case EditorEntityPreset::Plane:
       createdEntity = EntityFactory::createPlane(entityManager, componentManager, parent);
+      break;
+    case EditorEntityPreset::Sphere:
+      createdEntity = EntityFactory::createSphere(entityManager, componentManager, parent);
       break;
     case EditorEntityPreset::PhysicsCube:
       createdEntity = EntityFactory::createPhysicsCube(entityManager, componentManager, parent);
