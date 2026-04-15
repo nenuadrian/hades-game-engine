@@ -132,6 +132,7 @@ namespace hades
       {
         for (int i = 0; i < static_cast<int>(worldNames_.size()); ++i)
         {
+          ImGui::PushID(i);
           const bool selected = (i == selectedWorldIdx_);
           if (ImGui::Selectable(worldNames_[i].c_str(), selected))
           {
@@ -141,6 +142,7 @@ namespace hades
           {
             ImGui::SetItemDefaultFocus();
           }
+          ImGui::PopID();
         }
         ImGui::EndCombo();
       }
