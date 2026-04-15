@@ -67,7 +67,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
           libglu1-mesa-dev freeglut3-dev mesa-common-dev \
-          xorg-dev libvulkan-dev vulkan-tools
+          xorg-dev libvulkan-dev vulkan-tools \
+          libcurl4-openssl-dev
 
       # Use a minimal Vulkan setup on Windows instead of the full LunarG installer,
       # which is large and can stall on GitHub-hosted runners.
@@ -107,6 +108,19 @@ jobs:
 
           echo "VULKAN_SDK=$sdk_root/macOS" >> "$GITHUB_ENV"
           echo "$sdk_root/macOS/bin" >> "$GITHUB_PATH"
+
+      - name: Install CURL (Windows, via vcpkg)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install curl:x64-windows
+          "CMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            | Out-File -FilePath $env:GITHUB_ENV -Append
+          "VCPKG_TARGET_TRIPLET=x64-windows" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Install CURL (macOS)
+        if: matrix.os == 'macos-latest'
+        run: brew install curl
 
       - name: Set reusable strings
         id: strings

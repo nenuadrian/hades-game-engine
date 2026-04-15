@@ -8,6 +8,7 @@ RUN apt-get update \
         ca-certificates \
         cmake \
         git \
+        libcurl4-openssl-dev \
         libvulkan-dev \
         ninja-build \
         pkg-config \
