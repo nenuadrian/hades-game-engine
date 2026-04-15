@@ -18,6 +18,7 @@
 #include "../engine/gui/imgui.hpp"
 #include "../engine/profiling/frame_metrics.hpp"
 #include "../engine/runtime/script_runtime.hpp"
+#include "native_menu.hpp"
 
 namespace hades
 {
@@ -59,6 +60,10 @@ namespace hades
 
   Editor::Editor() : gui(std::make_unique<ImGui_GUI>())
   {
+    if (native_menu::is_available())
+    {
+      static_cast<ImGui_GUI *>(gui.get())->set_suppress_main_menu_bar(true);
+    }
     reset_scene_camera();
     register_builtin_plugins();
   }
@@ -69,6 +74,7 @@ namespace hades
     {
       exportBuildThread_.join();
     }
+    native_menu::teardown();
   }
 
   void Editor::reset_workspace_session()
@@ -219,6 +225,7 @@ namespace hades
     {
       HADES_FRAME_METRIC_SCOPE("menu_bar");
       sync_menu_bar(entityManager, componentManager);
+      native_menu::sync(gui->menu_bar_items);
     }
     configure_default_dock_layout(gui->render_frame());
 

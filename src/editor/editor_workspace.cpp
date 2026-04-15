@@ -136,15 +136,6 @@ namespace hades
       return {ICON_FA_FILE, IM_COL32(161, 151, 146, 255)};
     }
 
-    bool name_matches_filter(const std::string &name, const char *filter)
-    {
-      if (filter[0] == '\0')
-      {
-        return true;
-      }
-      return to_lower(name).find(to_lower(filter)) != std::string::npos;
-    }
-
     const Editor::WorkspaceTreeNode *find_tree_node(
         const Editor::WorkspaceTreeNode &root,
         const std::filesystem::path &targetPath)
@@ -310,7 +301,7 @@ namespace hades
     }
   }
 
-  void Editor::render_workspace_grid_cell(const WorkspaceTreeNode &node, const char *filter)
+  void Editor::render_workspace_grid_cell(const WorkspaceTreeNode &node)
   {
     const std::string label = path_display_name(node.path);
     const bool isRenaming = !workspaceRenamePath_.empty() &&
@@ -500,14 +491,6 @@ namespace hades
       return;
     }
 
-    // --- Filter bar ---
-    {
-      ImGui::SetNextItemWidth(-1.0f);
-      ImGui::InputTextWithHint("##wsfilter", ICON_FA_MAGNIFYING_GLASS "  Filter...",
-                               workspaceFilterBuffer_.data(), workspaceFilterBuffer_.size());
-      ImGui::Spacing();
-    }
-
     // --- Breadcrumb navigation ---
     {
       if (workspaceGridCurrentDir_.empty())
@@ -566,14 +549,8 @@ namespace hades
       {
         for (const auto &child : currentNode->children)
         {
-          const std::string childName = path_display_name(child.path);
-          if (!name_matches_filter(childName, workspaceFilterBuffer_.data()))
-          {
-            continue;
-          }
-
           ImGui::TableNextColumn();
-          render_workspace_grid_cell(child, workspaceFilterBuffer_.data());
+          render_workspace_grid_cell(child);
         }
         ImGui::EndTable();
       }

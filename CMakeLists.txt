@@ -182,6 +182,15 @@ file(GLOB_RECURSE EDITOR_SOURCE_FILES CONFIGURE_DEPENDS "${SRC_DIR}/editor/*.cpp
 file(GLOB_RECURSE EDITOR_HEADER_FILES CONFIGURE_DEPENDS "${SRC_DIR}/editor/*.h" "${SRC_DIR}/editor/*.hpp")
 list(APPEND EDITOR_SOURCE_FILES "${SRC_DIR}/engine/gui/imgui.cpp" "${SRC_DIR}/main.cpp")
 
+# Native menu bar bridge: use the macOS AppKit implementation on Apple
+# platforms and drop the portable stub; on other platforms keep the stub.
+if(APPLE)
+  list(REMOVE_ITEM EDITOR_SOURCE_FILES "${SRC_DIR}/editor/native_menu_stub.cpp")
+  list(APPEND EDITOR_SOURCE_FILES "${SRC_DIR}/editor/native_menu_mac.mm")
+  set_source_files_properties("${SRC_DIR}/editor/native_menu_mac.mm" PROPERTIES
+    COMPILE_FLAGS "-fobjc-arc")
+endif()
+
 # Collect runtime sources.
 file(GLOB_RECURSE RUNTIME_SOURCE_FILES CONFIGURE_DEPENDS "${SRC_DIR}/runtime/*.cpp")
 file(GLOB_RECURSE RUNTIME_HEADER_FILES CONFIGURE_DEPENDS "${SRC_DIR}/runtime/*.hpp")
@@ -279,6 +288,9 @@ add_custom_command(
 
 if(TARGET SDL2::SDL2main)
   target_link_libraries(${PROJECT_NAME} PRIVATE SDL2::SDL2main)
+endif()
+if(APPLE)
+  target_link_libraries(${PROJECT_NAME} PRIVATE "-framework AppKit")
 endif()
 endif() # NOT EMSCRIPTEN (editor)
 

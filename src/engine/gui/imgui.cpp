@@ -40,7 +40,7 @@ namespace hades
   {
     const ImGuiID dockspaceId = ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
 
-    if (ImGui::BeginMainMenuBar())
+    if (!suppress_main_menu_bar_ && ImGui::BeginMainMenuBar())
     {
       for (const auto &item : menu_bar_items)
       {

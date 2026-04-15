@@ -29,12 +29,18 @@ theme:
 
 nav:
   - Home: index.md
+  - Building:
+    - Overview: building/overview.md
+    - macOS: building/macos.md
+    - Linux: building/linux.md
+    - Windows: building/windows.md
   - Scripting: scripting.md
-  - API: api.md
-  - Metrics: metrics.md
+  - HadesAPI: api.md
   - Architecture:
     - Overview: architecture.md
     - Class Relationships: generated/class-relationships.md
+  - Frame Metrics: metrics.md
+  - Release Process: release.md
 
 markdown_extensions:
   - admonition

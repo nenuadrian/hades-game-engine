@@ -319,9 +319,18 @@ namespace hades
       reset_add_entity_dialog();
     }
 
-    ImGui::SetNextWindowSize(ImVec2(560.0f, 520.0f), ImGuiCond_Appearing);
-    if (!ImGui::BeginPopupModal(ADD_ENTITY_POPUP_TITLE, nullptr, ImGuiWindowFlags_NoResize))
+    bool dialogOpen = true;
+    ImGui::SetNextWindowSize(ImVec2(560.0f, 480.0f), ImGuiCond_Appearing);
+    if (!ImGui::BeginPopupModal(ADD_ENTITY_POPUP_TITLE, &dialogOpen, ImGuiWindowFlags_NoResize))
     {
+      return;
+    }
+
+    if (!dialogOpen)
+    {
+      reset_add_entity_dialog();
+      ImGui::CloseCurrentPopup();
+      ImGui::EndPopup();
       return;
     }
 
@@ -334,33 +343,12 @@ namespace hades
       return;
     }
 
-    ImGui::TextWrapped("Choose an entity type to add under:");
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.75f, 0.78f, 0.84f, 1.0f));
-    const std::string parentLabel = entity_label(*pendingAddEntityParent_, componentManager);
-    ImGui::TextWrapped("%s", parentLabel.c_str());
-    ImGui::PopStyleColor();
-    ImGui::Spacing();
-
-    if (focusAddEntitySearch_)
-    {
-      ImGui::SetKeyboardFocusHere();
-      focusAddEntitySearch_ = false;
-    }
-
-    ImGui::InputTextWithHint(
-        "##addentityfilter",
-        ICON_FA_MAGNIFYING_GLASS "  Search entities...",
-        addEntitySearchBuffer_.data(),
-        addEntitySearchBuffer_.size());
-
-    ImGui::Spacing();
-    ImGui::BeginChild("AddEntityList", ImVec2(0.0f, -ImGui::GetFrameHeightWithSpacing() - 8.0f), true);
+    ImGui::BeginChild("AddEntityList", ImVec2(0.0f, 0.0f), false);
 
     constexpr int PICKER_COLUMNS = 5;
-    const char *filter = addEntitySearchBuffer_.data();
+    const char *filter = "";
 
     bool pickedEntity = false;
-    bool hasVisibleOptions = false;
 
     for (const auto &category : ENTITY_PICKER_CATEGORIES)
     {
@@ -368,7 +356,6 @@ namespace hades
       {
         continue;
       }
-      hasVisibleOptions = true;
 
       ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.78f, 0.82f, 0.90f, 1.0f));
       ImGui::TextUnformatted((std::string(category.icon) + "  " + category.label).c_str());
@@ -472,19 +459,7 @@ namespace hades
       }
     }
 
-    if (!pickedEntity && !hasVisibleOptions)
-    {
-      ImGui::TextDisabled("No entity types match that search.");
-    }
-
     ImGui::EndChild();
-
-    if (ImGui::Button("Cancel"))
-    {
-      reset_add_entity_dialog();
-      ImGui::CloseCurrentPopup();
-    }
-
     ImGui::EndPopup();
   }
 

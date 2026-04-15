@@ -159,9 +159,6 @@ namespace hades
     std::filesystem::path pendingWorkspaceDeletePath_;
     std::string workspaceDeleteError_;
 
-    // Workspace filter state.
-    std::array<char, 256> workspaceFilterBuffer_{};
-
     // Workspace grid navigation state.
     std::filesystem::path workspaceGridCurrentDir_;
 
@@ -244,7 +241,7 @@ namespace hades
     void render_debug_console_window();
     void render_about_window();
     void render_export_window(EntityManager &entityManager, ComponentManager &componentManager);
-    void render_workspace_grid_cell(const WorkspaceTreeNode &node, const char *filter);
+    void render_workspace_grid_cell(const WorkspaceTreeNode &node);
     void render_workspace_create_menu(const std::filesystem::path &destination);
     void reset_scene_camera();
     void restore_saved_worlds_if_needed(EntityManager &entityManager, ComponentManager &componentManager);
