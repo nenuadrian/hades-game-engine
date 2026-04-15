@@ -19,7 +19,7 @@ set(HADES_WEB_ASSET_DIR "" CACHE PATH
 # Call this after the target is defined.
 function(hades_configure_web_target target)
   target_link_options(${target} PRIVATE
-    -sUSE_WEBGPU=1
+    --use-port=emdawnwebgpu
     -sUSE_SDL=2
     -sALLOW_MEMORY_GROWTH=1
     -sMAX_WEBGL_VERSION=2

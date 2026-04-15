@@ -252,8 +252,11 @@ function(hades_configure_dependencies)
         PUBLIC ${imgui_SOURCE_DIR}
                ${imgui_SOURCE_DIR}/backends)
       # Emscripten provides SDL2 and WebGPU via compiler flags.
-      target_compile_options(hades_imgui PUBLIC -sUSE_SDL=2)
-      target_link_options(hades_imgui PUBLIC -sUSE_SDL=2 -sUSE_WEBGPU=1)
+      # Note: modern Emscripten (>=3.1.58) ships WebGPU via the emdawnwebgpu
+      # port rather than the legacy -sUSE_WEBGPU=1 flag, and the port must be
+      # active at compile time so that <webgpu/webgpu.h> resolves.
+      target_compile_options(hades_imgui PUBLIC -sUSE_SDL=2 --use-port=emdawnwebgpu)
+      target_link_options(hades_imgui PUBLIC -sUSE_SDL=2 --use-port=emdawnwebgpu)
     else()
       add_library(
         hades_imgui STATIC
