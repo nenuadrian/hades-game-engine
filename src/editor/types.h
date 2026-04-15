@@ -69,6 +69,19 @@ namespace hades
     std::chrono::system_clock::time_point wallClockTimestamp;
   };
 
+  // A "policy preview" request: when set before EditorPlayAction::Start is
+  // consumed, start_play_mode swaps in the named world, injects the given
+  // .pt file into the matching ScriptAttachment (so the runtime runs it in
+  // Inference mode), and then enters play mode normally. The snapshot taken
+  // at play start reverts the injected modelPath on stop — nothing persists.
+  struct PreviewRequest
+  {
+    std::string worldName;
+    std::string entityName;
+    std::string className;
+    std::string modelPath;
+  };
+
   struct EditorState
   {
     std::queue<EDITOR_EventType> events = std::queue<EDITOR_EventType>();
@@ -82,6 +95,9 @@ namespace hades
     std::optional<Entity::EntityId> activeCamera;
     std::string playModeMessage;
     bool threeFingerDragActive = false;
+
+    std::optional<PreviewRequest> pendingPreviewRequest;
+    bool isPreviewing = false;
   };
 }
 

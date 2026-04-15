@@ -1,0 +1,92 @@
+{
+  "entities": [
+    {
+      "components": {
+        "hierarchy": {
+          "children": [
+            9,
+            10
+          ],
+          "parent": null
+        },
+        "name": {
+          "value": "TrainingWorld"
+        },
+        "world": {
+          "isDefault": false
+        }
+      },
+      "id": 8
+    },
+    {
+      "components": {
+        "audioListener": {
+          "enabled": true,
+          "forwardX": 0.0,
+          "forwardY": 0.0,
+          "forwardZ": 1.0,
+          "upX": 0.0,
+          "upY": 1.0,
+          "upZ": 0.0
+        },
+        "camera": {
+          "farClip": 1000.0,
+          "fovY": 60.0,
+          "isMainCamera": true,
+          "nearClip": 0.10000000149011612
+        },
+        "hierarchy": {
+          "children": [],
+          "parent": 8
+        },
+        "name": {
+          "value": "Camera"
+        },
+        "position3d": {
+          "x": 0.0,
+          "y": 5.0,
+          "z": -10.0
+        },
+        "rotation3d": {
+          "qw": 1.0,
+          "qx": 0.0,
+          "qy": 0.0,
+          "qz": 0.0
+        }
+      },
+      "id": 9
+    },
+    {
+      "components": {
+        "hierarchy": {
+          "children": [],
+          "parent": 8
+        },
+        "name": {
+          "value": "Cart"
+        },
+        "position3d": {
+          "x": 0.0,
+          "y": 2.0,
+          "z": 0.0
+        },
+        "primitive": {
+          "type": 0
+        },
+        "script": {
+          "attachments": [
+            {
+              "className": "PoleBalance",
+              "enabled": true,
+              "modelPath": "",
+              "publicFieldValues": {},
+              "scriptPath": "PoleBalance.cpp"
+            }
+          ]
+        }
+      },
+      "id": 10
+    }
+  ],
+  "version": 1
+}
