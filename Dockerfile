@@ -11,7 +11,13 @@ RUN apt-get update \
         libvulkan-dev \
         ninja-build \
         pkg-config \
+        python3 \
+        python3-pip \
     && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --break-system-packages --no-cache-dir \
+      --index-url https://download.pytorch.org/whl/cpu \
+      torch
 
 WORKDIR /workspace
 
