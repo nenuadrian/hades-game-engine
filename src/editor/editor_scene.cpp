@@ -2078,7 +2078,7 @@ namespace hades
          ImGui::IsMouseClicked(ImGuiMouseButton_Right) ||
          ImGui::IsMouseClicked(ImGuiMouseButton_Middle));
 
-    if (sceneCanvasClicked)
+    if (sceneCanvasClicked || (sceneCanvasHovered && state.threeFingerDragActive))
     {
       sceneCanvasKeyboardCapture_ = true;
       ImGui::SetNavCursorVisible(false);
@@ -2090,7 +2090,7 @@ namespace hades
 
     const bool rightMouseFlyMode =
         sceneCanvasHovered &&
-        ImGui::IsMouseDown(ImGuiMouseButton_Right) &&
+        (ImGui::IsMouseDown(ImGuiMouseButton_Right) || state.threeFingerDragActive) &&
         !io.WantTextInput;
 
     if (rightMouseFlyMode)
@@ -2111,7 +2111,8 @@ namespace hades
           EDITOR_SCENE_CAMERA_MAX_DISTANCE);
     }
 
-    if (sceneCanvasHovered && ImGui::IsMouseDragging(ImGuiMouseButton_Right))
+    if (sceneCanvasHovered && (ImGui::IsMouseDragging(ImGuiMouseButton_Right) ||
+        (state.threeFingerDragActive && ImGui::IsMouseDragging(ImGuiMouseButton_Left))))
     {
       sceneCameraYawDegrees_ = std::remainder(
           sceneCameraYawDegrees_ + (io.MouseDelta.x * EDITOR_SCENE_CAMERA_ROTATION_SENSITIVITY_X),
@@ -2364,7 +2365,7 @@ namespace hades
     }
 
     SceneGizmoAxis hoveredGizmoAxis = SceneGizmoAxis::None;
-    if (selectedEntityIsEditableInScene && sceneCanvasHovered && !rotateModifierDown)
+    if (selectedEntityIsEditableInScene && sceneCanvasHovered && !rotateModifierDown && !state.threeFingerDragActive)
     {
       if (sceneGizmoMode_ == SceneGizmoMode::Translate)
       {
@@ -2386,7 +2387,7 @@ namespace hades
       }
     }
 
-    if (sceneCanvasHovered && !rotateModifierDown && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+    if (sceneCanvasHovered && !rotateModifierDown && !state.threeFingerDragActive && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
     {
       bool handledClick = false;
 

@@ -81,6 +81,7 @@ namespace hades
     std::optional<Entity::EntityId> activeWorld;
     std::optional<Entity::EntityId> activeCamera;
     std::string playModeMessage;
+    bool threeFingerDragActive = false;
   };
 }
 

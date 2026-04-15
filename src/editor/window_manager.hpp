@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "../engine/core/ecs/component_manager.hpp"
@@ -105,6 +106,7 @@ namespace hades
     int workspaceLogoWidth = 0;
     int workspaceLogoHeight = 0;
     std::string imguiIniPath_;
+    std::unordered_set<std::int64_t> activeTrackpadFingers_;
 
     void request_quit();
     bool persist_workspace_state(const std::filesystem::path &workspacePath, std::string *errorMessage = nullptr);

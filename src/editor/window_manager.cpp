@@ -1375,7 +1375,17 @@ namespace hades
             }
           }
         }
+
+        if (event.type == SDL_FINGERDOWN)
+        {
+          activeTrackpadFingers_.insert(static_cast<std::int64_t>(event.tfinger.fingerId));
+        }
+        else if (event.type == SDL_FINGERUP)
+        {
+          activeTrackpadFingers_.erase(static_cast<std::int64_t>(event.tfinger.fingerId));
+        }
       }
+      editor.state.threeFingerDragActive = (activeTrackpadFingers_.size() >= 3);
     }
 
     {
