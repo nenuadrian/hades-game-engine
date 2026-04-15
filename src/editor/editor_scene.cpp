@@ -58,6 +58,7 @@ namespace hades
     constexpr float EDITOR_SCENE_CAMERA_MAX_PITCH = 89.0f;
     constexpr float EDITOR_SCENE_CAMERA_ROTATION_SENSITIVITY_X = 0.35f;
     constexpr float EDITOR_SCENE_CAMERA_ROTATION_SENSITIVITY_Y = 0.25f;
+    constexpr float EDITOR_SCENE_CAMERA_ROTATION_SPEED_KEYBOARD = 90.0f;
     constexpr float EDITOR_SCENE_CAMERA_ZOOM_FACTOR = 0.85f;
     constexpr float CAMERA_FRUSTUM_PREVIEW_MAX_DEPTH = 12.0f;
     constexpr float SCENE_PICK_THRESHOLD_PIXELS = 12.0f;
@@ -2100,6 +2101,10 @@ namespace hades
       ImGui::SetKeyOwner(ImGuiKey_RightArrow, sceneCanvasId, ImGuiInputFlags_LockThisFrame);
       ImGui::SetKeyOwner(ImGuiKey_UpArrow, sceneCanvasId, ImGuiInputFlags_LockThisFrame);
       ImGui::SetKeyOwner(ImGuiKey_DownArrow, sceneCanvasId, ImGuiInputFlags_LockThisFrame);
+      ImGui::SetKeyOwner(ImGuiKey_A, sceneCanvasId, ImGuiInputFlags_LockThisFrame);
+      ImGui::SetKeyOwner(ImGuiKey_D, sceneCanvasId, ImGuiInputFlags_LockThisFrame);
+      ImGui::SetKeyOwner(ImGuiKey_W, sceneCanvasId, ImGuiInputFlags_LockThisFrame);
+      ImGui::SetKeyOwner(ImGuiKey_S, sceneCanvasId, ImGuiInputFlags_LockThisFrame);
       ImGui::SetNavCursorVisible(false);
       ImGui::SetNextFrameWantCaptureKeyboard(true);
     }
@@ -2136,19 +2141,19 @@ namespace hades
       Vec3 movement = make_vec3(0.0f, 0.0f, 0.0f);
       const Vec3 forwardOnGround = flatten_xz(sceneCamera.forward);
 
-      if (ImGui::IsKeyDown(ImGuiKey_LeftArrow, sceneCanvasId))
+      if (ImGui::IsKeyDown(ImGuiKey_A, sceneCanvasId))
       {
         movement = subtract_vec3(movement, sceneCamera.right);
       }
-      if (ImGui::IsKeyDown(ImGuiKey_RightArrow, sceneCanvasId))
+      if (ImGui::IsKeyDown(ImGuiKey_D, sceneCanvasId))
       {
         movement = add_vec3(movement, sceneCamera.right);
       }
-      if (ImGui::IsKeyDown(ImGuiKey_UpArrow, sceneCanvasId))
+      if (ImGui::IsKeyDown(ImGuiKey_W, sceneCanvasId))
       {
         movement = add_vec3(movement, forwardOnGround);
       }
-      if (ImGui::IsKeyDown(ImGuiKey_DownArrow, sceneCanvasId))
+      if (ImGui::IsKeyDown(ImGuiKey_S, sceneCanvasId))
       {
         movement = subtract_vec3(movement, forwardOnGround);
       }
@@ -2159,6 +2164,44 @@ namespace hades
         const float cameraMoveSpeed = std::max(3.0f, sceneCameraDistance_);
         sceneCameraTargetX_ += movement.x * cameraMoveSpeed * io.DeltaTime;
         sceneCameraTargetZ_ += movement.z * cameraMoveSpeed * io.DeltaTime;
+        sceneCamera = make_editor_scene_view_camera(
+            sceneCameraTargetX_,
+            sceneCameraTargetY_,
+            sceneCameraTargetZ_,
+            sceneCameraDistance_,
+            sceneCameraYawDegrees_,
+            sceneCameraPitchDegrees_);
+      }
+
+      const float rotateSpeed = EDITOR_SCENE_CAMERA_ROTATION_SPEED_KEYBOARD * io.DeltaTime;
+      if (ImGui::IsKeyDown(ImGuiKey_LeftArrow, sceneCanvasId))
+      {
+        sceneCameraYawDegrees_ = std::remainder(sceneCameraYawDegrees_ - rotateSpeed, 360.0f);
+      }
+      if (ImGui::IsKeyDown(ImGuiKey_RightArrow, sceneCanvasId))
+      {
+        sceneCameraYawDegrees_ = std::remainder(sceneCameraYawDegrees_ + rotateSpeed, 360.0f);
+      }
+      if (ImGui::IsKeyDown(ImGuiKey_UpArrow, sceneCanvasId))
+      {
+        sceneCameraPitchDegrees_ = std::clamp(
+            sceneCameraPitchDegrees_ + rotateSpeed,
+            EDITOR_SCENE_CAMERA_MIN_PITCH,
+            EDITOR_SCENE_CAMERA_MAX_PITCH);
+      }
+      if (ImGui::IsKeyDown(ImGuiKey_DownArrow, sceneCanvasId))
+      {
+        sceneCameraPitchDegrees_ = std::clamp(
+            sceneCameraPitchDegrees_ - rotateSpeed,
+            EDITOR_SCENE_CAMERA_MIN_PITCH,
+            EDITOR_SCENE_CAMERA_MAX_PITCH);
+      }
+
+      if (ImGui::IsKeyDown(ImGuiKey_LeftArrow, sceneCanvasId) ||
+          ImGui::IsKeyDown(ImGuiKey_RightArrow, sceneCanvasId) ||
+          ImGui::IsKeyDown(ImGuiKey_UpArrow, sceneCanvasId) ||
+          ImGui::IsKeyDown(ImGuiKey_DownArrow, sceneCanvasId))
+      {
         sceneCamera = make_editor_scene_view_camera(
             sceneCameraTargetX_,
             sceneCameraTargetY_,
