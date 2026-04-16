@@ -43,6 +43,48 @@ function(hades_stage_runtime_dependency target dependency)
     VERBATIM)
 endfunction()
 
+# Windows-only: stage every runtime DLL (LibTorch, Vulkan loader, etc.)
+# next to the produced executable so it launches without the user needing
+# to set PATH. Without this, ctest and CI smoke tests fail with
+# STATUS_DLL_NOT_FOUND (0xC0000135) because MSVC link graphs expose import
+# libraries, not DLLs, and Windows only searches the exe dir + PATH.
+function(hades_stage_windows_runtime_dlls target)
+  if(NOT WIN32 OR NOT TARGET "${target}")
+    return()
+  endif()
+
+  # CMake 3.21 introduced $<TARGET_RUNTIME_DLLS>, which walks the link graph
+  # and picks up every SHARED_LIBRARY imported target (LibTorch ships that way).
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.21)
+    add_custom_command(
+      TARGET "${target}"
+      POST_BUILD
+      COMMAND
+        ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_RUNTIME_DLLS:${target}>"
+        "$<TARGET_FILE_DIR:${target}>"
+      COMMAND_EXPAND_LISTS
+      VERBATIM)
+  endif()
+
+  # find_package(Vulkan) only imports the .lib; the loader DLL is not
+  # discoverable via the target. Copy it directly from the SDK so the binary
+  # can resolve vulkan-1.dll at load time.
+  if(DEFINED ENV{VULKAN_SDK})
+    set(_hades_vulkan_dll "$ENV{VULKAN_SDK}/Bin/vulkan-1.dll")
+    if(EXISTS "${_hades_vulkan_dll}")
+      add_custom_command(
+        TARGET "${target}"
+        POST_BUILD
+        COMMAND
+          ${CMAKE_COMMAND} -E copy_if_different
+          "${_hades_vulkan_dll}"
+          "$<TARGET_FILE_DIR:${target}>"
+        VERBATIM)
+    endif()
+  endif()
+endfunction()
+
 if(NOT EMSCRIPTEN)
   find_package(Vulkan REQUIRED)
 endif()
@@ -305,6 +347,7 @@ endif()
 if(APPLE)
   target_link_libraries(${PROJECT_NAME} PRIVATE "-framework AppKit")
 endif()
+hades_stage_windows_runtime_dlls(${PROJECT_NAME})
 endif() # NOT EMSCRIPTEN (editor)
 
 # ---------------------------------------------------------------------------
@@ -334,6 +377,7 @@ else()
   if(TARGET SDL2::SDL2main)
     target_link_libraries(HadesRuntime PRIVATE SDL2::SDL2main)
   endif()
+  hades_stage_windows_runtime_dlls(HadesRuntime)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -358,6 +402,8 @@ if(HADES_ENABLE_HNE_TRAINING AND TARGET hne_training)
   target_link_libraries(hades_tests PRIVATE hne_training)
   target_compile_definitions(hades_tests PRIVATE HADES_HAS_HNE_TRAINING=1)
 endif()
+
+hades_stage_windows_runtime_dlls(hades_tests)
 
 enable_testing()
 include(GoogleTest)
