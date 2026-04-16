@@ -1,9 +1,11 @@
 #include "log.hpp"
 
+#include <array>
 #include <cstdarg>
 #include <cstdio>
 #include <ctime>
 #include <mutex>
+#include <string>
 #include <system_error>
 
 namespace hades
@@ -40,7 +42,28 @@ namespace hades
         return "INFO";
       }
 
-      void write_timestamp(FILE *stream)
+      // Format (fmt, args) into a std::string at the call site. Doing this at
+      // the public API entry point keeps printf-style varargs from flowing
+      // through any helper's format-string parameter downstream — the internal
+      // emitters only see an already-rendered message. This also sidesteps
+      // CodeQL's cpp/tainted-format-string false positives on variadic
+      // forwarding chains.
+      std::string format_message(const char *fmt, std::va_list args)
+      {
+        std::va_list probe;
+        va_copy(probe, args);
+        const int needed = std::vsnprintf(nullptr, 0, fmt, probe);
+        va_end(probe);
+        if (needed <= 0)
+        {
+          return {};
+        }
+        std::string result(static_cast<std::size_t>(needed), '\0');
+        std::vsnprintf(result.data(), static_cast<std::size_t>(needed) + 1, fmt, args);
+        return result;
+      }
+
+      std::string timestamp_prefix()
       {
         const std::time_t now = std::time(nullptr);
         std::tm tm{};
@@ -49,51 +72,48 @@ namespace hades
 #else
         localtime_r(&now, &tm);
 #endif
-        std::fprintf(stream, "[%04d-%02d-%02d %02d:%02d:%02d] ",
-                     tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
-                     tm.tm_hour, tm.tm_min, tm.tm_sec);
+        std::array<char, 32> buffer{};
+        const int written = std::snprintf(
+            buffer.data(), buffer.size(),
+            "[%04d-%02d-%02d %02d:%02d:%02d] ",
+            tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+            tm.tm_hour, tm.tm_min, tm.tm_sec);
+        if (written <= 0)
+        {
+          return {};
+        }
+        return std::string(buffer.data(), static_cast<std::size_t>(written));
       }
 
-      void write_va(Level level, const char *tag, const char *fmt, std::va_list args)
+      // Emit an already-formatted message. No format-string machinery from
+      // here on: every write is a plain fputs of a constructed std::string.
+      void emit(Level level, const char *tag, const std::string &message)
       {
-        std::va_list argsCopy;
-        va_copy(argsCopy, args);
+        std::string line;
+        line.reserve(message.size() + 32);
+        line.push_back('[');
+        line.append(level_label(level));
+        line.push_back(']');
+        if (tag != nullptr)
+        {
+          line.push_back('[');
+          line.append(tag);
+          line.push_back(']');
+        }
+        line.push_back(' ');
+        line.append(message);
+        line.push_back('\n');
 
-        if (tag)
-        {
-          std::fprintf(stderr, "[%s][%s] ", level_label(level), tag);
-        }
-        else
-        {
-          std::fprintf(stderr, "[%s] ", level_label(level));
-        }
-        std::vfprintf(stderr, fmt, args);
-        std::fprintf(stderr, "\n");
+        std::fputs(line.c_str(), stderr);
 
         std::lock_guard<std::mutex> lock(file_mutex());
         FILE *fileStream = file_handle();
         if (fileStream != nullptr)
         {
-          write_timestamp(fileStream);
-          if (tag)
-          {
-            std::fprintf(fileStream, "[%s][%s] ", level_label(level), tag);
-          }
-          else
-          {
-            std::fprintf(fileStream, "[%s] ", level_label(level));
-          }
-          std::vfprintf(fileStream, fmt, argsCopy);
-          std::fprintf(fileStream, "\n");
+          const std::string prefixed = timestamp_prefix() + line;
+          std::fputs(prefixed.c_str(), fileStream);
           std::fflush(fileStream);
         }
-
-        va_end(argsCopy);
-      }
-
-      void write_no_tag(Level level, const char *fmt, std::va_list args)
-      {
-        write_va(level, nullptr, fmt, args);
       }
     }
 
@@ -111,11 +131,14 @@ namespace hades
       handle = std::fopen(logPath.string().c_str(), "w");
       if (handle == nullptr)
       {
-        std::fprintf(stderr, "[WARNING] Failed to open log file: %s\n", logPath.string().c_str());
+        const std::string warning =
+            "[WARNING] Failed to open log file: " + logPath.string() + "\n";
+        std::fputs(warning.c_str(), stderr);
         return false;
       }
-      write_timestamp(handle);
-      std::fprintf(handle, "[INFO] hades log opened at %s\n", logPath.string().c_str());
+      const std::string header =
+          timestamp_prefix() + "[INFO] hades log opened at " + logPath.string() + "\n";
+      std::fputs(header.c_str(), handle);
       std::fflush(handle);
       return true;
     }
@@ -124,64 +147,72 @@ namespace hades
     {
       std::va_list args;
       va_start(args, fmt);
-      write_no_tag(Level::Debug, fmt, args);
+      const std::string message = format_message(fmt, args);
       va_end(args);
+      emit(Level::Debug, nullptr, message);
     }
 
     void info(const char *fmt, ...)
     {
       std::va_list args;
       va_start(args, fmt);
-      write_no_tag(Level::Info, fmt, args);
+      const std::string message = format_message(fmt, args);
       va_end(args);
+      emit(Level::Info, nullptr, message);
     }
 
     void warn(const char *fmt, ...)
     {
       std::va_list args;
       va_start(args, fmt);
-      write_no_tag(Level::Warning, fmt, args);
+      const std::string message = format_message(fmt, args);
       va_end(args);
+      emit(Level::Warning, nullptr, message);
     }
 
     void error(const char *fmt, ...)
     {
       std::va_list args;
       va_start(args, fmt);
-      write_no_tag(Level::Error, fmt, args);
+      const std::string message = format_message(fmt, args);
       va_end(args);
+      emit(Level::Error, nullptr, message);
     }
 
     void debug(const char *tag, const char *fmt, ...)
     {
       std::va_list args;
       va_start(args, fmt);
-      write_va(Level::Debug, tag, fmt, args);
+      const std::string message = format_message(fmt, args);
       va_end(args);
+      emit(Level::Debug, tag, message);
     }
 
     void info(const char *tag, const char *fmt, ...)
     {
       std::va_list args;
       va_start(args, fmt);
-      write_va(Level::Info, tag, fmt, args);
+      const std::string message = format_message(fmt, args);
       va_end(args);
+      emit(Level::Info, tag, message);
     }
 
     void warn(const char *tag, const char *fmt, ...)
     {
       std::va_list args;
       va_start(args, fmt);
-      write_va(Level::Warning, tag, fmt, args);
+      const std::string message = format_message(fmt, args);
       va_end(args);
+      emit(Level::Warning, tag, message);
     }
 
     void error(const char *tag, const char *fmt, ...)
     {
       std::va_list args;
       va_start(args, fmt);
-      write_va(Level::Error, tag, fmt, args);
+      const std::string message = format_message(fmt, args);
       va_end(args);
+      emit(Level::Error, tag, message);
     }
   }
 }
