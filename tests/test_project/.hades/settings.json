@@ -1,23 +1,25 @@
 {
   "editor": {
     "sceneCamera": {
-      "distance": 39.44020080566406,
-      "pitchDegrees": -46.06504821777344,
+      "distance": 25.847929000854492,
+      "pitchDegrees": -41.31504821777344,
       "targetX": 8.454989433288574,
       "targetY": 0.0,
       "targetZ": -2.976780652999878,
-      "yawDegrees": -5.950042247772217
+      "yawDegrees": -31.85003662109375
     },
     "showDebugInfo": false
   },
   "export": {
     "linux": {
+      "enableDebugBuild": false,
       "enableHadesAPI": false,
       "enableHeadless": false,
       "outputPath": "",
       "projectName": "test_project"
     },
     "macOS": {
+      "enableDebugBuild": false,
       "enableHadesAPI": false,
       "enableHeadless": false,
       "outputPath": "/Users/adriannenu/Desktop/asdasd/",
@@ -25,12 +27,14 @@
     },
     "selectedPlatform": 0,
     "web": {
+      "enableDebugBuild": false,
       "enableHadesAPI": false,
       "enableHeadless": false,
       "outputPath": "/Users/adriannenu/Desktop/web/",
       "projectName": "test_project"
     },
     "windows": {
+      "enableDebugBuild": false,
       "enableHadesAPI": false,
       "enableHeadless": false,
       "outputPath": "",
@@ -43,7 +47,7 @@
   "plugins": {
     "debug": false,
     "entities": true,
-    "export": true,
+    "export": false,
     "neural-training": true,
     "properties": true,
     "workspace": true,

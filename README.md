@@ -14,7 +14,16 @@ Educational and experimental. Also designed for ML/RL training through a headles
 
 ## Features
 
-![editor](assets/editor.png)
+![editor](assets/editor.jpg)
+
+![scripts](assets/scripts.jpg)
+
+![export](assets/export.jpg)
+
+![neural](assets/neural.jpg)
+
+![workspace](assets/workspace.jpg)
+
 
 **Rendering** — Vulkan renderer with swapchain, frame sync, and validation layers; ImGui with docking/multi-viewport; software-rasterised model preview; vector-based 3D text.
 

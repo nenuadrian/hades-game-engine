@@ -1,22 +1,7 @@
 [
   {
     "directory": "/Users/adriannenu/Desktop/hades-game-engine/tests/test_project",
-    "file": "/Users/adriannenu/Desktop/hades-game-engine/tests/test_project/ArrowMovement.cpp",
-    "arguments": ["/usr/bin/c++", "-std=c++20", "-I/Users/adriannenu/Desktop/hades-game-engine/src", "-I/Users/adriannenu/Desktop/hades-game-engine/lib/hades-neural-engine/include", "-I/Users/adriannenu/Desktop/hades-game-engine/build/_deps/nlohmann_json-src/single_include/", "-DHADES_HAS_HNE_INFERENCE=1", "-c", "/Users/adriannenu/Desktop/hades-game-engine/tests/test_project/ArrowMovement.cpp"]
-  },
-  {
-    "directory": "/Users/adriannenu/Desktop/hades-game-engine/tests/test_project",
-    "file": "/Users/adriannenu/Desktop/hades-game-engine/tests/test_project/Jump.cpp",
-    "arguments": ["/usr/bin/c++", "-std=c++20", "-I/Users/adriannenu/Desktop/hades-game-engine/src", "-I/Users/adriannenu/Desktop/hades-game-engine/lib/hades-neural-engine/include", "-I/Users/adriannenu/Desktop/hades-game-engine/build/_deps/nlohmann_json-src/single_include/", "-DHADES_HAS_HNE_INFERENCE=1", "-c", "/Users/adriannenu/Desktop/hades-game-engine/tests/test_project/Jump.cpp"]
-  },
-  {
-    "directory": "/Users/adriannenu/Desktop/hades-game-engine/tests/test_project",
-    "file": "/Users/adriannenu/Desktop/hades-game-engine/tests/test_project/ClickDetection.cpp",
-    "arguments": ["/usr/bin/c++", "-std=c++20", "-I/Users/adriannenu/Desktop/hades-game-engine/src", "-I/Users/adriannenu/Desktop/hades-game-engine/lib/hades-neural-engine/include", "-I/Users/adriannenu/Desktop/hades-game-engine/build/_deps/nlohmann_json-src/single_include/", "-DHADES_HAS_HNE_INFERENCE=1", "-c", "/Users/adriannenu/Desktop/hades-game-engine/tests/test_project/ClickDetection.cpp"]
-  },
-  {
-    "directory": "/Users/adriannenu/Desktop/hades-game-engine/tests/test_project",
-    "file": "/Users/adriannenu/Desktop/hades-game-engine/tests/test_project/WorldLoader.cpp",
-    "arguments": ["/usr/bin/c++", "-std=c++20", "-I/Users/adriannenu/Desktop/hades-game-engine/src", "-I/Users/adriannenu/Desktop/hades-game-engine/lib/hades-neural-engine/include", "-I/Users/adriannenu/Desktop/hades-game-engine/build/_deps/nlohmann_json-src/single_include/", "-DHADES_HAS_HNE_INFERENCE=1", "-c", "/Users/adriannenu/Desktop/hades-game-engine/tests/test_project/WorldLoader.cpp"]
+    "file": "/Users/adriannenu/Desktop/hades-game-engine/tests/test_project/PoleBalance.cpp",
+    "arguments": ["/usr/bin/c++", "-std=c++20", "-I/Users/adriannenu/Desktop/hades-game-engine/src", "-I/Users/adriannenu/Desktop/hades-game-engine/lib/hades-neural-engine/include", "-I/Users/adriannenu/Desktop/hades-game-engine/build/_deps/nlohmann_json-src/single_include/", "-DHADES_HAS_HNE_INFERENCE=1", "-c", "/Users/adriannenu/Desktop/hades-game-engine/tests/test_project/PoleBalance.cpp"]
   }
 ]
