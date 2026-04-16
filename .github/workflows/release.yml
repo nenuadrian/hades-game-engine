@@ -95,13 +95,25 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install LibTorch (via pip)
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+
       - name: Install dependencies (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             libglu1-mesa-dev freeglut3-dev mesa-common-dev \
-            xorg-dev libvulkan-dev vulkan-tools
+            xorg-dev libvulkan-dev vulkan-tools \
+            libcurl4-openssl-dev
 
       - name: Setup Vulkan SDK (Windows)
         if: matrix.os == 'windows-latest'
@@ -110,6 +122,19 @@ jobs:
           vulkan-query-version: 1.4.304.1
           vulkan-components: Vulkan-Headers, Vulkan-Loader
           vulkan-use-cache: true
+
+      - name: Install CURL (Windows, via vcpkg)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install curl:x64-windows
+          "CMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            | Out-File -FilePath $env:GITHUB_ENV -Append
+          "VCPKG_TARGET_TRIPLET=x64-windows" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Install CURL (macOS)
+        if: matrix.os == 'macos-latest'
+        run: brew install curl
 
       - name: Install Vulkan SDK (macOS)
         if: matrix.os == 'macos-latest'
