@@ -177,6 +177,41 @@ jobs:
       - name: Build
         run: cmake --build "${{ github.workspace }}/build" --config ${{ env.BUILD_TYPE }}
 
+      # Stage LibTorch + Vulkan loader DLLs next to the test executable.
+      # CMake's $<TARGET_RUNTIME_DLLS> walk can't resolve every torch DLL
+      # (fbgemm, asmjit, libiomp5md, etc.) because TorchConfig.cmake doesn't
+      # always expose them as proper imported SHARED_LIBRARY targets. Copying
+      # the whole torch/lib folder ensures hades_tests.exe can load every
+      # transitive dependency at ctest time.
+      - name: Stage runtime DLLs for tests (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $buildDir = "${{ github.workspace }}/build"
+          $testDir = Join-Path $buildDir "Release"
+          if (-not (Test-Path $testDir)) {
+            throw "Expected test binary directory not found: $testDir"
+          }
+
+          $torchLib = python -c "import os, torch; print(os.path.join(os.path.dirname(torch.__file__), 'lib'))"
+          if (-not $torchLib -or -not (Test-Path $torchLib)) {
+            throw "torch lib dir not found (got '$torchLib')"
+          }
+          $copied = 0
+          Get-ChildItem -Path $torchLib -Filter "*.dll" | ForEach-Object {
+            Copy-Item $_.FullName -Destination $testDir -Force
+            $copied++
+          }
+          Write-Host "Copied $copied torch DLLs from $torchLib to $testDir"
+
+          if ($env:VULKAN_SDK) {
+            $vulkanDll = Get-ChildItem -Path $env:VULKAN_SDK -Filter "vulkan-1.dll" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($vulkanDll) {
+              Copy-Item $vulkanDll.FullName -Destination $testDir -Force
+              Write-Host "Copied Vulkan loader from $($vulkanDll.FullName) to $testDir"
+            }
+          }
+
       - name: Test
         working-directory: ${{ github.workspace }}/build
         run: ctest --build-config ${{ env.BUILD_TYPE }} --output-on-failure
