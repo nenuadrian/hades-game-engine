@@ -135,17 +135,13 @@ namespace hades
     selectedExportPlatform_ = ExportPlatform::Windows;
   #endif
     exportPlatformSettings_ = {};
+    exportPlatformBuildResults_ = {};
     if (exportBuildThread_.joinable())
     {
       exportBuildThread_.join();
     }
     exportBuildInProgress_ = false;
     exportBuildState_.reset();
-    exportBuildLog_.clear();
-    exportBuildLogBuffer_.clear();
-    exportBuildError_.clear();
-    exportBuildSucceeded_ = false;
-    exportBuildFinished_ = false;
   }
 
   void Editor::log_message(DebugMessageLevel level, const std::string &text)
@@ -669,6 +665,7 @@ namespace hades
       target.outputPath = source.outputPathBuffer.data();
       target.enableHeadless = source.enableHeadless;
       target.enableHadesAPI = source.enableHadesAPI;
+      target.enableDebugBuild = source.enableDebugBuild;
       return target;
     };
 
@@ -717,6 +714,7 @@ namespace hades
       copy_to_buffer(source.outputPath, target.outputPathBuffer);
       target.enableHeadless = source.enableHeadless;
       target.enableHadesAPI = source.enableHadesAPI;
+      target.enableDebugBuild = source.enableDebugBuild;
     };
 
     state.showDebugInfo = settings.showDebugInfo;
@@ -740,11 +738,7 @@ namespace hades
     // Export build output is runtime-only; never keep it across workspace restore.
     exportBuildInProgress_ = false;
     exportBuildState_.reset();
-    exportBuildLog_.clear();
-    exportBuildLogBuffer_.clear();
-    exportBuildError_.clear();
-    exportBuildSucceeded_ = false;
-    exportBuildFinished_ = false;
+    exportPlatformBuildResults_ = {};
 
     for (const auto &plugin : plugins_)
     {

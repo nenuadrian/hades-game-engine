@@ -10,6 +10,8 @@
 #include <thread>
 #include <vector>
 
+#include <fstream>
+
 #include "imgui.h"
 #include "native_dialogs.hpp"
 #include "engine/core/ecs/scene_serializer.hpp"
@@ -70,10 +72,22 @@ namespace
     return "Unknown";
   }
 
-  void append_log(hades::Editor::ExportBuildState &state, const std::string &text)
+  // File handle for the on-disk build log. Writes happen under state.mutex so
+  // all appenders see a consistent ordering.
+  struct BuildLogFile
+  {
+    std::ofstream stream;
+  };
+
+  void append_log(hades::Editor::ExportBuildState &state, const std::string &text, BuildLogFile *file = nullptr)
   {
     std::lock_guard<std::mutex> lock(state.mutex);
     state.log += text;
+    if (file != nullptr && file->stream.is_open())
+    {
+      file->stream << text;
+      file->stream.flush();
+    }
   }
 
   void sync_log_buffer(const std::string &source, std::vector<char> &buffer)
@@ -98,24 +112,26 @@ namespace
     }
   }
 
-  // Run a subprocess and stream its output line-by-line into the shared log.
-  // Returns the exit code (-1 if the process failed to launch).
+  // Run a subprocess and stream its output line-by-line into the shared log
+  // (and the build.log file if one is provided). Returns the exit code, or -1
+  // if the process failed to launch.
   int run_streaming(
       hades::Editor::ExportBuildState &state,
-      const std::vector<std::string> &args)
+      const std::vector<std::string> &args,
+      BuildLogFile *logFile = nullptr)
   {
     hades::Subprocess proc;
     std::string startError;
     if (!proc.start(args, {}, &startError))
     {
-      append_log(state, "Failed to launch: " + startError + "\n");
+      append_log(state, "Failed to launch: " + startError + "\n", logFile);
       return -1;
     }
 
     std::string line;
     while (proc.read_line(line))
     {
-      append_log(state, line + "\n");
+      append_log(state, line + "\n", logFile);
     }
 
     return proc.wait_for_exit();
@@ -128,7 +144,8 @@ namespace
       const std::string &projectName,
       hades::Editor::ExportPlatform platform,
       bool enableHeadless,
-      bool enableHadesAPI)
+      bool enableHadesAPI,
+      bool enableDebugBuild)
   {
     const std::string sourceDir = hades::build_config::cmake_source_dir;
     const std::string cmakeCommand = hades::build_config::cmake_command;
@@ -136,6 +153,27 @@ namespace
     const bool isWeb = (platform == hades::Editor::ExportPlatform::Web);
     const std::filesystem::path buildDir = outputDir / (isWeb ? "build-web" : "build");
     const std::filesystem::path stageDir = outputDir / projectName;
+    const std::string buildType = enableDebugBuild ? "RelWithDebInfo" : "Release";
+
+    // Open the per-build log file alongside the CMake build directory so users
+    // can inspect logs after the editor window closes. Failure to open is
+    // non-fatal — the in-memory log still works.
+    std::error_code logEc;
+    std::filesystem::create_directories(buildDir, logEc);
+    BuildLogFile logFile;
+    const std::filesystem::path buildLogPath = buildDir / "build.log";
+    logFile.stream.open(buildLogPath, std::ios::trunc);
+    {
+      std::lock_guard<std::mutex> lock(state->mutex);
+      state->buildLogPath = buildLogPath;
+    }
+    if (logFile.stream.is_open())
+    {
+      append_log(*state, "Build log: " + buildLogPath.string() + "\n", &logFile);
+    }
+    append_log(*state, "Configuration: " + buildType +
+                           (enableDebugBuild ? " (debug build, verbose)" : "") + "\n",
+               &logFile);
 
     auto fail = [&](const std::string &msg)
     {
@@ -171,42 +209,52 @@ namespace
       const std::string webAssetDir = hadesDataSrc.string();
 
       // Step 1: CMake configure via emcmake.
-      append_log(*state, "=== Configuring (emcmake cmake) ===\n");
+      append_log(*state, "=== Configuring (emcmake cmake) ===\n", &logFile);
       {
-        int exitCode = run_streaming(*state,
-            {emcmake, "cmake",
-             "-S", sourceDir,
-             "-B", buildDir.string(),
-             "-DCMAKE_BUILD_TYPE=Release",
-             "-DBUILD_SHARED_LIBS=OFF",
-             "-DHADES_WEB_ASSET_DIR=" + webAssetDir});
+        std::vector<std::string> configureArgs = {
+            emcmake, "cmake",
+            "-S", sourceDir,
+            "-B", buildDir.string(),
+            "-DCMAKE_BUILD_TYPE=" + buildType,
+            "-DBUILD_SHARED_LIBS=OFF",
+            "-DHADES_WEB_ASSET_DIR=" + webAssetDir};
+        if (enableDebugBuild)
+        {
+          configureArgs.push_back("-DCMAKE_VERBOSE_MAKEFILE=ON");
+        }
+        int exitCode = run_streaming(*state, configureArgs, &logFile);
         if (exitCode != 0)
         {
           fail("Emscripten CMake configure failed (exit code " + std::to_string(exitCode) + "). "
                "Is the Emscripten SDK installed and in your PATH?");
           return;
         }
-        append_log(*state, "\n");
+        append_log(*state, "\n", &logFile);
       }
 
       // Step 2: Build.
-      append_log(*state, "=== Building HadesRuntime (WebAssembly) ===\n");
+      append_log(*state, "=== Building HadesRuntime (WebAssembly) ===\n", &logFile);
       {
-        int exitCode = run_streaming(*state,
-            {cmakeCommand,
-             "--build", buildDir.string(),
-             "--target", "HadesRuntime",
-             "--config", "Release"});
+        std::vector<std::string> buildArgs = {
+            cmakeCommand,
+            "--build", buildDir.string(),
+            "--target", "HadesRuntime",
+            "--config", buildType};
+        if (enableDebugBuild)
+        {
+          buildArgs.push_back("--verbose");
+        }
+        int exitCode = run_streaming(*state, buildArgs, &logFile);
         if (exitCode != 0)
         {
           fail("Web build failed (exit code " + std::to_string(exitCode) + ").");
           return;
         }
-        append_log(*state, "\n");
+        append_log(*state, "\n", &logFile);
       }
 
       // Step 3: Package web output.
-      append_log(*state, "=== Packaging (Web) ===\n");
+      append_log(*state, "=== Packaging (Web) ===\n", &logFile);
 
       std::error_code ec;
       std::filesystem::create_directories(stageDir, ec);
@@ -231,7 +279,7 @@ namespace
                                      std::filesystem::copy_options::overwrite_existing, ec);
           if (!ec)
           {
-            append_log(*state, "Copied " + destName + "\n");
+            append_log(*state, "Copied " + destName + "\n", &logFile);
           }
           if (ext == ".wasm")
           {
@@ -281,11 +329,11 @@ namespace
         }
       }
 #endif
-      append_log(*state, "Created server script.\n");
+      append_log(*state, "Created server script.\n", &logFile);
 
-      append_log(*state, "\nWeb export complete.\n");
-      append_log(*state, "Output directory: " + stageDir.string() + "\n");
-      append_log(*state, "Run the serve script and open http://localhost:8000 in a WebGPU-capable browser.\n");
+      append_log(*state, "\nWeb export complete.\n", &logFile);
+      append_log(*state, "Output directory: " + stageDir.string() + "\n", &logFile);
+      append_log(*state, "Run the serve script and open http://localhost:8000 in a WebGPU-capable browser.\n", &logFile);
       {
         std::lock_guard<std::mutex> lock(state->mutex);
         state->succeeded = true;
@@ -300,45 +348,54 @@ namespace
     // Force BUILD_SHARED_LIBS=OFF so all dependencies are statically linked,
     // producing a self-contained binary with no external dylib/so dependencies
     // that would need to be bundled alongside it.
-    append_log(*state, "=== Configuring (cmake) ===\n");
+    append_log(*state, "=== Configuring (cmake) ===\n", &logFile);
     {
       std::vector<std::string> configureArgs = {
           cmakeCommand,
           "-S", sourceDir,
           "-B", buildDir.string(),
-          "-DCMAKE_BUILD_TYPE=Release",
+          "-DCMAKE_BUILD_TYPE=" + buildType,
           "-DBUILD_SHARED_LIBS=OFF"};
       if (enableHadesAPI)
       {
         configureArgs.push_back("-DHADES_ENABLE_API=ON");
       }
-      int exitCode = run_streaming(*state, configureArgs);
+      if (enableDebugBuild)
+      {
+        configureArgs.push_back("-DCMAKE_VERBOSE_MAKEFILE=ON");
+      }
+      int exitCode = run_streaming(*state, configureArgs, &logFile);
       if (exitCode != 0)
       {
         fail("CMake configure failed (exit code " + std::to_string(exitCode) + ").");
         return;
       }
-      append_log(*state, "\n");
+      append_log(*state, "\n", &logFile);
     }
 
     // Step 2: CMake build.
-    append_log(*state, "=== Building HadesRuntime ===\n");
+    append_log(*state, "=== Building HadesRuntime ===\n", &logFile);
     {
-      int exitCode = run_streaming(*state,
-          {cmakeCommand,
-           "--build", buildDir.string(),
-           "--target", "HadesRuntime",
-           "--config", "Release"});
+      std::vector<std::string> buildArgs = {
+          cmakeCommand,
+          "--build", buildDir.string(),
+          "--target", "HadesRuntime",
+          "--config", buildType};
+      if (enableDebugBuild)
+      {
+        buildArgs.push_back("--verbose");
+      }
+      int exitCode = run_streaming(*state, buildArgs, &logFile);
       if (exitCode != 0)
       {
         fail("Build failed (exit code " + std::to_string(exitCode) + ").");
         return;
       }
-      append_log(*state, "\n");
+      append_log(*state, "\n", &logFile);
     }
 
     // Step 3: Package the output.
-    append_log(*state, "=== Packaging ===\n");
+    append_log(*state, "=== Packaging ===\n", &logFile);
 
     std::error_code ec;
     std::filesystem::create_directories(stageDir, ec);
@@ -388,7 +445,7 @@ namespace
         fail("Failed to copy runtime binary: " + ec.message());
         return;
       }
-      append_log(*state, "Copied runtime binary.\n");
+      append_log(*state, "Copied runtime binary.\n", &logFile);
 
       // Make it executable.
       std::filesystem::permissions(macosDir / binaryName,
@@ -424,7 +481,7 @@ namespace
                        projectName.c_str(), binaryName.c_str(), projectName.c_str());
           std::fclose(plist);
         }
-        append_log(*state, "Created Info.plist.\n");
+        append_log(*state, "Created Info.plist.\n", &logFile);
       }
 
       // Copy project data alongside the binary (inside MacOS dir so --project . works).
@@ -432,7 +489,7 @@ namespace
       if (std::filesystem::exists(hadesDataSrc))
       {
         copy_directory_recursive(hadesDataSrc, macosDir / ".hades", nullptr);
-        append_log(*state, "Copied project data.\n");
+        append_log(*state, "Copied project data.\n", &logFile);
       }
 
       // Copy assets.
@@ -440,10 +497,15 @@ namespace
       if (std::filesystem::exists(assetsSrc))
       {
         copy_directory_recursive(assetsSrc, macosDir / "assets", nullptr);
-        append_log(*state, "Copied assets.\n");
+        append_log(*state, "Copied assets.\n", &logFile);
       }
 
-      // Create a launcher script at the top level for convenience.
+      // `.command` scripts double-click into Terminal, so stderr is visible —
+      // useful both for debug builds and for diagnosing startup failures.
+      // Regular double-clicks on the .app still work: the runtime detects the
+      // bundled .hades directory next to the executable on its own.
+      const char *debugExport = enableDebugBuild ? "export HADES_DEBUG=1\n" : "";
+
       {
         const std::filesystem::path launcherPath = stageDir / ("Run " + projectName + ".command");
         FILE *launcher = std::fopen(launcherPath.string().c_str(), "w");
@@ -451,9 +513,10 @@ namespace
         {
           std::fprintf(launcher,
                        "#!/bin/bash\n"
-                       "cd \"$(dirname \"$0\")\"\n"
-                       "open \"%s.app\"\n",
-                       projectName.c_str());
+                       "%s"
+                       "cd \"$(dirname \"$0\")/%s.app/Contents/MacOS\"\n"
+                       "./%s --project .\n",
+                       debugExport, projectName.c_str(), binaryName.c_str());
           std::fclose(launcher);
           std::filesystem::permissions(launcherPath,
                                        std::filesystem::perms::owner_exec |
@@ -471,16 +534,17 @@ namespace
         {
           std::fprintf(headless,
                        "#!/bin/bash\n"
+                       "%s"
                        "cd \"$(dirname \"$0\")/%s.app/Contents/MacOS\"\n"
                        "./%s --project . --headless\n",
-                       projectName.c_str(), binaryName.c_str());
+                       debugExport, projectName.c_str(), binaryName.c_str());
           std::fclose(headless);
           std::filesystem::permissions(headlessPath,
                                        std::filesystem::perms::owner_exec |
                                            std::filesystem::perms::group_exec,
                                        std::filesystem::perm_options::add, ec);
         }
-        append_log(*state, "Created headless launcher script.\n");
+        append_log(*state, "Created headless launcher script.\n", &logFile);
       }
 
       // Create a HadesAPI launcher script if enabled.
@@ -492,19 +556,20 @@ namespace
         {
           std::fprintf(apiLauncher,
                        "#!/bin/bash\n"
+                       "%s"
                        "cd \"$(dirname \"$0\")/%s.app/Contents/MacOS\"\n"
                        "./%s --project . --api --api-port 7777\n",
-                       projectName.c_str(), binaryName.c_str());
+                       debugExport, projectName.c_str(), binaryName.c_str());
           std::fclose(apiLauncher);
           std::filesystem::permissions(apiPath,
                                        std::filesystem::perms::owner_exec |
                                            std::filesystem::perms::group_exec,
                                        std::filesystem::perm_options::add, ec);
         }
-        append_log(*state, "Created HadesAPI launcher script.\n");
+        append_log(*state, "Created HadesAPI launcher script.\n", &logFile);
       }
 
-      append_log(*state, "Created macOS app bundle: " + appBundle.string() + "\n");
+      append_log(*state, "Created macOS app bundle: " + appBundle.string() + "\n", &logFile);
     }
     else
 #endif
@@ -519,7 +584,7 @@ namespace
         fail("Failed to copy runtime binary: " + ec.message());
         return;
       }
-      append_log(*state, "Copied runtime binary.\n");
+      append_log(*state, "Copied runtime binary.\n", &logFile);
 
 #ifndef _WIN32
       // Make executable on Linux.
@@ -535,7 +600,7 @@ namespace
       if (std::filesystem::exists(hadesDataSrc))
       {
         copy_directory_recursive(hadesDataSrc, stageDir / ".hades", nullptr);
-        append_log(*state, "Copied project data.\n");
+        append_log(*state, "Copied project data.\n", &logFile);
       }
 
       // Copy assets.
@@ -543,7 +608,7 @@ namespace
       if (std::filesystem::exists(assetsSrc))
       {
         copy_directory_recursive(assetsSrc, stageDir / "assets", nullptr);
-        append_log(*state, "Copied assets.\n");
+        append_log(*state, "Copied assets.\n", &logFile);
       }
 
 #ifdef _WIN32
@@ -564,6 +629,7 @@ namespace
 
       // Create a launcher script.
 #ifdef _WIN32
+      const char *debugExportWin = enableDebugBuild ? "set HADES_DEBUG=1\r\n" : "";
       {
         const std::filesystem::path launcherPath = stageDir / (projectName + ".bat");
         FILE *launcher = std::fopen(launcherPath.string().c_str(), "w");
@@ -571,9 +637,10 @@ namespace
         {
           std::fprintf(launcher,
                        "@echo off\r\n"
+                       "%s"
                        "cd /d \"%%~dp0\"\r\n"
                        "%s --project .\r\n",
-                       binaryName.c_str());
+                       debugExportWin, binaryName.c_str());
           std::fclose(launcher);
         }
       }
@@ -585,12 +652,13 @@ namespace
         {
           std::fprintf(headless,
                        "@echo off\r\n"
+                       "%s"
                        "cd /d \"%%~dp0\"\r\n"
                        "%s --project . --headless\r\n",
-                       binaryName.c_str());
+                       debugExportWin, binaryName.c_str());
           std::fclose(headless);
         }
-        append_log(*state, "Created headless launcher script.\n");
+        append_log(*state, "Created headless launcher script.\n", &logFile);
       }
       if (enableHadesAPI)
       {
@@ -600,14 +668,16 @@ namespace
         {
           std::fprintf(apiLauncher,
                        "@echo off\r\n"
+                       "%s"
                        "cd /d \"%%~dp0\"\r\n"
                        "%s --project . --api --api-port 7777\r\n",
-                       binaryName.c_str());
+                       debugExportWin, binaryName.c_str());
           std::fclose(apiLauncher);
         }
-        append_log(*state, "Created HadesAPI launcher script.\n");
+        append_log(*state, "Created HadesAPI launcher script.\n", &logFile);
       }
 #else
+      const char *debugExportUnix = enableDebugBuild ? "export HADES_DEBUG=1\n" : "";
       {
         const std::filesystem::path launcherPath = stageDir / ("run_" + projectName + ".sh");
         FILE *launcher = std::fopen(launcherPath.string().c_str(), "w");
@@ -615,9 +685,10 @@ namespace
         {
           std::fprintf(launcher,
                        "#!/bin/bash\n"
+                       "%s"
                        "cd \"$(dirname \"$0\")\"\n"
                        "./%s --project .\n",
-                       binaryName.c_str());
+                       debugExportUnix, binaryName.c_str());
           std::fclose(launcher);
           std::filesystem::permissions(launcherPath,
                                        std::filesystem::perms::owner_exec |
@@ -633,16 +704,17 @@ namespace
         {
           std::fprintf(headless,
                        "#!/bin/bash\n"
+                       "%s"
                        "cd \"$(dirname \"$0\")\"\n"
                        "./%s --project . --headless\n",
-                       binaryName.c_str());
+                       debugExportUnix, binaryName.c_str());
           std::fclose(headless);
           std::filesystem::permissions(headlessPath,
                                        std::filesystem::perms::owner_exec |
                                            std::filesystem::perms::group_exec,
                                        std::filesystem::perm_options::add, ec);
         }
-        append_log(*state, "Created headless launcher script.\n");
+        append_log(*state, "Created headless launcher script.\n", &logFile);
       }
       if (enableHadesAPI)
       {
@@ -652,24 +724,25 @@ namespace
         {
           std::fprintf(apiLauncher,
                        "#!/bin/bash\n"
+                       "%s"
                        "cd \"$(dirname \"$0\")\"\n"
                        "./%s --project . --api --api-port 7777\n",
-                       binaryName.c_str());
+                       debugExportUnix, binaryName.c_str());
           std::fclose(apiLauncher);
           std::filesystem::permissions(apiPath,
                                        std::filesystem::perms::owner_exec |
                                            std::filesystem::perms::group_exec,
                                        std::filesystem::perm_options::add, ec);
         }
-        append_log(*state, "Created HadesAPI launcher script.\n");
+        append_log(*state, "Created HadesAPI launcher script.\n", &logFile);
       }
 #endif
 
-      append_log(*state, "Created game directory: " + stageDir.string() + "\n");
+      append_log(*state, "Created game directory: " + stageDir.string() + "\n", &logFile);
     }
 
-    append_log(*state, "\nExport complete.\n");
-    append_log(*state, "Build directory: " + buildDir.string() + "\n");
+    append_log(*state, "\nExport complete.\n", &logFile);
+    append_log(*state, "Build directory: " + buildDir.string() + "\n", &logFile);
     {
       std::lock_guard<std::mutex> lock(state->mutex);
       state->succeeded = true;
@@ -713,18 +786,22 @@ namespace hades
       }
     }
 
-    // Poll the shared build state for updates.
+    // Poll the shared build state for updates. The running build is owned by
+    // exportBuildingPlatform_, and results are stored on that platform's slot
+    // so switching tabs doesn't swap state between targets.
     if (exportBuildInProgress_ && exportBuildState_)
     {
+      auto &result = exportPlatformBuildResults_[export_platform_index(exportBuildingPlatform_)];
       std::lock_guard<std::mutex> lock(exportBuildState_->mutex);
-      exportBuildLog_ = exportBuildState_->log;
-      sync_log_buffer(exportBuildLog_, exportBuildLogBuffer_);
+      result.log = exportBuildState_->log;
+      result.buildLogPath = exportBuildState_->buildLogPath;
+      sync_log_buffer(result.log, result.logBuffer);
       if (exportBuildState_->finished)
       {
         exportBuildInProgress_ = false;
-        exportBuildFinished_ = true;
-        exportBuildSucceeded_ = exportBuildState_->succeeded;
-        exportBuildError_ = exportBuildState_->error;
+        result.finished = true;
+        result.succeeded = exportBuildState_->succeeded;
+        result.error = exportBuildState_->error;
         if (exportBuildThread_.joinable())
         {
           exportBuildThread_.join();
@@ -846,6 +923,18 @@ namespace hades
         }
       }
 
+      if (ImGui::Checkbox("Debug build (verbose logs, HADES_DEBUG=1)", &platformSettings.enableDebugBuild))
+      {
+        exportSettingsDirty = true;
+      }
+      if (ImGui::IsItemHovered())
+      {
+        ImGui::SetTooltip("Builds with RelWithDebInfo + verbose CMake output.\n"
+                          "Launchers set HADES_DEBUG=1 so the runtime writes\n"
+                          "hades.log next to the executable — useful when the\n"
+                          "exported app fails to start silently.");
+      }
+
       ImGui::Spacing();
       ImGui::Separator();
       ImGui::Spacing();
@@ -855,6 +944,9 @@ namespace hades
       const bool canBuildOnHost = is_current_platform(selectedExportPlatform_);
       const bool canBuild = hasProjectName && hasOutputPath && canBuildOnHost && !exportBuildInProgress_;
 
+      auto &result = exportPlatformBuildResults_[export_platform_index(selectedExportPlatform_)];
+      const bool buildingThisTab = exportBuildInProgress_ && exportBuildingPlatform_ == selectedExportPlatform_;
+
       if (!canBuild)
       {
         ImGui::BeginDisabled();
@@ -863,13 +955,12 @@ namespace hades
       {
         save_worlds(entityManager, componentManager);
 
-        exportBuildLog_.clear();
-        sync_log_buffer(exportBuildLog_, exportBuildLogBuffer_);
-        exportBuildError_.clear();
-        exportBuildSucceeded_ = false;
-        exportBuildFinished_ = false;
-        exportBuildInProgress_ = true;
+        // Reset this tab's prior result before starting the new build.
+        result = ExportPlatformBuildResult{};
+        sync_log_buffer(result.log, result.logBuffer);
 
+        exportBuildInProgress_ = true;
+        exportBuildingPlatform_ = selectedExportPlatform_;
         exportBuildState_ = std::make_shared<ExportBuildState>();
 
         const std::filesystem::path outputDir = platformSettings.outputPathBuffer.data();
@@ -878,6 +969,7 @@ namespace hades
         const ExportPlatform platform = selectedExportPlatform_;
         const bool enableHeadless = platformSettings.enableHeadless;
         const bool enableHadesAPI = platformSettings.enableHadesAPI;
+        const bool enableDebugBuild = platformSettings.enableDebugBuild;
 
         auto buildState = exportBuildState_;
         if (exportBuildThread_.joinable())
@@ -885,9 +977,9 @@ namespace hades
           exportBuildThread_.join();
         }
         exportBuildThread_ = std::thread(
-            [buildState, outputDir, workspacePath, projectName, platform, enableHeadless, enableHadesAPI]()
+            [buildState, outputDir, workspacePath, projectName, platform, enableHeadless, enableHadesAPI, enableDebugBuild]()
             {
-              run_export_build(buildState, outputDir, workspacePath, projectName, platform, enableHeadless, enableHadesAPI);
+              run_export_build(buildState, outputDir, workspacePath, projectName, platform, enableHeadless, enableHadesAPI, enableDebugBuild);
             });
       }
       if (!canBuild)
@@ -895,43 +987,53 @@ namespace hades
         ImGui::EndDisabled();
       }
 
-      if (exportBuildInProgress_)
+      if (buildingThisTab)
       {
         ImGui::SameLine();
         ImGui::TextDisabled("Building...");
       }
-      else if (exportBuildFinished_)
+      else if (exportBuildInProgress_)
       {
         ImGui::SameLine();
-        if (exportBuildSucceeded_)
+        ImGui::TextDisabled("(Busy on %s)", platform_label(exportBuildingPlatform_));
+      }
+      else if (result.finished)
+      {
+        ImGui::SameLine();
+        if (result.succeeded)
         {
           ImGui::TextColored(ImVec4(0.4f, 0.85f, 0.4f, 1.0f), "Export succeeded.");
         }
         else
         {
-          ImGui::TextColored(ImVec4(0.88f, 0.42f, 0.42f, 1.0f), "%s", exportBuildError_.c_str());
+          ImGui::TextColored(ImVec4(0.88f, 0.42f, 0.42f, 1.0f), "%s", result.error.c_str());
         }
       }
 
       ImGui::Spacing();
 
-      if (!exportBuildLog_.empty() || exportBuildInProgress_)
+      if (!result.log.empty() || buildingThisTab)
       {
         ImGui::Text("Build Output");
+        if (!result.buildLogPath.empty())
+        {
+          ImGui::SameLine();
+          ImGui::TextDisabled("(%s)", result.buildLogPath.string().c_str());
+        }
         ImGui::BeginChild("BuildLog", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders);
-        if (exportBuildInProgress_ && exportBuildLog_.empty())
+        if (buildingThisTab && result.log.empty())
         {
           ImGui::TextDisabled("Starting build...");
         }
         else
         {
-          if (exportBuildLogBuffer_.empty())
+          if (result.logBuffer.empty())
           {
-            sync_log_buffer(exportBuildLog_, exportBuildLogBuffer_);
+            sync_log_buffer(result.log, result.logBuffer);
           }
           ImGui::InputTextMultiline("##BuildOutputText",
-                                    exportBuildLogBuffer_.data(),
-                                    exportBuildLogBuffer_.size(),
+                                    result.logBuffer.data(),
+                                    result.logBuffer.size(),
                                     ImVec2(-1.0f, -1.0f),
                                     ImGuiInputTextFlags_ReadOnly);
           if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY())

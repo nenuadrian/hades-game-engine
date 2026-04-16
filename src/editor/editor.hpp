@@ -71,6 +71,7 @@ namespace hades
       std::array<char, 256> projectNameBuffer{};
       bool enableHeadless = false;
       bool enableHadesAPI = false;
+      bool enableDebugBuild = false;
     };
 
     struct ExportBuildState
@@ -78,8 +79,21 @@ namespace hades
       std::mutex mutex;
       std::string log;
       std::string error;
+      std::filesystem::path buildLogPath;
       bool finished = false;
       bool succeeded = false;
+    };
+
+    // Per-platform build result, so switching tabs doesn't leak status or logs
+    // from one target onto another.
+    struct ExportPlatformBuildResult
+    {
+      std::string log;
+      std::vector<char> logBuffer;
+      std::string error;
+      std::filesystem::path buildLogPath;
+      bool succeeded = false;
+      bool finished = false;
     };
 
     EditorState state;
@@ -146,15 +160,14 @@ namespace hades
 #else
     ExportPlatform selectedExportPlatform_ = ExportPlatform::Windows;
 #endif
-  std::array<ExportPlatformSettings, 4> exportPlatformSettings_{};
+    std::array<ExportPlatformSettings, 4> exportPlatformSettings_{};
+    std::array<ExportPlatformBuildResult, 4> exportPlatformBuildResults_{};
+    // Only one build runs at a time; this records which platform owns the
+    // currently-running build so status text renders only on that tab.
     bool exportBuildInProgress_ = false;
+    ExportPlatform exportBuildingPlatform_ = ExportPlatform::macOS;
     std::shared_ptr<ExportBuildState> exportBuildState_;
     std::thread exportBuildThread_;
-    std::string exportBuildLog_;
-    std::vector<char> exportBuildLogBuffer_;
-    std::string exportBuildError_;
-    bool exportBuildSucceeded_ = false;
-    bool exportBuildFinished_ = false;
 
     std::filesystem::path pendingWorkspaceDeletePath_;
     std::string workspaceDeleteError_;

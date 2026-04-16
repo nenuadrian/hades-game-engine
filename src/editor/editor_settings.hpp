@@ -13,6 +13,7 @@ namespace hades
     std::string outputPath;
     bool enableHeadless = false;
     bool enableHadesAPI = false;
+    bool enableDebugBuild = false;
   };
 
   struct WorkspaceGamePreviewSettings

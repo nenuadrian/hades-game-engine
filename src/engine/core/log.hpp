@@ -2,6 +2,7 @@
 #define HADES_ENGINE_CORE_LOG_HPP
 
 #include <cstdarg>
+#include <filesystem>
 
 #if defined(__GNUC__) || defined(__clang__)
 #define HADES_PRINTF_FORMAT(fmt, args) __attribute__((format(printf, fmt, args)))
@@ -20,6 +21,12 @@ namespace hades
       Warning,
       Error,
     };
+
+    // Mirror all subsequent log output to the given file path (in addition to
+    // stderr). Intended for exported runtimes launched without a terminal
+    // attached — the file gives users a way to see why startup failed.
+    // Returns true if the file was opened successfully.
+    bool enable_file_logging(const std::filesystem::path &logPath);
 
     void debug(const char *fmt, ...) HADES_PRINTF_FORMAT(1, 2);
     void info(const char *fmt, ...) HADES_PRINTF_FORMAT(1, 2);
