@@ -717,7 +717,7 @@ namespace hades
       ImGui::Spacing();
       ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.22f, 0.11f, 0.10f, 0.90f));
       ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.66f, 0.34f, 0.31f, 0.85f));
-      ImGui::BeginChild("Workspace Status", ImVec2(0.0f, 54.0f), true, ImGuiWindowFlags_AlwaysUseWindowPadding);
+      ImGui::BeginChild("Workspace Status", ImVec2(0.0f, 54.0f), ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
       ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.98f, 0.80f, 0.75f, 1.00f));
       ImGui::TextWrapped("%s", workspaceStatusMessage.c_str());
       ImGui::PopStyleColor();
@@ -780,7 +780,7 @@ namespace hades
 
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.08f, 0.08f, 0.92f));
     ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.18f, 0.15f, 0.15f, 1.00f));
-    ImGui::BeginChild("Recent Workspaces List", ImVec2(0.0f, 0.0f), true, ImGuiWindowFlags_AlwaysUseWindowPadding);
+    ImGui::BeginChild("Recent Workspaces List", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
 
     if (workspaceManager.recent_workspaces().empty())
     {
