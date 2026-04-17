@@ -12,6 +12,11 @@ namespace hades
 {
   WebGPURenderer::~WebGPURenderer()
   {
+    if (meshPipeline_ != nullptr)
+    {
+      meshPipeline_->destroy();
+      meshPipeline_.reset();
+    }
     if (surface_ != nullptr)
     {
       wgpuSurfaceUnconfigure(surface_);
@@ -90,8 +95,28 @@ namespace hades
     SDL_GetWindowSize(window, &width_, &height_);
     configure_surface(width_, height_);
 
+    // Mesh pipeline.
+    meshPipeline_ = std::make_unique<WebGPUMeshPipeline>();
+    WebGPUMeshPipeline::InitInfo mpInfo{};
+    mpInfo.device = device_;
+    mpInfo.queue = queue_;
+    mpInfo.colorFormat = surfaceFormat_;
+    mpInfo.depthFormat = WGPUTextureFormat_Depth24Plus;
+    if (!meshPipeline_->init(mpInfo))
+    {
+      hades::Log::error("webgpu", "WebGPURenderer::init: mesh pipeline init failed");
+      meshPipeline_.reset();
+      return false;
+    }
+
     initialized_ = true;
     return true;
+  }
+
+  void WebGPURenderer::render_scene_to_main(const RenderList &list)
+  {
+    pendingMainScene_ = list;
+    hasPendingMainScene_ = true;
   }
 
   void WebGPURenderer::configure_surface(int width, int height)
@@ -153,20 +178,32 @@ namespace hades
     WGPUCommandEncoderDescriptor encoderDesc{};
     WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(device_, &encoderDesc);
 
-    // Begin a render pass that clears to a dark background.
-    WGPURenderPassColorAttachment colorAttachment{};
-    colorAttachment.view = view;
-    colorAttachment.loadOp = WGPULoadOp_Clear;
-    colorAttachment.storeOp = WGPUStoreOp_Store;
-    colorAttachment.clearValue = {0.1, 0.1, 0.1, 1.0};
+    if (hasPendingMainScene_ && meshPipeline_ != nullptr)
+    {
+      meshPipeline_->drawRenderList(
+          encoder, view,
+          static_cast<uint32_t>(width_),
+          static_cast<uint32_t>(height_),
+          pendingMainScene_);
+      hasPendingMainScene_ = false;
+    }
+    else
+    {
+      // No scene: clear-only pass.
+      WGPURenderPassColorAttachment colorAttachment{};
+      colorAttachment.view = view;
+      colorAttachment.loadOp = WGPULoadOp_Clear;
+      colorAttachment.storeOp = WGPUStoreOp_Store;
+      colorAttachment.clearValue = {0.1, 0.1, 0.1, 1.0};
 
-    WGPURenderPassDescriptor passDesc{};
-    passDesc.colorAttachmentCount = 1;
-    passDesc.colorAttachments = &colorAttachment;
+      WGPURenderPassDescriptor passDesc{};
+      passDesc.colorAttachmentCount = 1;
+      passDesc.colorAttachments = &colorAttachment;
 
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
-    wgpuRenderPassEncoderEnd(pass);
-    wgpuRenderPassEncoderRelease(pass);
+      WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+      wgpuRenderPassEncoderEnd(pass);
+      wgpuRenderPassEncoderRelease(pass);
+    }
 
     // Submit.
     WGPUCommandBufferDescriptor cmdDesc{};

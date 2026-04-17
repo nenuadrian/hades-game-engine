@@ -2,9 +2,12 @@
 #define HADES_ENGINE_RENDERING_VULKAN_HPP
 
 #include <cstddef>
+#include <memory>
+#include <vector>
 #include <vulkan/vulkan.h>
 #include "imgui.h"
 #include "renderer.hpp"
+#include "render_types.hpp"
 
 // #define APP_USE_UNLIMITED_FRAME_RATE
 #ifdef _DEBUG
@@ -22,6 +25,9 @@ namespace hades
     VkImage Backbuffer;
     VkImageView BackbufferView;
     VkFramebuffer Framebuffer;
+    VkImage DepthImage = VK_NULL_HANDLE;
+    VkDeviceMemory DepthMemory = VK_NULL_HANDLE;
+    VkImageView DepthView = VK_NULL_HANDLE;
   };
 
   struct Vulkan_FrameSemaphores
@@ -55,13 +61,30 @@ namespace hades
     Vulkan_Window();
   };
 
+  class VulkanMeshPipeline;
+  class VulkanSceneTargets;
+
   class VulkanRenderer : public Renderer
   {
   private:
     bool vulkan_initialized = false;
     bool window_initialized = false;
     bool imgui_backend_initialized = false;
+    bool mesh_pipeline_initialized = false;
+    bool scene_targets_initialized = false;
     bool vsync_ = true;
+
+    std::unique_ptr<VulkanMeshPipeline> mesh_pipeline_;
+    std::unique_ptr<VulkanSceneTargets> scene_targets_;
+    bool has_pending_main_scene_ = false;
+    RenderList pending_main_scene_;
+    struct PendingTargetRender
+    {
+      SceneTargetHandle handle;
+      RenderList list;
+    };
+    std::vector<PendingTargetRender> pending_target_renders_;
+    uint32_t frame_counter_ = 0;
 
     void destroy();
     bool IsExtensionAvailable(const ImVector<VkExtensionProperties> &properties, const char *extension);
@@ -83,8 +106,8 @@ namespace hades
     void VulkanH_DestroyFrameSemaphores(VkDevice device, Vulkan_FrameSemaphores *fsd, const VkAllocationCallbacks *allocator);
 
   public:
-    VulkanRenderer() = default;
-    explicit VulkanRenderer(bool enableVsync) : vsync_(enableVsync) {}
+    VulkanRenderer();
+    explicit VulkanRenderer(bool enableVsync);
     ~VulkanRenderer() override;
 
     VkAllocationCallbacks *g_Allocator = nullptr;
@@ -110,6 +133,19 @@ namespace hades
     void render_imgui(ImDrawData *draw_data) override;
     void shutdown_imgui_backend() override;
     void present_frame() override;
+
+    void render_scene_to_main(const RenderList &list) override;
+    SceneTargetHandle acquire_scene_target(int width, int height) override;
+    bool resize_scene_target(SceneTargetHandle target, int width, int height) override;
+    void *render_scene_to_target(SceneTargetHandle target, const RenderList &list) override;
+    void release_scene_target(SceneTargetHandle target) override;
+
+  private:
+    VkFormat selectDepthFormat() const;
+    bool createDepthResources(Vulkan_Frame *frame, uint32_t width, uint32_t height);
+    void destroyDepthResources(Vulkan_Frame *frame);
+    void ensureMeshPipelineInitialized();
+    void ensureSceneTargetsInitialized();
   };
 
 }

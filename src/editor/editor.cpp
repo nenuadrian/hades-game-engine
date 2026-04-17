@@ -74,6 +74,11 @@ namespace hades
     {
       exportBuildThread_.join();
     }
+    if (renderer_ != nullptr && sceneViewportTarget_ != kInvalidSceneTarget)
+    {
+      renderer_->release_scene_target(sceneViewportTarget_);
+      sceneViewportTarget_ = kInvalidSceneTarget;
+    }
     native_menu::teardown();
   }
 

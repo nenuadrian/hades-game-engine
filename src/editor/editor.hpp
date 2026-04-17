@@ -24,6 +24,7 @@
 #include "plugins/editor_plugin.hpp"
 #include "../engine/core/ecs/entity.hpp"
 #include "../engine/rendering/render_types.hpp"
+#include "../engine/rendering/renderer.hpp"
 #include "../engine/rendering/scene_renderer.hpp"
 
 namespace hades
@@ -31,6 +32,7 @@ namespace hades
   class ComponentManager;
   class EntityManager;
   class GUI;
+  class Renderer;
   class ScriptRuntime;
 
   class Editor
@@ -103,6 +105,8 @@ namespace hades
     ~Editor();
 
     void reset_workspace_session();
+
+    void set_renderer(Renderer *renderer) { renderer_ = renderer; }
 
     void render(
         float deltaTime,
@@ -223,6 +227,10 @@ namespace hades
     // Render pipeline integration.
     SceneRenderer sceneRenderer_;
     RenderList sceneRenderList_;
+    Renderer *renderer_ = nullptr;
+    SceneTargetHandle sceneViewportTarget_ = kInvalidSceneTarget;
+    int sceneViewportTargetWidth_ = 0;
+    int sceneViewportTargetHeight_ = 0;
 
     // Parsed script class cache (keyed by resolved script path).
     std::unordered_map<std::string, std::vector<ParsedScriptClass>> parsedScriptCache_;

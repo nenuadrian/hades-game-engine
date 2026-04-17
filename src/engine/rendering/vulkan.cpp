@@ -5,6 +5,8 @@
 #include <cstring>
 
 #include "../core/log.hpp"
+#include "vulkan_mesh_pipeline.hpp"
+#include "vulkan_scene_target.hpp"
 
 #include <SDL.h>
 #include <SDL_vulkan.h>
@@ -23,26 +25,61 @@ namespace hades
 
   void VulkanRenderer::destroy()
   {
-    shutdown_imgui_backend();
-
+    bool device_usable = true;
     if (g_Device != VK_NULL_HANDLE)
     {
       VkResult err = vkDeviceWaitIdle(g_Device);
-      check_vk_result(err);
+      if (err != VK_SUCCESS)
+      {
+        hades::Log::warn("vulkan", "vkDeviceWaitIdle on shutdown returned %d; skipping GPU resource teardown", err);
+        device_usable = false;
+      }
     }
 
-    if (window_initialized)
+    if (device_usable)
     {
-      CleanupVulkanWindow();
+      if (scene_targets_initialized && scene_targets_)
+      {
+        scene_targets_->destroy();
+        scene_targets_.reset();
+        scene_targets_initialized = false;
+      }
+
+      shutdown_imgui_backend();
+
+      if (mesh_pipeline_initialized && mesh_pipeline_)
+      {
+        mesh_pipeline_->destroy();
+        mesh_pipeline_.reset();
+        mesh_pipeline_initialized = false;
+      }
+
+      if (window_initialized)
+      {
+        CleanupVulkanWindow();
+        window_initialized = false;
+      }
+
+      if (vulkan_initialized)
+      {
+        CleanupVulkan();
+        vulkan_initialized = false;
+      }
+    }
+    else
+    {
+      scene_targets_.reset();
+      scene_targets_initialized = false;
+      mesh_pipeline_.reset();
+      mesh_pipeline_initialized = false;
       window_initialized = false;
-    }
-
-    if (vulkan_initialized)
-    {
-      CleanupVulkan();
       vulkan_initialized = false;
     }
   }
+
+  VulkanRenderer::VulkanRenderer() = default;
+
+  VulkanRenderer::VulkanRenderer(bool enableVsync) : vsync_(enableVsync) {}
 
   VulkanRenderer::~VulkanRenderer()
   {
@@ -271,13 +308,15 @@ namespace hades
     }
 
     {
+      // ImGui 1.92+ allocates from this pool for the font atlas plus every
+      // ImGui_ImplVulkan_AddTexture call (scene viewport composite targets).
       VkDescriptorPoolSize pool_sizes[] = {
-          {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
+          {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 64},
       };
       VkDescriptorPoolCreateInfo pool_info = {};
       pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
       pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-      pool_info.maxSets = 1;
+      pool_info.maxSets = 64;
       pool_info.poolSizeCount = (uint32_t)IM_ARRAYSIZE(pool_sizes);
       pool_info.pPoolSizes = pool_sizes;
       err = vkCreateDescriptorPool(g_Device, &pool_info, g_Allocator, &g_DescriptorPool);
@@ -511,21 +550,51 @@ namespace hades
       err = vkBeginCommandBuffer(fd->CommandBuffer, &info);
       check_vk_result(err);
     }
+
+    // Drain offscreen scene-target renders before opening the main render pass.
+    if (mesh_pipeline_initialized && scene_targets_initialized &&
+        !pending_target_renders_.empty())
     {
+      for (const auto &p : pending_target_renders_)
+      {
+        scene_targets_->recordRender(
+            fd->CommandBuffer, p.handle, p.list, *mesh_pipeline_,
+            frame_counter_ % mesh_pipeline_->framesInFlight());
+      }
+      pending_target_renders_.clear();
+    }
+
+    {
+      VkClearValue clearValues[2] = {};
+      clearValues[0] = g_MainWindowData.ClearValue;
+      clearValues[1].depthStencil = {1.0f, 0};
       VkRenderPassBeginInfo info = {};
       info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
       info.renderPass = g_MainWindowData.RenderPass;
       info.framebuffer = fd->Framebuffer;
       info.renderArea.extent.width = g_MainWindowData.Width;
       info.renderArea.extent.height = g_MainWindowData.Height;
-      info.clearValueCount = 1;
-      info.pClearValues = &g_MainWindowData.ClearValue;
+      info.clearValueCount = 2;
+      info.pClearValues = clearValues;
       vkCmdBeginRenderPass(fd->CommandBuffer, &info, VK_SUBPASS_CONTENTS_INLINE);
+    }
+
+    // Draw main scene (game runtime / detached play) before ImGui overlay.
+    if (has_pending_main_scene_ && mesh_pipeline_initialized)
+    {
+      VkExtent2D ext{static_cast<uint32_t>(g_MainWindowData.Width),
+                     static_cast<uint32_t>(g_MainWindowData.Height)};
+      mesh_pipeline_->drawRenderList(
+          fd->CommandBuffer, g_MainWindowData.RenderPass,
+          pending_main_scene_, ext,
+          frame_counter_ % mesh_pipeline_->framesInFlight());
+      has_pending_main_scene_ = false;
     }
 
     ImGui_ImplVulkan_RenderDrawData(draw_data, fd->CommandBuffer);
 
     vkCmdEndRenderPass(fd->CommandBuffer);
+    ++frame_counter_;
     {
       VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
       VkSubmitInfo info = {};
@@ -755,34 +824,52 @@ namespace hades
 
     if (g_MainWindowData.UseDynamicRendering == false)
     {
-      VkAttachmentDescription attachment = {};
-      attachment.format = g_MainWindowData.SurfaceFormat.format;
-      attachment.samples = VK_SAMPLE_COUNT_1_BIT;
-      attachment.loadOp =
+      VkFormat depthFormat = selectDepthFormat();
+      VkAttachmentDescription attachments[2] = {};
+      attachments[0].format = g_MainWindowData.SurfaceFormat.format;
+      attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
+      attachments[0].loadOp =
           g_MainWindowData.ClearEnable ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-      attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-      attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-      attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-      attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-      attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+      attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+      attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+      attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+      attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+      attachments[0].finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+      attachments[1].format = depthFormat;
+      attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
+      attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+      attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+      attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+      attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+      attachments[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+      attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
       VkAttachmentReference color_attachment = {};
       color_attachment.attachment = 0;
       color_attachment.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+      VkAttachmentReference depth_attachment = {};
+      depth_attachment.attachment = 1;
+      depth_attachment.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
       VkSubpassDescription subpass = {};
       subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
       subpass.colorAttachmentCount = 1;
       subpass.pColorAttachments = &color_attachment;
+      subpass.pDepthStencilAttachment = &depth_attachment;
       VkSubpassDependency dependency = {};
       dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
       dependency.dstSubpass = 0;
-      dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-      dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+      dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                                VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+      dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                                VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
       dependency.srcAccessMask = 0;
-      dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+      dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                                  VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
       VkRenderPassCreateInfo info = {};
       info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-      info.attachmentCount = 1;
-      info.pAttachments = &attachment;
+      info.attachmentCount = 2;
+      info.pAttachments = attachments;
       info.subpassCount = 1;
       info.pSubpasses = &subpass;
       info.dependencyCount = 1;
@@ -813,19 +900,29 @@ namespace hades
 
     if (g_MainWindowData.UseDynamicRendering == false)
     {
-      VkImageView attachment[1];
+      for (uint32_t i = 0; i < g_MainWindowData.ImageCount; i++)
+      {
+        Vulkan_Frame *fd = &g_MainWindowData.Frames[i];
+        if (!createDepthResources(fd, g_MainWindowData.Width, g_MainWindowData.Height))
+        {
+          hades::Log::error("vulkan", "failed to create depth resources for frame %u", i);
+        }
+      }
+
+      VkImageView attachments[2];
       VkFramebufferCreateInfo info = {};
       info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
       info.renderPass = g_MainWindowData.RenderPass;
-      info.attachmentCount = 1;
-      info.pAttachments = attachment;
+      info.attachmentCount = 2;
+      info.pAttachments = attachments;
       info.width = g_MainWindowData.Width;
       info.height = g_MainWindowData.Height;
       info.layers = 1;
       for (uint32_t i = 0; i < g_MainWindowData.ImageCount; i++)
       {
         Vulkan_Frame *fd = &g_MainWindowData.Frames[i];
-        attachment[0] = fd->BackbufferView;
+        attachments[0] = fd->BackbufferView;
+        attachments[1] = fd->DepthView;
         err = vkCreateFramebuffer(device, &info, allocator, &fd->Framebuffer);
         check_vk_result(err);
       }
@@ -889,6 +986,7 @@ namespace hades
 
     vkDestroyImageView(device, fd->BackbufferView, allocator);
     vkDestroyFramebuffer(device, fd->Framebuffer, allocator);
+    destroyDepthResources(fd);
   }
 
   void VulkanRenderer::VulkanH_DestroyFrameSemaphores(
@@ -914,6 +1012,7 @@ namespace hades
     }
 
     window_initialized = true;
+    ensureMeshPipelineInitialized();
     return true;
   }
 
@@ -941,6 +1040,7 @@ namespace hades
     init_info.CheckVkResultFn = check_vk_result;
     ImGui_ImplVulkan_Init(&init_info);
     imgui_backend_initialized = true;
+    ensureSceneTargetsInitialized();
   }
 
   void VulkanRenderer::start_imgui_frame()
@@ -1045,20 +1145,48 @@ namespace hades
       err = vkBeginCommandBuffer(fd->CommandBuffer, &info);
       check_vk_result(err);
     }
+
+    // Drain offscreen scene-target renders before opening the main render pass.
+    if (mesh_pipeline_initialized && scene_targets_initialized &&
+        !pending_target_renders_.empty())
     {
+      for (const auto &p : pending_target_renders_)
+      {
+        scene_targets_->recordRender(
+            fd->CommandBuffer, p.handle, p.list, *mesh_pipeline_,
+            frame_counter_ % mesh_pipeline_->framesInFlight());
+      }
+      pending_target_renders_.clear();
+    }
+
+    {
+      VkClearValue clearValues[2] = {};
+      clearValues[0] = g_MainWindowData.ClearValue;
+      clearValues[1].depthStencil = {1.0f, 0};
       VkRenderPassBeginInfo info = {};
       info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
       info.renderPass = g_MainWindowData.RenderPass;
       info.framebuffer = fd->Framebuffer;
       info.renderArea.extent.width = g_MainWindowData.Width;
       info.renderArea.extent.height = g_MainWindowData.Height;
-      info.clearValueCount = 1;
-      info.pClearValues = &g_MainWindowData.ClearValue;
+      info.clearValueCount = 2;
+      info.pClearValues = clearValues;
       vkCmdBeginRenderPass(fd->CommandBuffer, &info, VK_SUBPASS_CONTENTS_INLINE);
     }
 
-    // No ImGui draw data -- just the clear color render pass.
+    if (has_pending_main_scene_ && mesh_pipeline_initialized)
+    {
+      VkExtent2D ext{static_cast<uint32_t>(g_MainWindowData.Width),
+                     static_cast<uint32_t>(g_MainWindowData.Height)};
+      mesh_pipeline_->drawRenderList(
+          fd->CommandBuffer, g_MainWindowData.RenderPass,
+          pending_main_scene_, ext,
+          frame_counter_ % mesh_pipeline_->framesInFlight());
+      has_pending_main_scene_ = false;
+    }
+
     vkCmdEndRenderPass(fd->CommandBuffer);
+    ++frame_counter_;
 
     {
       VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -1078,5 +1206,172 @@ namespace hades
     }
 
     FramePresent();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Mesh pipeline + scene target glue
+  // ---------------------------------------------------------------------------
+
+  VkFormat VulkanRenderer::selectDepthFormat() const
+  {
+    const VkFormat candidates[] = {
+        VK_FORMAT_D32_SFLOAT,
+        VK_FORMAT_D32_SFLOAT_S8_UINT,
+        VK_FORMAT_D24_UNORM_S8_UINT,
+    };
+    for (VkFormat f : candidates)
+    {
+      VkFormatProperties props{};
+      vkGetPhysicalDeviceFormatProperties(g_PhysicalDevice, f, &props);
+      if (props.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT)
+        return f;
+    }
+    return VK_FORMAT_D32_SFLOAT;
+  }
+
+  bool VulkanRenderer::createDepthResources(Vulkan_Frame *frame, uint32_t width, uint32_t height)
+  {
+    if (!frame || width == 0 || height == 0) return false;
+
+    VkFormat depthFormat = selectDepthFormat();
+
+    VkImageCreateInfo ii{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    ii.imageType = VK_IMAGE_TYPE_2D;
+    ii.format = depthFormat;
+    ii.extent = {width, height, 1};
+    ii.mipLevels = 1;
+    ii.arrayLayers = 1;
+    ii.samples = VK_SAMPLE_COUNT_1_BIT;
+    ii.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ii.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    ii.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    if (vkCreateImage(g_Device, &ii, g_Allocator, &frame->DepthImage) != VK_SUCCESS)
+      return false;
+
+    VkMemoryRequirements req{};
+    vkGetImageMemoryRequirements(g_Device, frame->DepthImage, &req);
+    VkPhysicalDeviceMemoryProperties mp{};
+    vkGetPhysicalDeviceMemoryProperties(g_PhysicalDevice, &mp);
+    uint32_t typeIndex = UINT32_MAX;
+    for (uint32_t i = 0; i < mp.memoryTypeCount; ++i)
+    {
+      if ((req.memoryTypeBits & (1u << i)) &&
+          (mp.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT))
+      {
+        typeIndex = i;
+        break;
+      }
+    }
+    if (typeIndex == UINT32_MAX) return false;
+
+    VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    ai.allocationSize = req.size;
+    ai.memoryTypeIndex = typeIndex;
+    if (vkAllocateMemory(g_Device, &ai, g_Allocator, &frame->DepthMemory) != VK_SUCCESS)
+      return false;
+    if (vkBindImageMemory(g_Device, frame->DepthImage, frame->DepthMemory, 0) != VK_SUCCESS)
+      return false;
+
+    VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    vi.image = frame->DepthImage;
+    vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    vi.format = depthFormat;
+    vi.subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1};
+    if (vkCreateImageView(g_Device, &vi, g_Allocator, &frame->DepthView) != VK_SUCCESS)
+      return false;
+    return true;
+  }
+
+  void VulkanRenderer::destroyDepthResources(Vulkan_Frame *frame)
+  {
+    if (!frame) return;
+    if (frame->DepthView)   vkDestroyImageView(g_Device, frame->DepthView, g_Allocator);
+    if (frame->DepthImage)  vkDestroyImage(g_Device, frame->DepthImage, g_Allocator);
+    if (frame->DepthMemory) vkFreeMemory(g_Device, frame->DepthMemory, g_Allocator);
+    frame->DepthView = VK_NULL_HANDLE;
+    frame->DepthImage = VK_NULL_HANDLE;
+    frame->DepthMemory = VK_NULL_HANDLE;
+  }
+
+  void VulkanRenderer::ensureMeshPipelineInitialized()
+  {
+    if (mesh_pipeline_initialized) return;
+    if (g_Device == VK_NULL_HANDLE) return;
+    mesh_pipeline_ = std::make_unique<VulkanMeshPipeline>();
+    VulkanMeshPipeline::InitInfo info{};
+    info.device = g_Device;
+    info.physicalDevice = g_PhysicalDevice;
+    info.queue = g_Queue;
+    info.queueFamily = g_QueueFamily;
+    info.framesInFlight = g_MainWindowData.ImageCount > 0 ? g_MainWindowData.ImageCount : 2;
+    info.allocator = g_Allocator;
+    if (!mesh_pipeline_->init(info))
+    {
+      hades::Log::warn("vulkan", "mesh pipeline init failed; scene rendering disabled");
+      mesh_pipeline_.reset();
+      return;
+    }
+    mesh_pipeline_initialized = true;
+  }
+
+  void VulkanRenderer::ensureSceneTargetsInitialized()
+  {
+    if (scene_targets_initialized) return;
+    if (!imgui_backend_initialized || g_Device == VK_NULL_HANDLE) return;
+    scene_targets_ = std::make_unique<VulkanSceneTargets>();
+    VulkanSceneTargets::InitInfo info{};
+    info.device = g_Device;
+    info.physicalDevice = g_PhysicalDevice;
+    info.queue = g_Queue;
+    info.queueFamily = g_QueueFamily;
+    info.colorFormat = g_MainWindowData.SurfaceFormat.format;
+    info.depthFormat = selectDepthFormat();
+    info.allocator = g_Allocator;
+    if (!scene_targets_->init(info))
+    {
+      hades::Log::warn("vulkan", "scene targets init failed");
+      scene_targets_.reset();
+      return;
+    }
+    scene_targets_initialized = true;
+  }
+
+  void VulkanRenderer::render_scene_to_main(const RenderList &list)
+  {
+    if (!mesh_pipeline_initialized) return;
+    pending_main_scene_ = list;
+    has_pending_main_scene_ = true;
+  }
+
+  SceneTargetHandle VulkanRenderer::acquire_scene_target(int width, int height)
+  {
+    if (!scene_targets_initialized) return kInvalidSceneTarget;
+    return scene_targets_->acquire(width, height);
+  }
+
+  bool VulkanRenderer::resize_scene_target(SceneTargetHandle target, int width, int height)
+  {
+    if (!scene_targets_initialized) return false;
+    return scene_targets_->resize(target, width, height);
+  }
+
+  void *VulkanRenderer::render_scene_to_target(SceneTargetHandle target, const RenderList &list)
+  {
+    if (!scene_targets_initialized || !mesh_pipeline_initialized) return nullptr;
+    if (target == kInvalidSceneTarget) return nullptr;
+    // Queue for recording at frame begin; return the ImGui texture id now —
+    // it is stable across renders of the same target.
+    PendingTargetRender p;
+    p.handle = target;
+    p.list = list;
+    pending_target_renders_.push_back(std::move(p));
+    return scene_targets_->imguiSetFor(target);
+  }
+
+  void VulkanRenderer::release_scene_target(SceneTargetHandle target)
+  {
+    if (!scene_targets_initialized) return;
+    scene_targets_->release(target);
   }
 }

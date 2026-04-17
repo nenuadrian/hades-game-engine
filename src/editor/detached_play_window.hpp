@@ -7,19 +7,20 @@
 #include <string>
 
 #include "../engine/core/ecs/entity.hpp"
+#include "../engine/rendering/scene_renderer.hpp"
 
-struct SDL_Renderer;
 struct SDL_Window;
 
 namespace hades
 {
   class ComponentManager;
   class EntityManager;
+  class VulkanRenderer;
 
   class DetachedPlayWindow
   {
   public:
-    DetachedPlayWindow() = default;
+    DetachedPlayWindow();
     ~DetachedPlayWindow();
 
     DetachedPlayWindow(const DetachedPlayWindow &) = delete;
@@ -41,16 +42,11 @@ namespace hades
       void operator()(SDL_Window *window) const;
     };
 
-    struct SDLRendererDeleter
-    {
-      void operator()(SDL_Renderer *renderer) const;
-    };
-
     using WindowPtr = std::unique_ptr<SDL_Window, SDLWindowDeleter>;
-    using RendererPtr = std::unique_ptr<SDL_Renderer, SDLRendererDeleter>;
 
     WindowPtr window_{nullptr};
-    RendererPtr renderer_{nullptr};
+    std::unique_ptr<VulkanRenderer> renderer_;
+    SceneRenderer sceneRenderer_;
   };
 }
 

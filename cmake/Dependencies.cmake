@@ -14,7 +14,7 @@ option(
 set(HADES_CLI11_TAG "v2.4.2" CACHE STRING "CLI11 git tag or branch.")
 set(HADES_GOOGLETEST_TAG "v1.15.2" CACHE STRING "GoogleTest git tag or branch.")
 # Docking APIs live on Dear ImGui's docking release branch.
-set(HADES_IMGUI_TAG "v1.91.4-docking" CACHE STRING "Dear ImGui git tag or branch.")
+set(HADES_IMGUI_TAG "v1.92.7-docking" CACHE STRING "Dear ImGui git tag or branch.")
 # SoLoud does not ship tagged releases on a regular cadence; track master like
 # ImGuiColorTextEdit does.
 set(HADES_SOLOUD_TAG "master" CACHE STRING "SoLoud git tag or branch.")

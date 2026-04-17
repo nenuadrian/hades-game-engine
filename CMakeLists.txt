@@ -9,6 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(cmake/Dependencies.cmake)
 include(cmake/WebPlatform.cmake)
+include(cmake/Shaders.cmake)
 
 set(HADES_NEURAL_ENGINE_DIR "${CMAKE_SOURCE_DIR}/lib/hades-neural-engine")
 
@@ -226,9 +227,11 @@ if(EMSCRIPTEN)
     "${SRC_DIR}/engine/runtime/subprocess.cpp"
     "${SRC_DIR}/engine/training/hades_script_env.cpp")
 else()
-  # For native builds: remove WebGPU renderer (only usable with Emscripten).
+  # For native builds: remove WebGPU renderer and mesh pipeline
+  # (only usable with Emscripten).
   list(REMOVE_ITEM ENGINE_SOURCE_FILES
-    "${SRC_DIR}/engine/rendering/webgpu_renderer.cpp")
+    "${SRC_DIR}/engine/rendering/webgpu_renderer.cpp"
+    "${SRC_DIR}/engine/rendering/webgpu_mesh_pipeline.cpp")
 endif()
 
 # Collect editor sources (src/editor/ plus the editor-only ImGui GUI and main.cpp).
@@ -258,9 +261,18 @@ option(HADES_ENABLE_API "Enable HadesAPI REST server for ML training" OFF)
 # ---------------------------------------------------------------------------
 # HadesEngine static library (engine core, shared by editor and runtime)
 # ---------------------------------------------------------------------------
-add_library(HadesEngine STATIC ${ENGINE_SOURCE_FILES} ${ENGINE_HEADER_FILES})
+set(HADES_SHADER_HEADERS "")
+if(NOT EMSCRIPTEN)
+  hades_add_shader("${SRC_DIR}/engine/rendering/shaders/mesh.vert.glsl" vert mesh_vert_spv)
+  hades_add_shader("${SRC_DIR}/engine/rendering/shaders/mesh.frag.glsl" frag mesh_frag_spv)
+endif()
+
+add_library(HadesEngine STATIC ${ENGINE_SOURCE_FILES} ${ENGINE_HEADER_FILES} ${HADES_SHADER_HEADERS})
 hades_configure_cxx_standard(HadesEngine PUBLIC)
 target_include_directories(HadesEngine PUBLIC "${SRC_DIR}" "${CMAKE_BINARY_DIR}/generated")
+if(HADES_SHADER_HEADERS)
+  target_compile_definitions(HadesEngine PUBLIC HADES_HAS_MESH_SHADERS=1)
+endif()
 if(HADES_FRAME_METRICS)
   target_compile_definitions(HadesEngine PUBLIC HADES_ENABLE_FRAME_METRICS)
 endif()

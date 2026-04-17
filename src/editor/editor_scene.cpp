@@ -29,6 +29,7 @@
 #include "../engine/core/ecs/entity_manager.hpp"
 #include "../engine/core/ecs/world_utils.hpp"
 #include "../engine/profiling/frame_metrics.hpp"
+#include "../engine/rendering/renderer.hpp"
 #include "../engine/rendering/scene_renderer.hpp"
 #include "../engine/rendering/vector_text.hpp"
 #include "../engine/runtime/script_runtime.hpp"
@@ -1708,14 +1709,57 @@ namespace hades
         const RenderList &renderList,
         std::optional<Entity::EntityId> world,
         std::optional<Entity::EntityId> excludedEntity,
-        std::optional<Entity::EntityId> selectedEntity)
+        std::optional<Entity::EntityId> selectedEntity,
+        Renderer *renderer,
+        SceneTargetHandle *sceneTarget,
+        int *sceneTargetWidth,
+        int *sceneTargetHeight)
     {
+      bool gpuBackgroundActive = false;
+      if (renderer != nullptr && sceneTarget != nullptr &&
+          sceneTargetWidth != nullptr && sceneTargetHeight != nullptr)
+      {
+        const int targetW = std::max(1, static_cast<int>(canvasSize.x));
+        const int targetH = std::max(1, static_cast<int>(canvasSize.y));
+        if (*sceneTarget == kInvalidSceneTarget)
+        {
+          *sceneTarget = renderer->acquire_scene_target(targetW, targetH);
+          *sceneTargetWidth = targetW;
+          *sceneTargetHeight = targetH;
+        }
+        else if (targetW != *sceneTargetWidth || targetH != *sceneTargetHeight)
+        {
+          if (renderer->resize_scene_target(*sceneTarget, targetW, targetH))
+          {
+            *sceneTargetWidth = targetW;
+            *sceneTargetHeight = targetH;
+          }
+        }
+        if (*sceneTarget != kInvalidSceneTarget)
+        {
+          if (void *texture = renderer->render_scene_to_target(*sceneTarget, renderList))
+          {
+            const ImVec2 canvasMax(canvasOrigin.x + canvasSize.x,
+                                   canvasOrigin.y + canvasSize.y);
+            drawList->AddImage(reinterpret_cast<ImTextureID>(texture),
+                               canvasOrigin, canvasMax);
+            gpuBackgroundActive = true;
+          }
+        }
+      }
+
       int visibleRenderableCount = 0;
       const auto render_render_item = [&](const RenderItem &item)
       {
         const Entity::EntityId entity = item.entity;
         if (excludedEntity.has_value() && entity == *excludedEntity)
         {
+          return;
+        }
+        const bool isSelectedItem = selectedEntity.has_value() && *selectedEntity == entity;
+        if (gpuBackgroundActive && !isSelectedItem)
+        {
+          ++visibleRenderableCount;
           return;
         }
 
@@ -2512,8 +2556,6 @@ namespace hades
     }
     else
     {
-      draw_editor_grid(drawList, sceneCamera, camera, canvasOrigin, canvasSize, sceneCameraDistance_);
-
       draw_world_preview(
           drawList,
           sceneCamera,
@@ -2525,7 +2567,13 @@ namespace hades
           sceneRenderList_,
           sceneWorld,
           std::nullopt,
-          state.selectedEntity);
+          state.selectedEntity,
+          renderer_,
+          &sceneViewportTarget_,
+          &sceneViewportTargetWidth_,
+          &sceneViewportTargetHeight_);
+
+      draw_editor_grid(drawList, sceneCamera, camera, canvasOrigin, canvasSize, sceneCameraDistance_);
 
       if (selectedEntityIsEditableInScene)
       {

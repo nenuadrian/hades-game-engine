@@ -21,11 +21,13 @@
 #ifdef HADES_ENABLE_API
 #include "../engine/api/hades_api.hpp"
 #include "../engine/components/name_component.hpp"
-#include "../engine/components/position_component_3d.hpp"
 #include "../engine/core/ecs/query.hpp"
 #include <nlohmann/json.hpp>
 #endif
+#include "../engine/components/position_component_3d.hpp"
 #include "../engine/core/log.hpp"
+#include "../engine/core/ecs/entity_factory.hpp"
+#include "../engine/core/ecs/component_manager.hpp"
 #include "../engine/core/ecs/scene_serializer.hpp"
 #include "../engine/core/ecs/world_utils.hpp"
 #include "../engine/runtime/main_camera_selection.hpp"
@@ -742,12 +744,17 @@ namespace hades
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.29f, 0.23f, 0.22f, 1.00f));
     if (ImGui::Button("Create New", ImVec2(buttonWidth, 0.0f)))
     {
-      creatingWorkspace = true;
-      workspaceStatusMessage.clear();
-      if (createWorkspaceParentBuffer[0] == '\0')
+      std::string pickerError;
+      const auto pickedFolder = hades::pick_folder_with_native_dialog("Select a location for the new workspace", &pickerError);
+      if (pickedFolder.has_value())
       {
-        std::error_code errorCode;
-        set_buffer_text(createWorkspaceParentBuffer, std::filesystem::current_path(errorCode).string());
+        set_buffer_text(createWorkspaceParentBuffer, pickedFolder->string());
+        workspaceStatusMessage.clear();
+        creatingWorkspace = true;
+      }
+      else if (!pickerError.empty())
+      {
+        workspaceStatusMessage = pickerError;
       }
     }
 
@@ -1002,6 +1009,8 @@ namespace hades
       ImGui::LoadIniSettingsFromDisk(imguiIniPath_.c_str());
     }
 
+    seed_default_world_entities(workspace->path);
+
     creatingWorkspace = false;
     workspaceStatusMessage = errorMessage;
     std::string settingsError;
@@ -1014,6 +1023,25 @@ namespace hades
     set_buffer_text(createWorkspaceParentBuffer, workspace->path.parent_path().string());
     set_buffer_text(createWorkspaceNameBuffer, std::string());
     update_window_title();
+  }
+
+  void WindowManager::seed_default_world_entities(const std::filesystem::path &workspacePath)
+  {
+    const auto world = EntityFactory::createWorld(entityManager, componentManager, "World1", true);
+
+    const auto camera = EntityFactory::createCamera(entityManager, componentManager, world);
+    if (componentManager.hasComponent<PositionComponent3D>(camera))
+    {
+      componentManager.getComponent<PositionComponent3D>(camera) = PositionComponent3D(0.0f, 0.0f, -5.0f);
+    }
+
+    EntityFactory::createCube(entityManager, componentManager, world);
+
+    std::string worldError;
+    if (!hades::save_all_worlds(workspacePath, entityManager, componentManager, &worldError))
+    {
+      workspaceStatusMessage = "Failed to seed default world: " + worldError;
+    }
   }
 
   void WindowManager::reset_workspace_session()
@@ -1245,6 +1273,8 @@ namespace hades
     {
       return false;
     }
+
+    editor.set_renderer(renderer.get());
 
     if (!audio_engine->init())
     {

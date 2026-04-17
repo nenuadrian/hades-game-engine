@@ -370,6 +370,21 @@ namespace hades
 
     if (renderer_)
     {
+      const auto cameraSelection = select_main_camera(entityManager_, componentManager_, activeWorld_);
+      if (cameraSelection.status == MainCameraSelectionStatus::Ready &&
+          cameraSelection.entity.has_value())
+      {
+        int windowW = 0;
+        int windowH = 0;
+        SDL_GetWindowSize(window_.get(), &windowW, &windowH);
+        const float aspect = (windowH > 0)
+                                 ? (static_cast<float>(windowW) / static_cast<float>(windowH))
+                                 : 1.0f;
+        const RenderCamera camera = sceneRenderer_.buildCamera(*cameraSelection.entity, aspect, componentManager_);
+        const RenderList list = sceneRenderer_.buildRenderList(
+            camera, componentManager_, entityManager_, activeWorld_);
+        renderer_->render_scene_to_main(list);
+      }
       // Present the frame (clear + present, no ImGui).
       renderer_->present_frame();
     }

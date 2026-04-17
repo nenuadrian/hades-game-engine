@@ -115,6 +115,7 @@ namespace hades
     void render_workspace_selector();
     void open_workspace(const std::string &workspacePath);
     void create_workspace();
+    void seed_default_world_entities(const std::filesystem::path &workspacePath);
     void reset_workspace_session();
     void stop_active_play_mode(const std::string &message = std::string());
     void sync_play_window();

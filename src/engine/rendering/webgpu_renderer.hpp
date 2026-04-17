@@ -1,8 +1,12 @@
 #ifndef HADES_ENGINE_RENDERING_WEBGPU_RENDERER_HPP
 #define HADES_ENGINE_RENDERING_WEBGPU_RENDERER_HPP
 
+#include <memory>
+
 #include <webgpu/webgpu.h>
+#include "render_types.hpp"
 #include "renderer.hpp"
+#include "webgpu_mesh_pipeline.hpp"
 
 namespace hades
 {
@@ -20,6 +24,8 @@ namespace hades
     void shutdown_imgui_backend() override;
     void present_frame() override;
 
+    void render_scene_to_main(const RenderList &list) override;
+
   private:
     WGPUInstance instance_ = nullptr;
     WGPUAdapter adapter_ = nullptr;
@@ -30,6 +36,10 @@ namespace hades
     int width_ = 0;
     int height_ = 0;
     bool initialized_ = false;
+
+    std::unique_ptr<WebGPUMeshPipeline> meshPipeline_;
+    RenderList pendingMainScene_;
+    bool hasPendingMainScene_ = false;
 
     void configure_surface(int width, int height);
   };

@@ -2,11 +2,11 @@
   "editor": {
     "sceneCamera": {
       "distance": 25.847929000854492,
-      "pitchDegrees": -41.31504821777344,
+      "pitchDegrees": -38.06504821777344,
       "targetX": 8.454989433288574,
       "targetY": 0.0,
       "targetZ": -2.976780652999878,
-      "yawDegrees": -31.85003662109375
+      "yawDegrees": -7.350029945373535
     },
     "showDebugInfo": false
   },

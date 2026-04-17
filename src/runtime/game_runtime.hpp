@@ -12,6 +12,7 @@
 #include "engine/core/ecs/entity_manager.hpp"
 #include "engine/core/ecs/system_manager.hpp"
 #include "engine/core/events/event_bus.hpp"
+#include "engine/rendering/scene_renderer.hpp"
 #ifndef HADES_PLATFORM_WEB
 #include "engine/runtime/script_runtime.hpp"
 #endif
@@ -76,6 +77,7 @@ namespace hades
     std::unique_ptr<PhysicsWorld> physicsWorld_;
     std::shared_ptr<PhysicsSystem> physicsSystem_;
     std::shared_ptr<RenderSystem> renderSystem_;
+    SceneRenderer sceneRenderer_;
     bool headless_ = false;
     bool apiMode_ = false;
     bool initialized_ = false;
