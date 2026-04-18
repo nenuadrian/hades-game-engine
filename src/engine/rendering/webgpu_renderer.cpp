@@ -2,14 +2,26 @@
 
 #include <SDL.h>
 
+#include "imgui.h"
+#include "imgui_impl_wgpu.h"
+
 #include "../core/log.hpp"
 
-#ifdef __EMSCRIPTEN__
-#include <emscripten/html5_webgpu.h>
-#endif
+#include <cstring>
 
 namespace hades
 {
+  namespace
+  {
+    inline WGPUStringView wgpu_sv(const char *s)
+    {
+      WGPUStringView v{};
+      v.data = s;
+      v.length = (s != nullptr) ? std::strlen(s) : 0;
+      return v;
+    }
+  }
+
   WebGPURenderer::~WebGPURenderer()
   {
     if (meshPipeline_ != nullptr)
@@ -78,9 +90,9 @@ namespace hades
     queue_ = wgpuDeviceGetQueue(device_);
 
     // Create a surface from the HTML canvas.
-    WGPUSurfaceDescriptorFromCanvasHTMLSelector canvasDesc{};
-    canvasDesc.chain.sType = WGPUSType_SurfaceDescriptorFromCanvasHTMLSelector;
-    canvasDesc.selector = "#canvas";
+    WGPUEmscriptenSurfaceSourceCanvasHTMLSelector canvasDesc{};
+    canvasDesc.chain.sType = WGPUSType_EmscriptenSurfaceSourceCanvasHTMLSelector;
+    canvasDesc.selector = wgpu_sv("#canvas");
 
     WGPUSurfaceDescriptor surfaceDesc{};
     surfaceDesc.nextInChain = &canvasDesc.chain;
@@ -161,7 +173,8 @@ namespace hades
     // Get the current surface texture.
     WGPUSurfaceTexture surfaceTexture{};
     wgpuSurfaceGetCurrentTexture(surface_, &surfaceTexture);
-    if (surfaceTexture.status != WGPUSurfaceGetCurrentTextureStatus_Success)
+    if (surfaceTexture.status != WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal &&
+        surfaceTexture.status != WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal)
     {
       return;
     }
@@ -205,6 +218,25 @@ namespace hades
       wgpuRenderPassEncoderRelease(pass);
     }
 
+    // Overlay ImGui on top of whatever the scene pass produced.
+    if (pendingImGuiDrawData_ != nullptr)
+    {
+      WGPURenderPassColorAttachment uiAttach{};
+      uiAttach.view = view;
+      uiAttach.loadOp = WGPULoadOp_Load;
+      uiAttach.storeOp = WGPUStoreOp_Store;
+
+      WGPURenderPassDescriptor uiDesc{};
+      uiDesc.colorAttachmentCount = 1;
+      uiDesc.colorAttachments = &uiAttach;
+
+      WGPURenderPassEncoder uiPass = wgpuCommandEncoderBeginRenderPass(encoder, &uiDesc);
+      ImGui_ImplWGPU_RenderDrawData(pendingImGuiDrawData_, uiPass);
+      wgpuRenderPassEncoderEnd(uiPass);
+      wgpuRenderPassEncoderRelease(uiPass);
+      pendingImGuiDrawData_ = nullptr;
+    }
+
     // Submit.
     WGPUCommandBufferDescriptor cmdDesc{};
     WGPUCommandBuffer cmdBuffer = wgpuCommandEncoderFinish(encoder, &cmdDesc);
@@ -220,9 +252,50 @@ namespace hades
     wgpuTextureRelease(surfaceTexture.texture);
   }
 
-  // The runtime does not use ImGui, so these are no-ops.
-  void WebGPURenderer::init_imgui_backend() {}
-  void WebGPURenderer::start_imgui_frame() {}
-  void WebGPURenderer::render_imgui(ImDrawData *) {}
-  void WebGPURenderer::shutdown_imgui_backend() {}
+  void WebGPURenderer::init_imgui_backend()
+  {
+    if (imguiInitialized_ || device_ == nullptr)
+    {
+      return;
+    }
+    ImGui_ImplWGPU_InitInfo info{};
+    info.Device = device_;
+    info.NumFramesInFlight = 3;
+    info.RenderTargetFormat = surfaceFormat_;
+    info.DepthStencilFormat = WGPUTextureFormat_Undefined;
+    if (!ImGui_ImplWGPU_Init(&info))
+    {
+      hades::Log::error("webgpu", "ImGui_ImplWGPU_Init failed");
+      return;
+    }
+    imguiInitialized_ = true;
+  }
+
+  void WebGPURenderer::start_imgui_frame()
+  {
+    if (!imguiInitialized_)
+    {
+      return;
+    }
+    ImGui_ImplWGPU_NewFrame();
+  }
+
+  void WebGPURenderer::render_imgui(ImDrawData *draw_data)
+  {
+    // Stash the draw data; the actual render pass is recorded in present_frame.
+    // ImDrawData is valid between ImGui::Render() and the next ImGui::NewFrame(),
+    // which spans the window_manager frame boundary.
+    pendingImGuiDrawData_ = draw_data;
+  }
+
+  void WebGPURenderer::shutdown_imgui_backend()
+  {
+    if (!imguiInitialized_)
+    {
+      return;
+    }
+    ImGui_ImplWGPU_Shutdown();
+    imguiInitialized_ = false;
+    pendingImGuiDrawData_ = nullptr;
+  }
 }

@@ -8,6 +8,8 @@
 #include "renderer.hpp"
 #include "webgpu_mesh_pipeline.hpp"
 
+struct ImDrawData;
+
 namespace hades
 {
   class WebGPURenderer : public Renderer
@@ -40,6 +42,8 @@ namespace hades
     std::unique_ptr<WebGPUMeshPipeline> meshPipeline_;
     RenderList pendingMainScene_;
     bool hasPendingMainScene_ = false;
+    ImDrawData *pendingImGuiDrawData_ = nullptr;
+    bool imguiInitialized_ = false;
 
     void configure_surface(int width, int height);
   };

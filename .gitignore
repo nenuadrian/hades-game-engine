@@ -1,3 +1,4 @@
+build-web/
 tests/test_project/.hades/policies/**
 tests/test_project/.hades/script-host/**
 docs/generated/*

@@ -24,9 +24,20 @@
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       z-index: 10;
       transition: opacity 0.3s;
+      padding: 1rem;
+      text-align: center;
     }
     #loading.hidden { opacity: 0; pointer-events: none; }
     #loading h1 { font-size: 1.5rem; margin-bottom: 1rem; font-weight: 400; }
+    #loading p { max-width: 36rem; font-size: 0.95rem; color: #aaa; line-height: 1.45; }
+    #loading code {
+      background: #222;
+      border-radius: 3px;
+      padding: 0 0.35rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.85rem;
+      color: #e0e0e0;
+    }
     #progress-bar {
       width: 300px;
       height: 6px;
@@ -41,6 +52,54 @@
       transition: width 0.2s;
     }
     #status { margin-top: 0.75rem; font-size: 0.85rem; color: #888; }
+
+    #error-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(17, 17, 17, 0.96);
+      color: #eee;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      z-index: 20;
+      padding: 1.5rem;
+      overflow: auto;
+    }
+    #error-overlay.visible { display: flex; }
+    #error-overlay h2 { font-size: 1.25rem; font-weight: 500; margin-bottom: 0.75rem; color: #e57373; }
+    #error-message {
+      max-width: 48rem;
+      font-size: 0.95rem;
+      color: #ddd;
+      line-height: 1.5;
+      margin-bottom: 1rem;
+      text-align: center;
+    }
+    #error-details {
+      max-width: 60rem;
+      width: 100%;
+    }
+    #error-details summary {
+      cursor: pointer;
+      color: #888;
+      font-size: 0.85rem;
+      margin-bottom: 0.5rem;
+    }
+    #error-log {
+      max-height: 40vh;
+      overflow: auto;
+      background: #0a0a0a;
+      border: 1px solid #222;
+      border-radius: 4px;
+      padding: 0.75rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.8rem;
+      color: #c8c8c8;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
   </style>
 </head>
 <body>
@@ -49,18 +108,76 @@
     <div id="progress-bar"><div id="progress-fill"></div></div>
     <div id="status">Downloading</div>
   </div>
+  <div id="error-overlay">
+    <h2>Something went wrong</h2>
+    <div id="error-message"></div>
+    <details id="error-details">
+      <summary>Show details</summary>
+      <div id="error-log"></div>
+    </details>
+  </div>
   <canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
   <script>
+    var overlay = document.getElementById('error-overlay');
+    var errorMessage = document.getElementById('error-message');
+    var errorLog = document.getElementById('error-log');
+
+    function hadesShowError(summary, detail) {
+      if (summary) errorMessage.textContent = summary;
+      if (detail) {
+        errorLog.textContent += (errorLog.textContent ? '\n' : '') + detail;
+      }
+      overlay.classList.add('visible');
+      var loading = document.getElementById('loading');
+      if (loading) loading.classList.add('hidden');
+    }
+    window.__hadesShowError = hadesShowError;
+
+    var hadesWebGpuAvailable = ('gpu' in navigator);
+    if (!hadesWebGpuAvailable) {
+      var loading = document.getElementById('loading');
+      if (loading) {
+        loading.innerHTML =
+          '<h1>WebGPU not available</h1>' +
+          '<p>Hades requires WebGPU. Use a recent Chrome or Edge (113+), ' +
+          'or Firefox Nightly with <code>dom.webgpu.enabled</code>. ' +
+          'Serving over <code>file://</code> will also disable WebGPU &mdash; ' +
+          'serve from <code>localhost</code> or HTTPS.</p>';
+      }
+    }
+
     var Module = {
-      canvas: (function() { return document.getElementById('canvas'); })(),
+      canvas: document.getElementById('canvas'),
+      preRun: [function() {
+        if (!hadesWebGpuAvailable) return;
+        Module.addRunDependency('webgpu-device');
+        Module.setStatus('Requesting WebGPU device...');
+        navigator.gpu.requestAdapter()
+          .then(function(adapter) {
+            if (!adapter) throw new Error('No suitable WebGPU adapter.');
+            return adapter.requestDevice();
+          })
+          .then(function(device) {
+            if (!device) throw new Error('Failed to get WebGPU device.');
+            device.lost.then(function(info) {
+              hadesShowError('WebGPU device lost: ' + info.reason, info.message || '');
+            });
+            Module.preinitializedWebGPUDevice = device;
+            Module.removeRunDependency('webgpu-device');
+          })
+          .catch(function(err) {
+            hadesShowError('WebGPU initialization failed', String(err && err.message || err));
+            Module.removeRunDependency('webgpu-device');
+          });
+      }],
       setStatus: function(text) {
         var statusEl = document.getElementById('status');
         if (statusEl) statusEl.textContent = text || 'Loading...';
         if (!text || text === '') {
-          var loading = document.getElementById('loading');
-          if (loading) loading.classList.add('hidden');
+          var el = document.getElementById('loading');
+          if (el) el.classList.add('hidden');
         }
-        var m = text.match(/(\d+(\.\d+)?)\/(\d+)/);
+        var m = text && text.match(/(\d+(\.\d+)?)\/(\d+)/);
         if (m) {
           var pct = (parseFloat(m[1]) / parseFloat(m[3])) * 100;
           var fill = document.getElementById('progress-fill');
@@ -68,15 +185,30 @@
         }
       },
       monitorRunDependencies: function(left) {
-        if (left === 0) {
-          Module.setStatus('');
-        }
+        if (left === 0) Module.setStatus('');
+      },
+      print: function(text) { console.log(text); },
+      printErr: function(text) {
+        // Hades routes every Log level through stderr; don't flag them as
+        // errors in DevTools. The overlay is only populated by onAbort,
+        // window.onerror, and unhandled rejection.
+        console.warn(text);
+      },
+      onAbort: function(what) {
+        hadesShowError('The application aborted: ' + what, String(what));
       }
     };
     Module.setStatus('Downloading...');
-    window.onerror = function(e) {
-      Module.setStatus('Error: ' + e);
-    };
+
+    window.addEventListener('error', function(e) {
+      var detail = e && e.error && e.error.stack ? e.error.stack : String(e.message || e);
+      hadesShowError(e.message || 'Uncaught error', detail);
+    });
+    window.addEventListener('unhandledrejection', function(e) {
+      var reason = e && e.reason;
+      var detail = reason && reason.stack ? reason.stack : String(reason);
+      hadesShowError('Unhandled promise rejection', detail);
+    });
   </script>
   {{{ SCRIPT }}}
 </body>

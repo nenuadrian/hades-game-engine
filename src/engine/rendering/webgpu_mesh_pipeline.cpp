@@ -9,6 +9,15 @@ namespace hades
 {
   namespace
   {
+    inline WGPUStringView wgpu_sv(const char *s)
+    {
+      WGPUStringView v{};
+      v.data = s;
+      v.length = (s != nullptr) ? std::strlen(s) : 0;
+      return v;
+    }
+
+
     constexpr uint32_t kMaxLights = 16;
     constexpr uint32_t kDrawStride = 256;
     constexpr uint32_t kInitialDrawCapacity = 256;
@@ -157,12 +166,12 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     drawStride_ = kDrawStride;
 
     // Shader module.
-    WGPUShaderModuleWGSLDescriptor wgsl{};
-    wgsl.chain.sType = WGPUSType_ShaderModuleWGSLDescriptor;
-    wgsl.code = kShaderSource;
+    WGPUShaderSourceWGSL wgsl{};
+    wgsl.chain.sType = WGPUSType_ShaderSourceWGSL;
+    wgsl.code = wgpu_sv(kShaderSource);
     WGPUShaderModuleDescriptor smDesc{};
     smDesc.nextInChain = &wgsl.chain;
-    smDesc.label = "hades_mesh_shader";
+    smDesc.label = wgpu_sv("hades_mesh_shader");
     shaderModule_ = wgpuDeviceCreateShaderModule(device_, &smDesc);
     if (shaderModule_ == nullptr)
     {
@@ -279,13 +288,13 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
       WGPUFragmentState fs{};
       fs.module = shaderModule_;
-      fs.entryPoint = "fs_main";
+      fs.entryPoint = wgpu_sv("fs_main");
       fs.targetCount = 1;
       fs.targets = &colorTarget;
 
       WGPUDepthStencilState ds{};
       ds.format = depthFormat_;
-      ds.depthWriteEnabled = true;
+      ds.depthWriteEnabled = WGPUOptionalBool_True;
       ds.depthCompare = WGPUCompareFunction_Less;
       ds.stencilFront.compare = WGPUCompareFunction_Always;
       ds.stencilFront.failOp = WGPUStencilOperation_Keep;
@@ -298,7 +307,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
       WGPURenderPipelineDescriptor pd{};
       pd.layout = pipelineLayout_;
       pd.vertex.module = shaderModule_;
-      pd.vertex.entryPoint = "vs_main";
+      pd.vertex.entryPoint = wgpu_sv("vs_main");
       pd.vertex.bufferCount = 1;
       pd.vertex.buffers = &vbl;
       pd.primitive.topology = WGPUPrimitiveTopology_TriangleList;

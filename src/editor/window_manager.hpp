@@ -15,7 +15,9 @@
 #include "../engine/core/ecs/system_manager.hpp"
 #include "../engine/core/events/event_bus.hpp"
 #include "../engine/runtime/script_runtime.hpp"
+#ifndef HADES_PLATFORM_WEB
 #include "detached_play_window.hpp"
+#endif
 #include "editor.hpp"
 #include "workspace_manager.hpp"
 
@@ -84,7 +86,9 @@ namespace hades
     // Keep destruction order: ImGui, audio, renderer, SDL window, then SDL itself.
     SdlSession sdl_session;
     WindowPtr window{nullptr};
+#ifndef HADES_PLATFORM_WEB
     DetachedPlayWindow playWindow;
+#endif
     std::unique_ptr<Renderer> renderer;
     std::unique_ptr<AudioEngine> audio_engine;
     std::shared_ptr<AudioSystem> audioSystem;

@@ -228,6 +228,7 @@ namespace hades
           editor.focusDebugConsoleWindow_ = true;
         }));
 
+#ifndef HADES_PLATFORM_WEB
     register_plugin(std::make_unique<CallbackEditorPlugin>(
         "export",
         "Export",
@@ -252,6 +253,7 @@ namespace hades
           editor.openExportWindow_ = true;
           editor.focusExportWindow_ = true;
         }));
+#endif
 
     register_plugin(std::make_unique<CallbackEditorPlugin>(
         "debug",

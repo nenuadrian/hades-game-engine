@@ -74,7 +74,7 @@ namespace hades
 
     if (SDL_Init(flags) != 0)
     {
-      Log::error("SDL_Init(): %s", SDL_GetError());
+      Log::error("runtime", "SDL_Init(): %s", SDL_GetError());
       return false;
     }
 
@@ -165,7 +165,7 @@ namespace hades
           window_flags));
       if (window_ == nullptr)
       {
-        Log::error("SDL_CreateWindow(): %s", SDL_GetError());
+        Log::error("runtime", "SDL_CreateWindow(): %s", SDL_GetError());
         return false;
       }
 
@@ -212,7 +212,7 @@ namespace hades
     const auto worlds = load_all_worlds(projectPath_, entityManager_, componentManager_, &loadError);
     if (worlds.empty())
     {
-      Log::error("failed to load worlds: %s", loadError.c_str());
+      Log::error("runtime", "failed to load worlds: %s", loadError.c_str());
       return false;
     }
 
@@ -228,7 +228,7 @@ namespace hades
     const auto cameraSelection = select_main_camera(entityManager_, componentManager_, activeWorld_);
     if (cameraSelection.status != MainCameraSelectionStatus::Ready)
     {
-      Log::warn("%s", main_camera_selection_message(cameraSelection.status));
+      Log::warn("runtime", "%s", main_camera_selection_message(cameraSelection.status));
     }
 
     // Set up audio and physics for the active world.
