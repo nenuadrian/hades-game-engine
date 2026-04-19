@@ -78,7 +78,7 @@ namespace
     SDL_Surface *surface = SDL_LoadBMP(logo_path.c_str());
     if (surface == nullptr)
     {
-      hades::Log::warn("editor", "failed to load '%s': %s", logo_path.c_str(), SDL_GetError());
+      hades::Log::warn_tagged("editor", "failed to load '%s': %s", logo_path.c_str(), SDL_GetError());
     }
 
     return SurfacePtr(surface, SDL_FreeSurface);
@@ -233,7 +233,7 @@ namespace
     SurfacePtr rgbaSurface(SDL_ConvertSurfaceFormat(logoSurface, SDL_PIXELFORMAT_RGBA32, 0), SDL_FreeSurface);
     if (rgbaSurface == nullptr)
     {
-      hades::Log::warn("editor", "failed to convert logo surface for workspace preview: %s", SDL_GetError());
+      hades::Log::warn_tagged("editor", "failed to convert logo surface for workspace preview: %s", SDL_GetError());
       return;
     }
 
@@ -251,7 +251,7 @@ namespace
         SDL_FreeSurface);
     if (scaledSurface == nullptr)
     {
-      hades::Log::warn("editor", "failed to allocate logo preview surface: %s", SDL_GetError());
+      hades::Log::warn_tagged("editor", "failed to allocate logo preview surface: %s", SDL_GetError());
       width = 0;
       height = 0;
       return;
@@ -259,7 +259,7 @@ namespace
 
     if (SDL_BlitScaled(rgbaSurface.get(), nullptr, scaledSurface.get(), nullptr) != 0)
     {
-      hades::Log::warn("editor", "failed to scale logo preview surface: %s", SDL_GetError());
+      hades::Log::warn_tagged("editor", "failed to scale logo preview surface: %s", SDL_GetError());
       pixels.clear();
       width = 0;
       height = 0;
@@ -404,7 +404,7 @@ namespace hades
 
     if (SDL_Init(flags) != 0)
     {
-      Log::error("editor", "%s", SDL_GetError());
+      Log::error_tagged("editor", "%s", SDL_GetError());
       return false;
     }
 
@@ -1298,7 +1298,7 @@ namespace hades
         window_flags));
     if (window == nullptr)
     {
-      Log::error("editor", "SDL_CreateWindow(): %s", SDL_GetError());
+      Log::error_tagged("editor", "SDL_CreateWindow(): %s", SDL_GetError());
       return false;
     }
 

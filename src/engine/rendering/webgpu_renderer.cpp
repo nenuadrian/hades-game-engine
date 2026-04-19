@@ -61,7 +61,7 @@ namespace hades
 
     if (window == nullptr)
     {
-      hades::Log::error("webgpu", "WebGPURenderer::init: window is null");
+      hades::Log::error_tagged("webgpu", "WebGPURenderer::init: window is null");
       return false;
     }
 
@@ -69,7 +69,7 @@ namespace hades
     instance_ = wgpuCreateInstance(nullptr);
     if (instance_ == nullptr)
     {
-      hades::Log::error("webgpu", "WebGPURenderer::init: failed to create WebGPU instance");
+      hades::Log::error_tagged("webgpu", "WebGPURenderer::init: failed to create WebGPU instance");
       return false;
     }
 
@@ -78,12 +78,12 @@ namespace hades
     device_ = emscripten_webgpu_get_device();
     if (device_ == nullptr)
     {
-      hades::Log::error("webgpu", "WebGPURenderer::init: failed to get WebGPU device");
+      hades::Log::error_tagged("webgpu", "WebGPURenderer::init: failed to get WebGPU device");
       return false;
     }
 #else
     // Native WebGPU path would go here (wgpu-native / dawn).
-    hades::Log::error("webgpu", "WebGPURenderer::init: native WebGPU not supported");
+    hades::Log::error_tagged("webgpu", "WebGPURenderer::init: native WebGPU not supported");
     return false;
 #endif
 
@@ -99,7 +99,7 @@ namespace hades
     surface_ = wgpuInstanceCreateSurface(instance_, &surfaceDesc);
     if (surface_ == nullptr)
     {
-      hades::Log::error("webgpu", "WebGPURenderer::init: failed to create surface");
+      hades::Log::error_tagged("webgpu", "WebGPURenderer::init: failed to create surface");
       return false;
     }
 
@@ -116,7 +116,7 @@ namespace hades
     mpInfo.depthFormat = WGPUTextureFormat_Depth24Plus;
     if (!meshPipeline_->init(mpInfo))
     {
-      hades::Log::error("webgpu", "WebGPURenderer::init: mesh pipeline init failed");
+      hades::Log::error_tagged("webgpu", "WebGPURenderer::init: mesh pipeline init failed");
       meshPipeline_.reset();
       return false;
     }
@@ -265,7 +265,7 @@ namespace hades
     info.DepthStencilFormat = WGPUTextureFormat_Undefined;
     if (!ImGui_ImplWGPU_Init(&info))
     {
-      hades::Log::error("webgpu", "ImGui_ImplWGPU_Init failed");
+      hades::Log::error_tagged("webgpu", "ImGui_ImplWGPU_Init failed");
       return;
     }
     imguiInitialized_ = true;

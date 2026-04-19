@@ -29,13 +29,13 @@ namespace
     char buf[1024];
     std::vsnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
-    hades::Log::info("jolt", "%s", buf);
+    hades::Log::info_tagged("jolt", "%s", buf);
   }
 
 #ifdef JPH_ENABLE_ASSERTS
   static bool jolt_assert_failed(const char *expression, const char *message, const char *file, JPH::uint line)
   {
-    hades::Log::error("jolt", "Assertion failed: %s:%u: (%s) %s", file, line, expression, message ? message : "");
+    hades::Log::error_tagged("jolt", "Assertion failed: %s:%u: (%s) %s", file, line, expression, message ? message : "");
     return true; // trigger breakpoint
   }
 #endif
@@ -152,7 +152,7 @@ namespace hades
     impl_->physicsSystem->SetContactListener(&impl_->contactListener);
 
     impl_->initialized = true;
-    hades::Log::info("jolt", "Jolt Physics initialized (%u threads)", numThreads);
+    hades::Log::info_tagged("jolt", "Jolt Physics initialized (%u threads)", numThreads);
     return true;
   }
 

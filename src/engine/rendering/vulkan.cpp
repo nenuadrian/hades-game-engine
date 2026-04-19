@@ -31,7 +31,7 @@ namespace hades
       VkResult err = vkDeviceWaitIdle(g_Device);
       if (err != VK_SUCCESS)
       {
-        hades::Log::warn("vulkan", "vkDeviceWaitIdle on shutdown returned %d; skipping GPU resource teardown", err);
+        hades::Log::warn_tagged("vulkan", "vkDeviceWaitIdle on shutdown returned %d; skipping GPU resource teardown", err);
         device_usable = false;
       }
     }
@@ -93,7 +93,7 @@ namespace hades
       return;
     }
 
-    hades::Log::error("vulkan", "VkResult = %d", err);
+    hades::Log::error_tagged("vulkan", "VkResult = %d", err);
     if (err < 0)
     {
       std::abort();
@@ -116,7 +116,7 @@ namespace hades
     (void)messageCode;
     (void)pUserData;
     (void)pLayerPrefix;
-    hades::Log::warn("vulkan", "Debug report from ObjectType: %i -- Message: %s", objectType, pMessage);
+    hades::Log::warn_tagged("vulkan", "Debug report from ObjectType: %i -- Message: %s", objectType, pMessage);
     return VK_FALSE;
   }
 
@@ -224,7 +224,7 @@ namespace hades
         }
         else
         {
-          hades::Log::warn("vulkan", "validation layer not available, skipping debug report");
+          hades::Log::warn_tagged("vulkan", "validation layer not available, skipping debug report");
         }
       }
 #endif
@@ -406,7 +406,7 @@ namespace hades
     VkResult err;
     if (SDL_Vulkan_CreateSurface(window, g_Instance, &surface) == 0)
     {
-      hades::Log::error("vulkan", "Failed to create Vulkan surface: %s", SDL_GetError());
+      hades::Log::error_tagged("vulkan", "Failed to create Vulkan surface: %s", SDL_GetError());
       return false;
     }
 
@@ -416,7 +416,7 @@ namespace hades
     vkGetPhysicalDeviceSurfaceSupportKHR(g_PhysicalDevice, g_QueueFamily, g_MainWindowData.Surface, &res);
     if (res != VK_TRUE)
     {
-      hades::Log::error("vulkan", "no WSI support on physical device 0");
+      hades::Log::error_tagged("vulkan", "no WSI support on physical device 0");
       return false;
     }
 
@@ -905,7 +905,7 @@ namespace hades
         Vulkan_Frame *fd = &g_MainWindowData.Frames[i];
         if (!createDepthResources(fd, g_MainWindowData.Width, g_MainWindowData.Height))
         {
-          hades::Log::error("vulkan", "failed to create depth resources for frame %u", i);
+          hades::Log::error_tagged("vulkan", "failed to create depth resources for frame %u", i);
         }
       }
 
@@ -1308,7 +1308,7 @@ namespace hades
     info.allocator = g_Allocator;
     if (!mesh_pipeline_->init(info))
     {
-      hades::Log::warn("vulkan", "mesh pipeline init failed; scene rendering disabled");
+      hades::Log::warn_tagged("vulkan", "mesh pipeline init failed; scene rendering disabled");
       mesh_pipeline_.reset();
       return;
     }
@@ -1330,7 +1330,7 @@ namespace hades
     info.allocator = g_Allocator;
     if (!scene_targets_->init(info))
     {
-      hades::Log::warn("vulkan", "scene targets init failed");
+      hades::Log::warn_tagged("vulkan", "scene targets init failed");
       scene_targets_.reset();
       return;
     }

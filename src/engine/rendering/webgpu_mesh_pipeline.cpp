@@ -175,7 +175,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     shaderModule_ = wgpuDeviceCreateShaderModule(device_, &smDesc);
     if (shaderModule_ == nullptr)
     {
-      hades::Log::error("webgpu_mesh", "wgpuDeviceCreateShaderModule failed");
+      hades::Log::error_tagged("webgpu_mesh", "wgpuDeviceCreateShaderModule failed");
       return false;
     }
 
@@ -321,7 +321,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
       pipeline_ = wgpuDeviceCreateRenderPipeline(device_, &pd);
       if (pipeline_ == nullptr)
       {
-        hades::Log::error("webgpu_mesh", "wgpuDeviceCreateRenderPipeline failed");
+        hades::Log::error_tagged("webgpu_mesh", "wgpuDeviceCreateRenderPipeline failed");
         return false;
       }
     }
@@ -576,7 +576,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
       MeshCpuData cpu = buildPrimitiveMesh(type);
       if (!createMesh(cpu, meshes_[idx]))
       {
-        hades::Log::error("webgpu_mesh", "failed to upload primitive mesh");
+        hades::Log::error_tagged("webgpu_mesh", "failed to upload primitive mesh");
       }
       else
       {

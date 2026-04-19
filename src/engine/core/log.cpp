@@ -179,7 +179,7 @@ namespace hades
       emit(Level::Error, nullptr, message);
     }
 
-    void debug(const char *tag, const char *fmt, ...)
+    void debug_tagged(const char *tag, const char *fmt, ...)
     {
       std::va_list args;
       va_start(args, fmt);
@@ -188,7 +188,7 @@ namespace hades
       emit(Level::Debug, tag, message);
     }
 
-    void info(const char *tag, const char *fmt, ...)
+    void info_tagged(const char *tag, const char *fmt, ...)
     {
       std::va_list args;
       va_start(args, fmt);
@@ -197,7 +197,7 @@ namespace hades
       emit(Level::Info, tag, message);
     }
 
-    void warn(const char *tag, const char *fmt, ...)
+    void warn_tagged(const char *tag, const char *fmt, ...)
     {
       std::va_list args;
       va_start(args, fmt);
@@ -206,7 +206,7 @@ namespace hades
       emit(Level::Warning, tag, message);
     }
 
-    void error(const char *tag, const char *fmt, ...)
+    void error_tagged(const char *tag, const char *fmt, ...)
     {
       std::va_list args;
       va_start(args, fmt);

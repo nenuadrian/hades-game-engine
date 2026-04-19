@@ -53,7 +53,7 @@ namespace hades
       return true;
 
 #if !HADES_MESH_SHADERS_EMBEDDED
-    hades::Log::error("vulkan_mesh",
+    hades::Log::error_tagged("vulkan_mesh",
                       "Mesh shaders not embedded — rebuild with glslangValidator available.");
     return false;
 #else
@@ -75,7 +75,7 @@ namespace hades
       pi.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
       if (vkCreateCommandPool(device_, &pi, allocator_, &uploadPool_) != VK_SUCCESS)
       {
-        hades::Log::error("vulkan_mesh", "failed to create upload command pool");
+        hades::Log::error_tagged("vulkan_mesh", "failed to create upload command pool");
         return false;
       }
     }
@@ -98,7 +98,7 @@ namespace hades
       ci.pBindings = &b;
       if (vkCreateDescriptorSetLayout(device_, &ci, allocator_, &setLayout_) != VK_SUCCESS)
       {
-        hades::Log::error("vulkan_mesh", "failed to create descriptor set layout");
+        hades::Log::error_tagged("vulkan_mesh", "failed to create descriptor set layout");
         return false;
       }
     }
@@ -116,7 +116,7 @@ namespace hades
       ci.pPushConstantRanges = &pc;
       if (vkCreatePipelineLayout(device_, &ci, allocator_, &pipelineLayout_) != VK_SUCCESS)
       {
-        hades::Log::error("vulkan_mesh", "failed to create pipeline layout");
+        hades::Log::error_tagged("vulkan_mesh", "failed to create pipeline layout");
         return false;
       }
     }
@@ -132,7 +132,7 @@ namespace hades
       ci.pPoolSizes = &sz;
       if (vkCreateDescriptorPool(device_, &ci, allocator_, &descriptorPool_) != VK_SUCCESS)
       {
-        hades::Log::error("vulkan_mesh", "failed to create descriptor pool");
+        hades::Log::error_tagged("vulkan_mesh", "failed to create descriptor pool");
         return false;
       }
     }
@@ -336,7 +336,7 @@ namespace hades
     VkResult r = vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &info, allocator_, &pipeline);
     if (r != VK_SUCCESS)
     {
-      hades::Log::error("vulkan_mesh", "vkCreateGraphicsPipelines failed");
+      hades::Log::error_tagged("vulkan_mesh", "vkCreateGraphicsPipelines failed");
       return VK_NULL_HANDLE;
     }
     pipelines_.emplace(key, pipeline);
@@ -464,7 +464,7 @@ namespace hades
       MeshCpuData cpu = buildPrimitiveMesh(type);
       if (!createMesh(cpu, meshes_[idx]))
       {
-        hades::Log::error("vulkan_mesh", "failed to upload primitive mesh");
+        hades::Log::error_tagged("vulkan_mesh", "failed to upload primitive mesh");
       }
       else
       {
@@ -599,7 +599,7 @@ namespace hades
     VkShaderModule m = VK_NULL_HANDLE;
     if (vkCreateShaderModule(device_, &ci, allocator_, &m) != VK_SUCCESS)
     {
-      hades::Log::error("vulkan_mesh", "vkCreateShaderModule failed");
+      hades::Log::error_tagged("vulkan_mesh", "vkCreateShaderModule failed");
       return VK_NULL_HANDLE;
     }
     return m;

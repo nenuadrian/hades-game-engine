@@ -33,10 +33,12 @@ namespace hades
     void warn(const char *fmt, ...) HADES_PRINTF_FORMAT(1, 2);
     void error(const char *fmt, ...) HADES_PRINTF_FORMAT(1, 2);
 
-    void debug(const char *tag, const char *fmt, ...) HADES_PRINTF_FORMAT(2, 3);
-    void info(const char *tag, const char *fmt, ...) HADES_PRINTF_FORMAT(2, 3);
-    void warn(const char *tag, const char *fmt, ...) HADES_PRINTF_FORMAT(2, 3);
-    void error(const char *tag, const char *fmt, ...) HADES_PRINTF_FORMAT(2, 3);
+    // Tagged logging uses explicit names to avoid ambiguous overloads like
+    // warn("message: %s", value) resolving as warn(tag, fmt, ...).
+    void debug_tagged(const char *tag, const char *fmt, ...) HADES_PRINTF_FORMAT(2, 3);
+    void info_tagged(const char *tag, const char *fmt, ...) HADES_PRINTF_FORMAT(2, 3);
+    void warn_tagged(const char *tag, const char *fmt, ...) HADES_PRINTF_FORMAT(2, 3);
+    void error_tagged(const char *tag, const char *fmt, ...) HADES_PRINTF_FORMAT(2, 3);
   }
 }
 

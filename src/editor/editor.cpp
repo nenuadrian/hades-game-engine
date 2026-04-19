@@ -153,15 +153,15 @@ namespace hades
   {
     if (level == DebugMessageLevel::Warning)
     {
-      Log::warn("editor", "%s", text.c_str());
+      Log::warn_tagged("editor", "%s", text.c_str());
     }
     else if (level == DebugMessageLevel::Error)
     {
-      Log::error("editor", "%s", text.c_str());
+      Log::error_tagged("editor", "%s", text.c_str());
     }
     else
     {
-      Log::info("editor", "%s", text.c_str());
+      Log::info_tagged("editor", "%s", text.c_str());
     }
 
     mainDebugConsole_.add_message(level, text);

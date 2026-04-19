@@ -211,7 +211,7 @@ namespace hades
     rp.pDependencies = deps;
     if (vkCreateRenderPass(device_, &rp, allocator_, &renderPass_) != VK_SUCCESS)
     {
-      hades::Log::error("vulkan_scene_target", "vkCreateRenderPass failed");
+      hades::Log::error_tagged("vulkan_scene_target", "vkCreateRenderPass failed");
       return false;
     }
     return true;
@@ -230,7 +230,7 @@ namespace hades
     si.maxLod = 1.0f;
     if (vkCreateSampler(device_, &si, allocator_, &sampler_) != VK_SUCCESS)
     {
-      hades::Log::error("vulkan_scene_target", "vkCreateSampler failed");
+      hades::Log::error_tagged("vulkan_scene_target", "vkCreateSampler failed");
       return false;
     }
     return true;
