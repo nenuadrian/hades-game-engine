@@ -2098,7 +2098,8 @@ namespace hades
       ImGui::PopStyleVar();
 
       const float toolbarBottomY = toolbarStartY + ImGui::GetFrameHeight();
-      ImGui::SetCursorPos(ImVec2(0.0f, toolbarBottomY + sceneToolbarMarginBottom));
+      ImGui::SetCursorPos(ImVec2(0.0f, toolbarBottomY));
+      ImGui::Dummy(ImVec2(0.0f, sceneToolbarMarginBottom));
     }
 
     const ImVec2 canvasSize = ImGui::GetContentRegionAvail();
