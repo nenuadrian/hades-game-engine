@@ -164,15 +164,6 @@ namespace hades
       return name + " (" + std::to_string(entity) + ")";
     }
 
-    template <typename T>
-    void remove_component_if_present(ComponentManager &componentManager, Entity::EntityId entity)
-    {
-      if (componentManager.hasComponent<T>(entity))
-      {
-        componentManager.removeComponent<T>(entity);
-      }
-    }
-
     bool hierarchy_contains_entity(
         Entity::EntityId root,
         Entity::EntityId target,
@@ -223,26 +214,10 @@ namespace hades
         parentHierarchy.removeChild(entity);
       }
 
-      remove_component_if_present<NameComponent>(componentManager, entity);
-      remove_component_if_present<WorldComponent>(componentManager, entity);
-      remove_component_if_present<TransformHierarchyComponent>(componentManager, entity);
-      remove_component_if_present<PositionComponent2D>(componentManager, entity);
-      remove_component_if_present<PositionComponent3D>(componentManager, entity);
-      remove_component_if_present<CameraComponent>(componentManager, entity);
-      remove_component_if_present<AudioListenerComponent>(componentManager, entity);
-      remove_component_if_present<PrimitiveComponent>(componentManager, entity);
-      remove_component_if_present<TextComponent>(componentManager, entity);
-      remove_component_if_present<AudioSourceComponent>(componentManager, entity);
-      remove_component_if_present<RenderComponent>(componentManager, entity);
-      remove_component_if_present<LightComponent>(componentManager, entity);
-      remove_component_if_present<ScriptComponent>(componentManager, entity);
-      remove_component_if_present<MeshRendererComponent>(componentManager, entity);
-      remove_component_if_present<ModelComponent>(componentManager, entity);
-      remove_component_if_present<AnimationComponent>(componentManager, entity);
-      remove_component_if_present<ColliderComponent>(componentManager, entity);
-      remove_component_if_present<RigidBodyComponent>(componentManager, entity);
-      remove_component_if_present<RotationComponent3D>(componentManager, entity);
-      remove_component_if_present<ScaleComponent3D>(componentManager, entity);
+      // Sweep every registered component type rather than naming them one by
+      // one: entity IDs are recycled, so a type missed here would reappear on
+      // whichever entity is created next.
+      componentManager.removeAllComponents(entity);
 
       entityManager.destroyEntity(entity);
     }

@@ -35,7 +35,6 @@ namespace hades
     WorkspaceExportSettings exportMacOS;
     WorkspaceExportSettings exportLinux;
     WorkspaceExportSettings exportWindows;
-    WorkspaceExportSettings exportWeb;
     WorkspaceGamePreviewSettings gamePreview;
 
     // External editor preference: 0 = VS Code, 1 = Rider, 2 = Visual Studio, 3 = System.

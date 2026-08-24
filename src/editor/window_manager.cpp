@@ -36,13 +36,8 @@
 #include "../engine/audio/script_audio.hpp"
 #include "../engine/rendering/renderer.hpp"
 #include "../engine/profiling/frame_metrics.hpp"
-#ifdef HADES_PLATFORM_WEB
-#include "../engine/rendering/webgpu_renderer.hpp"
-using EditorRenderer = hades::WebGPURenderer;
-#else
 #include "../engine/rendering/vulkan.hpp"
 using EditorRenderer = hades::VulkanRenderer;
-#endif
 #include "../engine/physics/physics_world.hpp"
 #include "../engine/systems/animation_system.hpp"
 #include "../engine/systems/audio_system.hpp"
@@ -443,14 +438,10 @@ namespace hades
 #ifdef __APPLE__
     io.ConfigMacOSXBehaviors = true;
 #endif
-#ifndef HADES_PLATFORM_WEB
     if (enableViewports)
     {
       io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
     }
-#else
-    (void)enableViewports;  // multi-viewport requires multiple OS windows
-#endif
     apply_editor_theme();
 
     // Load a more readable proportional font (bundled with ImGui) and fall
@@ -484,15 +475,6 @@ namespace hades
       }
     }
 
-#ifdef HADES_PLATFORM_WEB
-    if (!ImGui_ImplSDL2_InitForOther(window))
-    {
-      Log::error("ImGui_ImplSDL2_InitForOther() failed.");
-      ImGui::DestroyContext(context_);
-      context_ = nullptr;
-      return false;
-    }
-#else
     if (!ImGui_ImplSDL2_InitForVulkan(window))
     {
       Log::error("ImGui_ImplSDL2_InitForVulkan() failed.");
@@ -500,7 +482,6 @@ namespace hades
       context_ = nullptr;
       return false;
     }
-#endif
 
     renderer_ = &renderer;
     enableViewports_ = enableViewports;
@@ -1083,9 +1064,7 @@ namespace hades
       audio_engine->stop_all();
     }
 
-#ifndef HADES_PLATFORM_WEB
     playWindow.close();
-#endif
     entityManager = EntityManager();
     componentManager = ComponentManager(&entityManager);
     eventBus.clear();
@@ -1107,9 +1086,7 @@ namespace hades
     {
       editor.log_error("Play mode stopped: " + message);
     }
-#ifndef HADES_PLATFORM_WEB
     playWindow.close();
-#endif
 
     if (audio_engine != nullptr)
     {
@@ -1131,9 +1108,6 @@ namespace hades
 
   void WindowManager::sync_play_window()
   {
-#ifdef HADES_PLATFORM_WEB
-    // Detached play window (a second SDL window) is not supported on the web.
-#else
     if (!editor.state.isPlaying)
     {
       playWindow.close();
@@ -1155,7 +1129,6 @@ namespace hades
         componentManager,
         editor.state.activeWorld,
         editor.state.activeCamera);
-#endif
   }
 
 #ifdef HADES_ENABLE_API
@@ -1283,13 +1256,8 @@ namespace hades
         workspaceLogoWidth,
         workspaceLogoHeight);
 
-#ifdef HADES_PLATFORM_WEB
-    const SDL_WindowFlags window_flags =
-        static_cast<SDL_WindowFlags>(SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_HIDDEN);
-#else
     const SDL_WindowFlags window_flags =
         static_cast<SDL_WindowFlags>(SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_HIDDEN);
-#endif
     window.reset(SDL_CreateWindow(
         EDITOR_WINDOW_TITLE,
         SDL_WINDOWPOS_CENTERED,
@@ -1360,11 +1328,7 @@ namespace hades
       while (SDL_PollEvent(&event))
       {
         const auto targetWindowId = event_window_id(event);
-#ifdef HADES_PLATFORM_WEB
-        const std::optional<Uint32> playWindowId;
-#else
         const auto playWindowId = playWindow.window_id();
-#endif
         if (!targetWindowId.has_value() || *targetWindowId == editorWindowId)
         {
           imgui_session.process_event(event);

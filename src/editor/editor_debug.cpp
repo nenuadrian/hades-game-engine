@@ -551,6 +551,7 @@ namespace hades
       add_stat_row_label_value("Workspace loaded", activeWorkspacePath_.empty() ? "No" : "Yes");
       add_stat_row_label_value("Saved worlds on disk", cachedDiskWorlds_.size());
       add_stat_row_label_value("Workspace scripts", workspaceScriptFiles_.size());
+      add_stat_row_label_value("Workspace models", workspaceModelFiles_.size());
       add_stat_row_label_value("Parsed script cache entries", parsedScriptCache_.size());
       add_stat_row_label_value("Restore saved worlds pending", pendingSavedWorldRestore_ ? "Yes" : "No");
       ImGui::EndTable();

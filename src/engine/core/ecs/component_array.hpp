@@ -39,7 +39,16 @@ namespace hades
 
     void remove(Entity::EntityId entity)
     {
-      size_t index = entityToIndex[entity];
+      const auto entityIt = entityToIndex.find(entity);
+      if (entityIt == entityToIndex.end())
+      {
+        // Removing a component the entity never had is a no-op. Without this
+        // guard the swap-remove below would clobber the element at index 0 and
+        // underflow the size on an empty array.
+        return;
+      }
+
+      size_t index = entityIt->second;
       size_t lastIndex = components.size() - 1;
 
       // Move the last element to the removed position
@@ -63,9 +72,13 @@ namespace hades
       }
     }
 
+    /// Throws std::out_of_range when the entity has no component of this type.
+    /// Callers are expected to gate on has() (or a signature query) first;
+    /// reading through operator[] here would insert a phantom index entry and
+    /// alias another entity's storage.
     T &get(Entity::EntityId entity)
     {
-      return components[entityToIndex[entity]];
+      return components[entityToIndex.at(entity)];
     }
 
     bool has(Entity::EntityId entity) override

@@ -64,7 +64,6 @@ namespace hades
       macOS,
       Linux,
       Windows,
-      Web,
     };
 
     struct ExportPlatformSettings
@@ -165,8 +164,8 @@ namespace hades
 #else
     ExportPlatform selectedExportPlatform_ = ExportPlatform::Windows;
 #endif
-    std::array<ExportPlatformSettings, 4> exportPlatformSettings_{};
-    std::array<ExportPlatformBuildResult, 4> exportPlatformBuildResults_{};
+    std::array<ExportPlatformSettings, 3> exportPlatformSettings_{};
+    std::array<ExportPlatformBuildResult, 3> exportPlatformBuildResults_{};
     // Only one build runs at a time; this records which platform owns the
     // currently-running build so status text renders only on that tab.
     bool exportBuildInProgress_ = false;

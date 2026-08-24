@@ -39,11 +39,6 @@ namespace
 
   bool is_current_platform(hades::Editor::ExportPlatform platform)
   {
-    // Web is a cross-compile target available on all host platforms.
-    if (platform == hades::Editor::ExportPlatform::Web)
-    {
-      return true;
-    }
 #ifdef __APPLE__
     return platform == hades::Editor::ExportPlatform::macOS;
 #elif defined(__linux__)
@@ -66,8 +61,6 @@ namespace
       return "Linux";
     case hades::Editor::ExportPlatform::Windows:
       return "Windows";
-    case hades::Editor::ExportPlatform::Web:
-      return "Web (WebAssembly)";
     }
     return "Unknown";
   }
@@ -150,8 +143,7 @@ namespace
     const std::string sourceDir = hades::build_config::cmake_source_dir;
     const std::string cmakeCommand = hades::build_config::cmake_command;
 
-    const bool isWeb = (platform == hades::Editor::ExportPlatform::Web);
-    const std::filesystem::path buildDir = outputDir / (isWeb ? "build-web" : "build");
+    const std::filesystem::path buildDir = outputDir / "build";
     const std::filesystem::path stageDir = outputDir / projectName;
     const std::string buildType = enableDebugBuild ? "RelWithDebInfo" : "Release";
 
@@ -182,167 +174,6 @@ namespace
       state->succeeded = false;
       state->finished = true;
     };
-
-    if (isWeb)
-    {
-      // --- Web (Emscripten) build path ---
-
-      // Locate emcmake. Prefer EMSDK env var, fall back to PATH.
-      std::string emcmake = "emcmake";
-      const char *emsdkEnv = std::getenv("EMSDK");
-      if (emsdkEnv != nullptr && emsdkEnv[0] != '\0')
-      {
-        const std::filesystem::path emsdkPath(emsdkEnv);
-#ifdef _WIN32
-        const auto candidate = emsdkPath / "upstream" / "emscripten" / "emcmake.bat";
-#else
-        const auto candidate = emsdkPath / "upstream" / "emscripten" / "emcmake";
-#endif
-        if (std::filesystem::exists(candidate))
-        {
-          emcmake = candidate.string();
-        }
-      }
-
-      // Resolve the asset directory to embed (the workspace .hades folder).
-      const std::filesystem::path hadesDataSrc = workspacePath / ".hades";
-      const std::string webAssetDir = hadesDataSrc.string();
-
-      // Step 1: CMake configure via emcmake.
-      append_log(*state, "=== Configuring (emcmake cmake) ===\n", &logFile);
-      {
-        std::vector<std::string> configureArgs = {
-            emcmake, "cmake",
-            "-S", sourceDir,
-            "-B", buildDir.string(),
-            "-DCMAKE_BUILD_TYPE=" + buildType,
-            "-DBUILD_SHARED_LIBS=OFF",
-            "-DHADES_WEB_ASSET_DIR=" + webAssetDir};
-        if (enableDebugBuild)
-        {
-          configureArgs.push_back("-DCMAKE_VERBOSE_MAKEFILE=ON");
-        }
-        int exitCode = run_streaming(*state, configureArgs, &logFile);
-        if (exitCode != 0)
-        {
-          fail("Emscripten CMake configure failed (exit code " + std::to_string(exitCode) + "). "
-               "Is the Emscripten SDK installed and in your PATH?");
-          return;
-        }
-        append_log(*state, "\n", &logFile);
-      }
-
-      // Step 2: Build.
-      append_log(*state, "=== Building HadesRuntime (WebAssembly) ===\n", &logFile);
-      {
-        std::vector<std::string> buildArgs = {
-            cmakeCommand,
-            "--build", buildDir.string(),
-            "--target", "HadesRuntime",
-            "--config", buildType};
-        if (enableDebugBuild)
-        {
-          buildArgs.push_back("--verbose");
-        }
-        int exitCode = run_streaming(*state, buildArgs, &logFile);
-        if (exitCode != 0)
-        {
-          fail("Web build failed (exit code " + std::to_string(exitCode) + ").");
-          return;
-        }
-        append_log(*state, "\n", &logFile);
-      }
-
-      // Step 3: Package web output.
-      append_log(*state, "=== Packaging (Web) ===\n", &logFile);
-
-      std::error_code ec;
-      std::filesystem::create_directories(stageDir, ec);
-      if (ec)
-      {
-        fail("Failed to create output directory: " + ec.message());
-        return;
-      }
-
-      // Emscripten outputs HadesRuntime.html, HadesRuntime.js, HadesRuntime.wasm,
-      // and optionally HadesRuntime.data (preloaded assets).
-      const std::vector<std::string> webExtensions = {".html", ".js", ".wasm", ".data"};
-      bool foundWasm = false;
-      for (const auto &ext : webExtensions)
-      {
-        const std::filesystem::path src = buildDir / ("HadesRuntime" + ext);
-        if (std::filesystem::exists(src))
-        {
-          // Rename .html to index.html for convenience.
-          const std::string destName = (ext == ".html") ? "index.html" : ("HadesRuntime" + ext);
-          std::filesystem::copy_file(src, stageDir / destName,
-                                     std::filesystem::copy_options::overwrite_existing, ec);
-          if (!ec)
-          {
-            append_log(*state, "Copied " + destName + "\n", &logFile);
-          }
-          if (ext == ".wasm")
-          {
-            foundWasm = true;
-          }
-        }
-      }
-
-      if (!foundWasm)
-      {
-        fail("WebAssembly output not found in build directory.");
-        return;
-      }
-
-      // Create a convenience server script.
-#ifdef _WIN32
-      {
-        const std::filesystem::path serverPath = stageDir / "serve.bat";
-        FILE *f = std::fopen(serverPath.string().c_str(), "w");
-        if (f != nullptr)
-        {
-          std::fprintf(f,
-                       "@echo off\r\n"
-                       "echo Serving %s at http://localhost:8000\r\n"
-                       "python -m http.server 8000\r\n",
-                       projectName.c_str());
-          std::fclose(f);
-        }
-      }
-#else
-      {
-        const std::filesystem::path serverPath = stageDir / "serve.sh";
-        FILE *f = std::fopen(serverPath.string().c_str(), "w");
-        if (f != nullptr)
-        {
-          std::fprintf(f,
-                       "#!/bin/bash\n"
-                       "echo \"Serving %s at http://localhost:8000\"\n"
-                       "cd \"$(dirname \"$0\")\"\n"
-                       "python3 -m http.server 8000\n",
-                       projectName.c_str());
-          std::fclose(f);
-          std::filesystem::permissions(serverPath,
-                                       std::filesystem::perms::owner_exec |
-                                           std::filesystem::perms::group_exec,
-                                       std::filesystem::perm_options::add, ec);
-        }
-      }
-#endif
-      append_log(*state, "Created server script.\n", &logFile);
-
-      append_log(*state, "\nWeb export complete.\n", &logFile);
-      append_log(*state, "Output directory: " + stageDir.string() + "\n", &logFile);
-      append_log(*state, "Run the serve script and open http://localhost:8000 in a WebGPU-capable browser.\n", &logFile);
-      {
-        std::lock_guard<std::mutex> lock(state->mutex);
-        state->succeeded = true;
-        state->finished = true;
-      }
-      return;
-    }
-
-    // --- Native build path (macOS / Linux / Windows) ---
 
     // Step 1: CMake configure.
     // Force BUILD_SHARED_LIBS=OFF so all dependencies are statically linked,
@@ -811,7 +642,7 @@ namespace hades
     }
 
     bool exportSettingsDirty = false;
-    const ExportPlatform platforms[] = {ExportPlatform::macOS, ExportPlatform::Linux, ExportPlatform::Windows, ExportPlatform::Web};
+    const ExportPlatform platforms[] = {ExportPlatform::macOS, ExportPlatform::Linux, ExportPlatform::Windows};
 
     if (ImGui::BeginTable(
             "ExportLayout",
@@ -831,12 +662,7 @@ namespace hades
           exportSettingsDirty = true;
         }
 
-        if (platform == ExportPlatform::Web)
-        {
-          ImGui::SameLine();
-          ImGui::TextDisabled("(Emscripten)");
-        }
-        else if (is_current_platform(platform))
+        if (is_current_platform(platform))
         {
           ImGui::SameLine();
           ImGui::TextDisabled("(current host)");
@@ -893,34 +719,31 @@ namespace hades
       ImGui::Separator();
       ImGui::Spacing();
 
-      if (selectedExportPlatform_ != ExportPlatform::Web)
+      if (ImGui::Checkbox("Enable headless mode (--headless)", &platformSettings.enableHeadless))
       {
-        if (ImGui::Checkbox("Enable headless mode (--headless)", &platformSettings.enableHeadless))
-        {
-          exportSettingsDirty = true;
-        }
-        if (ImGui::IsItemHovered())
-        {
-          ImGui::SetTooltip("When enabled, the exported game accepts --headless to run\n"
-                            "without a window or rendering (e.g. for ML training).");
-        }
+        exportSettingsDirty = true;
+      }
+      if (ImGui::IsItemHovered())
+      {
+        ImGui::SetTooltip("When enabled, the exported game accepts --headless to run\n"
+                          "without a window or rendering (e.g. for ML training).");
+      }
 
-        if (ImGui::Checkbox("Enable HadesAPI (--api)", &platformSettings.enableHadesAPI))
-        {
-          exportSettingsDirty = true;
-        }
-        if (ImGui::IsItemHovered())
-        {
-          ImGui::SetTooltip("When enabled, the exported game includes a REST API server\n"
-                            "for ML training. Use --api to start in API mode.\n\n"
-                            "Endpoints:\n"
-                            "  POST /api/step   - Advance N ticks with optional inputs\n"
-                            "  GET  /api/state  - Read observed variables and entity state\n"
-                            "  POST /api/reset  - Reset the game to its initial state\n"
-                            "  POST /api/input  - Queue key events\n"
-                            "  GET  /api/status - Check server status\n\n"
-                            "Scripts expose variables via HadesAPI.Observe(key, value).");
-        }
+      if (ImGui::Checkbox("Enable HadesAPI (--api)", &platformSettings.enableHadesAPI))
+      {
+        exportSettingsDirty = true;
+      }
+      if (ImGui::IsItemHovered())
+      {
+        ImGui::SetTooltip("When enabled, the exported game includes a REST API server\n"
+                          "for ML training. Use --api to start in API mode.\n\n"
+                          "Endpoints:\n"
+                          "  POST /api/step   - Advance N ticks with optional inputs\n"
+                          "  GET  /api/state  - Read observed variables and entity state\n"
+                          "  POST /api/reset  - Reset the game to its initial state\n"
+                          "  POST /api/input  - Queue key events\n"
+                          "  GET  /api/status - Check server status\n\n"
+                          "Scripts expose variables via HadesAPI.Observe(key, value).");
       }
 
       if (ImGui::Checkbox("Debug build (verbose logs, HADES_DEBUG=1)", &platformSettings.enableDebugBuild))

@@ -5,7 +5,6 @@ Cross-platform C++20 project built with CMake. Pick your OS for minimal instruct
 - [macOS](macos.md)
 - [Linux](linux.md)
 - [Windows](windows.md)
-- [Web (Emscripten / WebAssembly)](web.md)
 
 ## Common notes
 

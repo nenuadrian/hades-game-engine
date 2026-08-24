@@ -160,7 +160,13 @@ function(hades_configure_dependencies)
   set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
   set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
   set(ASSIMP_NO_EXPORT ON CACHE BOOL "" FORCE)
-  set(ASSIMP_BUILD_ZLIB ON CACHE BOOL "" FORCE)
+  if(APPLE)
+    # assimp's vendored zlib trips over the modern macOS SDK (its fdopen()
+    # fallback macro breaks <_stdio.h>); the SDK always ships zlib, so use it.
+    set(ASSIMP_BUILD_ZLIB OFF CACHE BOOL "" FORCE)
+  else()
+    set(ASSIMP_BUILD_ZLIB ON CACHE BOOL "" FORCE)
+  endif()
   set(ASSIMP_WARNINGS_AS_ERRORS OFF CACHE BOOL "" FORCE)
   set(ASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
   set(ASSIMP_BUILD_FBX_IMPORTER ON CACHE BOOL "" FORCE)
@@ -173,13 +179,7 @@ function(hades_configure_dependencies)
     GIT_TAG ${HADES_ASSIMP_TAG}
     GIT_SHALLOW TRUE)
 
-  if(EMSCRIPTEN)
-    # Emscripten provides SDL2 as a built-in port (-sUSE_SDL=2).
-    # Skip SDL2 FetchContent and GoogleTest/CLI11 (not needed for web runtime).
-    FetchContent_MakeAvailable(nlohmann_json joltphysics assimp)
-  else()
-    FetchContent_MakeAvailable(cli11 googletest sdl2 imgui_color_text_edit nlohmann_json joltphysics httplib assimp)
-  endif()
+  FetchContent_MakeAvailable(cli11 googletest sdl2 imgui_color_text_edit nlohmann_json joltphysics httplib assimp)
 
   # SoLoud has no top-level CMakeLists.txt, so we populate the sources and
   # build a static library ourselves (same pattern as Dear ImGui below).
@@ -235,13 +235,7 @@ function(hades_configure_dependencies)
       hades_soloud
       PUBLIC WITH_SDL2_STATIC)
 
-    if(EMSCRIPTEN)
-      # Emscripten supplies SDL2 via -sUSE_SDL=2.
-      target_compile_options(hades_soloud PUBLIC -sUSE_SDL=2)
-      target_link_options(hades_soloud PUBLIC -sUSE_SDL=2)
-    else()
-      target_link_libraries(hades_soloud PUBLIC SDL2::SDL2)
-    endif()
+    target_link_libraries(hades_soloud PUBLIC SDL2::SDL2)
   endif()
 
   FetchContent_GetProperties(imgui)
@@ -263,50 +257,29 @@ function(hades_configure_dependencies)
       ${imgui_SOURCE_DIR}/imgui_widgets.cpp
       ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl2.cpp)
 
-    if(EMSCRIPTEN)
-      # Web builds use the WebGPU ImGui backend.
-      add_library(
-        hades_imgui STATIC
-        ${IMGUI_CORE_SOURCES}
-        ${imgui_SOURCE_DIR}/backends/imgui_impl_wgpu.cpp)
+    add_library(
+      hades_imgui STATIC
+      ${IMGUI_CORE_SOURCES}
+      ${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp)
 
-      target_include_directories(
-        hades_imgui
-        PUBLIC ${imgui_SOURCE_DIR}
-               ${imgui_SOURCE_DIR}/backends)
-      # Emscripten provides SDL2 and WebGPU via compiler flags.
-      # Note: modern Emscripten (>=3.1.58) ships WebGPU via the emdawnwebgpu
-      # port rather than the legacy -sUSE_WEBGPU=1 flag, and the port must be
-      # active at compile time so that <webgpu/webgpu.h> resolves.
-      target_compile_options(hades_imgui PUBLIC -sUSE_SDL=2 --use-port=emdawnwebgpu)
-      target_link_options(hades_imgui PUBLIC -sUSE_SDL=2 --use-port=emdawnwebgpu)
-    else()
-      add_library(
-        hades_imgui STATIC
-        ${IMGUI_CORE_SOURCES}
-        ${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp)
+    target_include_directories(
+      hades_imgui
+      PUBLIC ${imgui_SOURCE_DIR}
+             ${imgui_SOURCE_DIR}/backends)
+    target_link_libraries(hades_imgui PUBLIC SDL2::SDL2 Vulkan::Vulkan)
 
-      target_include_directories(
-        hades_imgui
-        PUBLIC ${imgui_SOURCE_DIR}
-               ${imgui_SOURCE_DIR}/backends)
-      target_link_libraries(hades_imgui PUBLIC SDL2::SDL2 Vulkan::Vulkan)
-
-      if(APPLE)
-        target_link_libraries(hades_imgui PUBLIC "-framework QuartzCore")
-      endif()
+    if(APPLE)
+      target_link_libraries(hades_imgui PUBLIC "-framework QuartzCore")
     endif()
   endif()
 
-  if(NOT EMSCRIPTEN)
-    if(NOT TARGET hades_imgui_textedit)
-      add_library(
-        hades_imgui_textedit STATIC
-        ${imgui_color_text_edit_SOURCE_DIR}/TextEditor.cpp)
-      target_include_directories(
-        hades_imgui_textedit
-        PUBLIC ${imgui_color_text_edit_SOURCE_DIR})
-      target_link_libraries(hades_imgui_textedit PUBLIC hades_imgui)
-    endif()
+  if(NOT TARGET hades_imgui_textedit)
+    add_library(
+      hades_imgui_textedit STATIC
+      ${imgui_color_text_edit_SOURCE_DIR}/TextEditor.cpp)
+    target_include_directories(
+      hades_imgui_textedit
+      PUBLIC ${imgui_color_text_edit_SOURCE_DIR})
+    target_link_libraries(hades_imgui_textedit PUBLIC hades_imgui)
   endif()
 endfunction()

@@ -13,9 +13,7 @@
 #include "engine/core/ecs/system_manager.hpp"
 #include "engine/core/events/event_bus.hpp"
 #include "engine/rendering/scene_renderer.hpp"
-#ifndef HADES_PLATFORM_WEB
 #include "engine/runtime/script_runtime.hpp"
-#endif
 #ifdef HADES_ENABLE_API
 #include "engine/api/hades_api.hpp"
 #endif
@@ -66,9 +64,7 @@ namespace hades
     ComponentManager componentManager_;
     SystemManager systemManager_;
     EventBus eventBus_;
-#ifndef HADES_PLATFORM_WEB
     ScriptRuntime scriptRuntime_;
-#endif
     SdlSession sdlSession_;
     WindowPtr window_{nullptr};
     std::unique_ptr<Renderer> renderer_;
@@ -95,9 +91,7 @@ namespace hades
 #endif
 
     std::string project_name() const;
-#ifndef HADES_PLATFORM_WEB
     void handle_pending_world_load();
-#endif
   };
 }
 

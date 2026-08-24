@@ -35,6 +35,7 @@ nav:
     - Linux: building/linux.md
     - Windows: building/windows.md
   - Scripting: scripting.md
+  - Models & Animation: models.md
   - HadesAPI: api.md
   - Architecture:
     - Overview: architecture.md

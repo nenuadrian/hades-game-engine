@@ -3,9 +3,7 @@
 #include <filesystem>
 #include <string>
 
-#ifndef HADES_PLATFORM_WEB
 #include <CLI/CLI.hpp>
-#endif
 
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
@@ -21,7 +19,6 @@
 
 namespace
 {
-#ifndef HADES_PLATFORM_WEB
   // Returns the absolute path of the current executable, or an empty path on failure.
   std::filesystem::path executable_path()
   {
@@ -76,23 +73,10 @@ namespace
     }
     return {};
   }
-#endif
 }
 
 int main(int argc, char **argv)
 {
-#ifdef HADES_PLATFORM_WEB
-  // On the web, assets are embedded in the virtual filesystem at /assets
-  // via Emscripten's --preload-file. No CLI argument parsing is needed.
-  (void)argc;
-  (void)argv;
-  static hades::GameRuntime runtime;
-  if (!runtime.init(std::filesystem::path("/assets")))
-  {
-    return EXIT_FAILURE;
-  }
-  return runtime.run();
-#else
   const std::filesystem::path exePath = executable_path();
   const std::filesystem::path exeDir = exePath.empty() ? std::filesystem::path{} : exePath.parent_path();
 
@@ -155,5 +139,4 @@ int main(int argc, char **argv)
   }
 
   return runtime.run();
-#endif
 }

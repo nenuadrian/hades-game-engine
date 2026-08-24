@@ -44,8 +44,6 @@ namespace hades
         return Editor::ExportPlatform::Linux;
       case export_platform_index(Editor::ExportPlatform::Windows):
         return Editor::ExportPlatform::Windows;
-      case export_platform_index(Editor::ExportPlatform::Web):
-        return Editor::ExportPlatform::Web;
       default:
 #ifdef __APPLE__
         return Editor::ExportPlatform::macOS;
@@ -687,7 +685,6 @@ namespace hades
     settings.exportMacOS = to_workspace_export(exportPlatformSettings_[export_platform_index(ExportPlatform::macOS)]);
     settings.exportLinux = to_workspace_export(exportPlatformSettings_[export_platform_index(ExportPlatform::Linux)]);
     settings.exportWindows = to_workspace_export(exportPlatformSettings_[export_platform_index(ExportPlatform::Windows)]);
-    settings.exportWeb = to_workspace_export(exportPlatformSettings_[export_platform_index(ExportPlatform::Web)]);
     settings.gamePreview.enableHadesAPI = gamePreviewEnableHadesAPI_;
     settings.externalEditor = static_cast<int>(externalEditor_);
 
@@ -734,7 +731,6 @@ namespace hades
     from_workspace_export(settings.exportMacOS, exportPlatformSettings_[export_platform_index(ExportPlatform::macOS)]);
     from_workspace_export(settings.exportLinux, exportPlatformSettings_[export_platform_index(ExportPlatform::Linux)]);
     from_workspace_export(settings.exportWindows, exportPlatformSettings_[export_platform_index(ExportPlatform::Windows)]);
-    from_workspace_export(settings.exportWeb, exportPlatformSettings_[export_platform_index(ExportPlatform::Web)]);
     gamePreviewEnableHadesAPI_ = settings.gamePreview.enableHadesAPI;
     if (settings.externalEditor >= 0 && settings.externalEditor <= static_cast<int>(ExternalEditor::System))
     {

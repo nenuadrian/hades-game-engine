@@ -27,9 +27,11 @@ Educational and experimental. Also designed for ML/RL training through a headles
 
 **Rendering** — Vulkan renderer with swapchain, frame sync, and validation layers; ImGui with docking/multi-viewport; software-rasterised model preview; vector-based 3D text.
 
-**ECS** — 13 component types, 3 runtime systems (Audio, Movement, Render), parent-child hierarchy, multi-world scenes, JSON serialization.
+**ECS** — Component-based entities with Audio, Movement, Physics, Animation and Render systems, parent-child hierarchy, multi-world scenes, JSON serialization.
 
 **Scripting** — In-process C++ scripts compiled to shared libraries at play start, direct ECS access, input callbacks, screen-to-world raycasts. See [scripting](docs/scripting.md).
+
+**Models & Animation** — assimp-powered model import (FBX / OBJ / glTF / COLLADA) with per-mesh materials, GPU skinning, and an animation clip player. See [models](docs/models.md).
 
 **Audio** — SoLoud engine with 3D spatial audio and 4 buses (Master / Music / Sfx / Voice).
 
@@ -46,6 +48,7 @@ Educational and experimental. Also designed for ML/RL training through a headles
 | Library | Use |
 |---------|-----|
 | [Vulkan SDK](https://www.lunarg.com/vulkan-sdk/) / [MoltenVK](https://github.com/KhronosGroup/MoltenVK) | Rendering backend |
+| [assimp](https://github.com/assimp/assimp) | Model import (FBX / OBJ / glTF / COLLADA) |
 | [Dear ImGui](https://github.com/ocornut/imgui) (docking branch) | Editor UI |
 | [SDL2](https://www.libsdl.org/) | Windowing & input |
 | [SoLoud](https://github.com/jarikomppa/soloud) | Audio engine |

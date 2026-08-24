@@ -181,7 +181,6 @@ namespace hades
         }
         if (exportSettings.contains("web"))
         {
-          read_export_settings(exportSettings["web"], settings.exportWeb);
         }
       }
 
@@ -254,7 +253,6 @@ namespace hades
         {"macOS", write_export_settings(settings.exportMacOS)},
         {"linux", write_export_settings(settings.exportLinux)},
         {"windows", write_export_settings(settings.exportWindows)},
-        {"web", write_export_settings(settings.exportWeb)},
     };
     document["gamePreview"] = {
       {"enableHadesAPI", settings.gamePreview.enableHadesAPI},
