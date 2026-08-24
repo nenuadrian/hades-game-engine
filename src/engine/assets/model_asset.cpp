@@ -128,6 +128,9 @@ namespace hades
 
     triangleCount_ = 0;
     float maxDistSq = 0.0f;
+    math::Vec3 boundsMin{0.0f, 0.0f, 0.0f};
+    math::Vec3 boundsMax{0.0f, 0.0f, 0.0f};
+    bool haveBounds = false;
     for (const auto &mesh : meshes)
     {
       triangleCount_ += mesh.indices.size() / 3;
@@ -152,7 +155,27 @@ namespace hades
           skinned = {v.px, v.py, v.pz};
         }
         maxDistSq = std::max(maxDistSq, skinned.lengthSquared());
+        if (!haveBounds)
+        {
+          boundsMin = boundsMax = skinned;
+          haveBounds = true;
+        }
+        else
+        {
+          boundsMin.x = std::min(boundsMin.x, skinned.x);
+          boundsMin.y = std::min(boundsMin.y, skinned.y);
+          boundsMin.z = std::min(boundsMin.z, skinned.z);
+          boundsMax.x = std::max(boundsMax.x, skinned.x);
+          boundsMax.y = std::max(boundsMax.y, skinned.y);
+          boundsMax.z = std::max(boundsMax.z, skinned.z);
+        }
       }
+    }
+
+    if (haveBounds)
+    {
+      boundsMin_ = boundsMin;
+      boundsMax_ = boundsMax;
     }
 
     // Skinned poses can reach beyond the bind pose; pad the radius so

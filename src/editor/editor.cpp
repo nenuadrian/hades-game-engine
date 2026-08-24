@@ -72,12 +72,18 @@ namespace hades
     {
       exportBuildThread_.join();
     }
+    release_renderer_resources();
+    native_menu::teardown();
+  }
+
+  void Editor::release_renderer_resources()
+  {
     if (renderer_ != nullptr && sceneViewportTarget_ != kInvalidSceneTarget)
     {
       renderer_->release_scene_target(sceneViewportTarget_);
-      sceneViewportTarget_ = kInvalidSceneTarget;
     }
-    native_menu::teardown();
+    sceneViewportTarget_ = kInvalidSceneTarget;
+    renderer_ = nullptr;
   }
 
   void Editor::reset_workspace_session()

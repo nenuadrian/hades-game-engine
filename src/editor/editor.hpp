@@ -107,6 +107,11 @@ namespace hades
 
     void set_renderer(Renderer *renderer) { renderer_ = renderer; }
 
+    // Hands the scene viewport target back to the renderer and forgets it.
+    // WindowManager declares `editor` before `renderer`, so the editor outlives
+    // it during member teardown; call this while the renderer is still alive.
+    void release_renderer_resources();
+
     void render(
         float deltaTime,
         const std::filesystem::path &workspacePath,
@@ -124,6 +129,11 @@ namespace hades
     bool load_workspace_settings(const std::filesystem::path &workspacePath, std::string *errorMessage = nullptr);
     bool save_workspace_settings(const std::filesystem::path &workspacePath, std::string *errorMessage = nullptr) const;
     void stop_play_mode(EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime);
+
+    /// Drop the cached workspace file tree so the next frame rescans it.
+    /// Called after in-editor file operations and when the editor window
+    /// regains focus (files may have changed on disk in the meantime).
+    void invalidate_workspace_cache();
 
   private:
     bool dockLayoutInitialized = false;
@@ -261,7 +271,6 @@ namespace hades
     void sync_menu_bar(EntityManager &entityManager, ComponentManager &componentManager);
     void configure_default_dock_layout(std::uint32_t dockspaceId);
     void refresh_workspace_cache(const std::filesystem::path &workspacePath);
-    void invalidate_workspace_cache();
     void request_workspace_item_creation(WorkspaceCreateKind kind, const std::filesystem::path &parentPath);
     void request_workspace_item_import(const std::filesystem::path &destinationDirectory);
     void request_workspace_item_deletion(const std::filesystem::path &targetPath);

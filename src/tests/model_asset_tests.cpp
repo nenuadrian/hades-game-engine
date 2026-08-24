@@ -13,6 +13,7 @@
 #include "../engine/assets/model_asset_cache.hpp"
 #include "../engine/assets/model_loader.hpp"
 #include "../engine/components/animation_component.hpp"
+#include "../engine/components/light_component.hpp"
 #include "../engine/components/model_component.hpp"
 #include "../engine/components/name_component.hpp"
 #include "../engine/core/ecs/component_manager.hpp"
@@ -20,6 +21,7 @@
 #include "../engine/core/ecs/entity_manager.hpp"
 #include "../engine/core/ecs/scene_serializer.hpp"
 #include "../engine/core/ecs/world_utils.hpp"
+#include "../engine/rendering/scene_renderer.hpp"
 #include "../engine/systems/animation_system.hpp"
 
 namespace hades
@@ -321,6 +323,30 @@ namespace hades
 
     cache.clear();
     cache.setAssetRoot({});
+  }
+
+  TEST(ModelAssetTest, SceneRendererAddsHeadlightOnlyWhenSceneHasNoLights)
+  {
+    EntityManager entityManager;
+    ComponentManager componentManager(&entityManager);
+    const auto world = EntityFactory::createWorld(entityManager, componentManager, "World", true);
+    EntityFactory::createCube(entityManager, componentManager, world);
+
+    SceneRenderer sceneRenderer;
+    const RenderCamera camera = sceneRenderer.buildCamera(
+        {0.0f, 1.0f, -5.0f}, {0.0f, 0.0f, 0.0f}, 60.0f, 1.0f, 0.1f, 100.0f);
+
+    // No lights in the scene → a default headlight keeps geometry shaded.
+    RenderList list = sceneRenderer.buildRenderList(camera, componentManager, entityManager, world);
+    ASSERT_EQ(list.lights.size(), 1U);
+    EXPECT_EQ(list.lights[0].type, 0);
+
+    // A real light suppresses the headlight.
+    const auto light = EntityFactory::createPointLight(entityManager, componentManager, world);
+    componentManager.getComponent<LightComponent>(light).intensity = 5.0f;
+    list = sceneRenderer.buildRenderList(camera, componentManager, entityManager, world);
+    ASSERT_EQ(list.lights.size(), 1U);
+    EXPECT_FLOAT_EQ(list.lights[0].intensity, 5.0f);
   }
 
   TEST(ModelAssetTest, ModelAndAnimationComponentsSerializeRoundTrip)

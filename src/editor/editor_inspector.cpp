@@ -263,6 +263,13 @@ namespace hades
           ImGui::TextDisabled(
               "%zu meshes, %zu triangles, %zu bones, %zu clips",
               asset->meshes.size(), asset->triangleCount(), asset->bones.size(), asset->clips.size());
+          if (!asset->hasSkeleton)
+          {
+            ImGui::TextColored(
+                ImVec4(0.88f, 0.72f, 0.34f, 1.0f),
+                "No skeleton in this file. If it should be rigged, re-export\n"
+                "with the armature/skin included (e.g. Mixamo: FBX Binary).");
+          }
         }
         else
         {

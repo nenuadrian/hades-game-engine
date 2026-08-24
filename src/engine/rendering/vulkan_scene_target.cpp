@@ -11,6 +11,29 @@
 
 namespace hades
 {
+  namespace
+  {
+    // ImGui_ImplVulkan_AddTexture()/RemoveTexture() dereference the backend
+    // data without a null check, so they segfault once the ImGui context has
+    // been destroyed or the Vulkan backend shut down. Shutdown order is meant
+    // to keep that from happening (see VulkanRenderer::shutdown_imgui_backend),
+    // but teardown can still reach us late, so gate every call on a live
+    // backend rather than crashing on the way out.
+    bool imguiVulkanBackendAlive()
+    {
+      return ImGui::GetCurrentContext() != nullptr &&
+             ImGui::GetIO().BackendRendererUserData != nullptr;
+    }
+
+    void removeImGuiTexture(VkDescriptorSet &set)
+    {
+      if (set == VK_NULL_HANDLE) return;
+      if (imguiVulkanBackendAlive())
+        ImGui_ImplVulkan_RemoveTexture(set);
+      set = VK_NULL_HANDLE;
+    }
+  }
+
   bool VulkanSceneTargets::init(const InitInfo &info)
   {
     if (initialized_) return true;
@@ -34,8 +57,7 @@ namespace hades
     vkDeviceWaitIdle(device_);
     for (auto &kv : targets_)
     {
-      if (kv.second.imguiSet)
-        ImGui_ImplVulkan_RemoveTexture(kv.second.imguiSet);
+      removeImGuiTexture(kv.second.imguiSet);
       destroyImages(kv.second);
     }
     targets_.clear();
@@ -49,6 +71,7 @@ namespace hades
   uint64_t VulkanSceneTargets::acquire(int width, int height)
   {
     if (!initialized_ || width <= 0 || height <= 0) return 0;
+    if (!imguiVulkanBackendAlive()) return 0;
     uint64_t handle = nextHandle_++;
     Target t{};
     if (!allocateImages(t, width, height))
@@ -67,13 +90,10 @@ namespace hades
     auto it = targets_.find(handle);
     if (it == targets_.end() || width <= 0 || height <= 0) return false;
     if (it->second.width == width && it->second.height == height) return true;
+    if (!imguiVulkanBackendAlive()) return false;
 
     vkDeviceWaitIdle(device_);
-    if (it->second.imguiSet)
-    {
-      ImGui_ImplVulkan_RemoveTexture(it->second.imguiSet);
-      it->second.imguiSet = VK_NULL_HANDLE;
-    }
+    removeImGuiTexture(it->second.imguiSet);
     destroyImages(it->second);
     it->second = Target{};
     if (!allocateImages(it->second, width, height))
@@ -92,8 +112,7 @@ namespace hades
     auto it = targets_.find(handle);
     if (it == targets_.end()) return;
     vkDeviceWaitIdle(device_);
-    if (it->second.imguiSet)
-      ImGui_ImplVulkan_RemoveTexture(it->second.imguiSet);
+    removeImGuiTexture(it->second.imguiSet);
     destroyImages(it->second);
     targets_.erase(it);
   }

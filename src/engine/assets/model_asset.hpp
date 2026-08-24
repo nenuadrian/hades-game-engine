@@ -90,9 +90,16 @@ namespace hades
     std::vector<AnimationClip> clips;
     math::Mat4 globalInverseTransform = math::Mat4::identity();
 
+    /// True when the source file carried real skin data (bones with
+    /// weights); false for rigid meshes bound to pseudo-bones only.
+    bool hasSkeleton = false;
+
     bool hasAnimations() const { return !clips.empty(); }
     std::size_t triangleCount() const { return triangleCount_; }
     float boundsRadius() const { return boundsRadius_; }
+    /// Bind-pose axis-aligned bounds in model space.
+    const math::Vec3 &boundsMin() const { return boundsMin_; }
+    const math::Vec3 &boundsMax() const { return boundsMax_; }
     const std::vector<math::Mat4> &bindPose() const { return bindPose_; }
 
     /// Evaluate the bone palette for `clipIndex` at `timeSeconds`.
@@ -108,6 +115,8 @@ namespace hades
 
     std::vector<math::Mat4> bindPose_;
     float boundsRadius_ = 0.5f;
+    math::Vec3 boundsMin_{-0.5f, -0.5f, -0.5f};
+    math::Vec3 boundsMax_{0.5f, 0.5f, 0.5f};
     std::size_t triangleCount_ = 0;
   };
 }

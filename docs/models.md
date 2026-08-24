@@ -10,7 +10,9 @@ Supported formats: **FBX**, **OBJ**, **glTF / GLB**, **COLLADA (.dae)**.
 2. In the **Entities** panel, right-click a parent and choose **Add Entity → Model**, or add a **Model** component to an existing entity from the Properties panel.
 3. In the **Properties** panel, pick the file in the **Model Asset** dropdown — it lists every model file found in the workspace.
 
-The inspector shows what was imported: mesh count, triangle count, bones, and animation clips. Load failures are shown inline with assimp's error message.
+The inspector shows what was imported: mesh count, triangle count, bones, and animation clips. Load failures are shown inline with assimp's error message, and a warning appears when the file carries no skeleton (a common symptom of exporting without the armature/skin).
+
+In the scene view, the selected model entity is outlined with a wire box matching the asset's actual bind-pose bounds. Scenes with no enabled light get a default headlight (a camera-aligned directional light) so geometry stays visibly shaded; add any light entity to take over lighting.
 
 Asset paths are stored workspace-relative, so scenes stay portable; the standalone runtime resolves the same paths against the project directory.
 

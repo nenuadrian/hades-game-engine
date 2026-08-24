@@ -10,11 +10,14 @@
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
 #include "imgui_internal.h"
+#include "../engine/assets/model_asset.hpp"
+#include "../engine/assets/model_asset_cache.hpp"
 #include "../engine/components/audio_listener_component.hpp"
 #include "../engine/components/audio_source_component.hpp"
 #include "../engine/components/camera_component.hpp"
 #include "../engine/components/collider_component.hpp"
 #include "../engine/components/light_component.hpp"
+#include "../engine/components/model_component.hpp"
 #include "../engine/components/name_component.hpp"
 #include "../engine/components/position_component_3d.hpp"
 #include "../engine/components/rotation_component_3d.hpp"
@@ -1785,7 +1788,29 @@ namespace hades
         };
 
         bool drawn = false;
-        if (item.primitiveType == PrimitiveType::Cube)
+        if (item.model != nullptr)
+        {
+          // Imported models get a wire box matching the asset's bind-pose
+          // bounds rather than the unit-cube proxy used for primitives.
+          const auto &bmin = item.model->boundsMin();
+          const auto &bmax = item.model->boundsMax();
+          drawn = draw_wire_box(
+              drawList,
+              sceneCamera,
+              camera,
+              canvasOrigin,
+              canvasSize,
+              position,
+              make_vec3(bmin.x, bmin.y, bmin.z),
+              make_vec3(bmax.x, bmax.y, bmax.z),
+              isSelected ? selectedColor : IM_COL32(223, 228, 235, 255),
+              isSelected ? 2.5f : 1.5f,
+              get_label(),
+              isSelected ? selectedLabelColor : IM_COL32(205, 210, 218, 255),
+              rotation,
+              scale);
+        }
+        else if (item.primitiveType == PrimitiveType::Cube)
         {
           drawn = draw_wire_box(
               drawList,
@@ -1877,8 +1902,16 @@ namespace hades
           continue;
         }
 
+        // Model entities whose asset failed to load are absent from the
+        // render list; keep their position marker visible so they can still
+        // be found and fixed in the viewport.
+        const bool modelHandledByRenderList =
+            componentManager.hasComponent<ModelComponent>(entity) &&
+            ModelAssetCache::instance().get(
+                componentManager.getComponent<ModelComponent>(entity).assetPath) != nullptr;
         const bool renderableHandledByRenderList =
-            componentManager.hasComponent<PrimitiveComponent>(entity);
+            componentManager.hasComponent<PrimitiveComponent>(entity) ||
+            modelHandledByRenderList;
         if (renderableHandledByRenderList)
         {
           continue;

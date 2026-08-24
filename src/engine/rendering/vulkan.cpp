@@ -1096,6 +1096,18 @@ namespace hades
       return;
     }
 
+    // Scene targets hold descriptor sets owned by the ImGui Vulkan backend, so
+    // they have to go first: tearing them down afterwards would call
+    // ImGui_ImplVulkan_RemoveTexture() with no backend data behind it. The
+    // editor shuts the backend down before ~VulkanRenderer runs, so this is
+    // where the targets actually die.
+    if (scene_targets_)
+    {
+      scene_targets_->destroy();
+      scene_targets_.reset();
+    }
+    scene_targets_initialized = false;
+
     ImGui_ImplVulkan_Shutdown();
     imgui_backend_initialized = false;
   }

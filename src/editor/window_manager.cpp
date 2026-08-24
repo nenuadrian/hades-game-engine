@@ -582,6 +582,12 @@ namespace hades
   WindowManager::~WindowManager()
   {
     scriptRuntime.stop();
+    // Runs before any member is destroyed, so the renderer and the ImGui
+    // backend are both still alive here: the editor's scene viewport target is
+    // renderer-owned and `editor` is declared ahead of `renderer`, so it would
+    // otherwise be released through a dangling pointer.
+    editor.release_renderer_resources();
+    imgui_session.close();
     // Release the AudioEngine pointer from the scripting facade before the
     // unique_ptr tears it down, so any lingering Audio::* calls are no-ops.
     register_script_audio_engine(nullptr);
@@ -1339,6 +1345,15 @@ namespace hades
           {
             running = false;
           }
+        }
+        if (event.type == SDL_WINDOWEVENT &&
+            event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED &&
+            event.window.windowID == editorWindowId)
+        {
+          // Files may have been added or removed outside the editor (e.g.
+          // copied in via Finder); rescan the workspace so new scripts and
+          // model assets show up without reopening the workspace.
+          editor.invalidate_workspace_cache();
         }
         if (event.type == SDL_WINDOWEVENT &&
             event.window.event == SDL_WINDOWEVENT_CLOSE)

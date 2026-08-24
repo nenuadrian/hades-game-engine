@@ -218,6 +218,7 @@ namespace hades
 
       if (mesh->mNumBones > 0)
       {
+        ctx.asset->hasSkeleton = true;
         for (unsigned int b = 0; b < mesh->mNumBones; ++b)
         {
           const aiBone *bone = mesh->mBones[b];

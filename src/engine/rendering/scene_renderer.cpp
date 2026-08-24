@@ -102,6 +102,19 @@ namespace hades
     list.camera = camera;
 
     collectLights(list, componentManager, entityManager, worldFilter);
+
+    // Scenes without any enabled light get a default headlight so geometry
+    // is still visibly shaded instead of rendering at flat ambient. Tilted
+    // slightly downward from the view direction so surfaces gain contrast.
+    if (list.lights.empty())
+    {
+      RenderLight headlight;
+      headlight.type = 0; // directional
+      headlight.direction = (camera.forward + math::Vec3{0.0f, -0.6f, 0.0f}).normalized();
+      headlight.intensity = 0.9f;
+      list.lights.push_back(headlight);
+    }
+
     collectRenderables(list, camera, componentManager, entityManager, worldFilter);
 
     // Sort opaque front-to-back (closer first, for early-Z).
