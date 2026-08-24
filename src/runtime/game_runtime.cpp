@@ -19,10 +19,12 @@
 #else
 #include "engine/rendering/vulkan.hpp"
 #endif
+#include "engine/assets/model_asset_cache.hpp"
 #include "engine/runtime/main_camera_selection.hpp"
 #include "engine/components/name_component.hpp"
 #include "engine/components/position_component_3d.hpp"
 #include "engine/core/ecs/query.hpp"
+#include "engine/systems/animation_system.hpp"
 #include "engine/systems/audio_system.hpp"
 #include "engine/systems/movement_system.hpp"
 #include "engine/systems/physics_system.hpp"
@@ -203,9 +205,13 @@ namespace hades
     physicsSystem_ = systemManager_.registerSystem<PhysicsSystem>(SystemPhase::Physics);
     physicsSystem_->setPhysicsWorld(physicsWorld_.get());
     systemManager_.registerSystem<MovementSystem>(SystemPhase::Logic);
+    systemManager_.registerSystem<AnimationSystem>(SystemPhase::Logic);
     renderSystem_ = systemManager_.registerSystem<RenderSystem>(SystemPhase::Render);
     audioSystem_ = systemManager_.registerSystem<AudioSystem>(SystemPhase::Audio);
     audioSystem_->setAudioEngine(audioEngine_.get());
+
+    // Model asset paths resolve relative to the project directory.
+    ModelAssetCache::instance().setAssetRoot(projectPath_);
 
     // Load all worlds from the project.
     std::string loadError;

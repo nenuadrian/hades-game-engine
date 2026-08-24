@@ -25,6 +25,7 @@ set(HADES_IMGUI_TEXTEDIT_TAG "master" CACHE STRING "ImGuiColorTextEdit git tag o
 set(HADES_NLOHMANN_JSON_TAG "v3.11.3" CACHE STRING "nlohmann/json git tag or branch.")
 set(HADES_JOLTPHYSICS_TAG "v5.3.0" CACHE STRING "JoltPhysics git tag or branch.")
 set(HADES_HTTPLIB_TAG "v0.18.3" CACHE STRING "cpp-httplib git tag or branch.")
+set(HADES_ASSIMP_TAG "v6.0.2" CACHE STRING "assimp git tag or branch.")
 
 function(hades_prefer_local_source fetch_name local_dir)
   string(TOUPPER "${fetch_name}" fetch_name_upper)
@@ -57,6 +58,7 @@ function(hades_configure_dependencies)
   hades_prefer_local_source(nlohmann_json "${CMAKE_SOURCE_DIR}/lib/json")
   hades_prefer_local_source(joltphysics "${CMAKE_SOURCE_DIR}/lib/JoltPhysics")
   hades_prefer_local_source(httplib "${CMAKE_SOURCE_DIR}/lib/cpp-httplib")
+  hades_prefer_local_source(assimp "${CMAKE_SOURCE_DIR}/lib/assimp")
 
   set(CLI11_BUILD_DOCS OFF CACHE BOOL "" FORCE)
   set(CLI11_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -150,12 +152,33 @@ function(hades_configure_dependencies)
     GIT_TAG ${HADES_HTTPLIB_TAG}
     GIT_SHALLOW TRUE)
 
+  # assimp powers model import (FBX/OBJ/glTF/COLLADA). Exporters, tools and
+  # the all-importers default are switched off to keep build times and binary
+  # size down; the bundled zlib avoids a system dependency (needed for
+  # compressed FBX and .glb).
+  set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
+  set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
+  set(ASSIMP_NO_EXPORT ON CACHE BOOL "" FORCE)
+  set(ASSIMP_BUILD_ZLIB ON CACHE BOOL "" FORCE)
+  set(ASSIMP_WARNINGS_AS_ERRORS OFF CACHE BOOL "" FORCE)
+  set(ASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
+  set(ASSIMP_BUILD_FBX_IMPORTER ON CACHE BOOL "" FORCE)
+  set(ASSIMP_BUILD_OBJ_IMPORTER ON CACHE BOOL "" FORCE)
+  set(ASSIMP_BUILD_GLTF_IMPORTER ON CACHE BOOL "" FORCE)
+  set(ASSIMP_BUILD_COLLADA_IMPORTER ON CACHE BOOL "" FORCE)
+  FetchContent_Declare(
+    assimp
+    GIT_REPOSITORY https://github.com/assimp/assimp.git
+    GIT_TAG ${HADES_ASSIMP_TAG}
+    GIT_SHALLOW TRUE)
+
   if(EMSCRIPTEN)
     # Emscripten provides SDL2 as a built-in port (-sUSE_SDL=2).
     # Skip SDL2 FetchContent and GoogleTest/CLI11 (not needed for web runtime).
-    FetchContent_MakeAvailable(nlohmann_json joltphysics)
+    FetchContent_MakeAvailable(nlohmann_json joltphysics assimp)
   else()
-    FetchContent_MakeAvailable(cli11 googletest sdl2 imgui_color_text_edit nlohmann_json joltphysics httplib)
+    FetchContent_MakeAvailable(cli11 googletest sdl2 imgui_color_text_edit nlohmann_json joltphysics httplib assimp)
   endif()
 
   # SoLoud has no top-level CMakeLists.txt, so we populate the sources and

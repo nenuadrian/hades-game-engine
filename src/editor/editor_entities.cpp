@@ -3,12 +3,16 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstring>
+#include <optional>
 #include <string>
 #include <string_view>
 
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
+#include "../engine/components/animation_component.hpp"
 #include "../engine/components/audio_listener_component.hpp"
+#include "../engine/components/model_component.hpp"
 #include "../engine/components/light_component.hpp"
 #include "../engine/components/audio_source_component.hpp"
 #include "../engine/components/camera_component.hpp"
@@ -29,6 +33,7 @@
 #include "../engine/core/ecs/component_manager.hpp"
 #include "../engine/core/ecs/entity_factory.hpp"
 #include "../engine/core/ecs/entity_manager.hpp"
+#include "../engine/core/ecs/hierarchy_utils.hpp"
 #include "../engine/core/ecs/scene_serializer.hpp"
 #include "../engine/core/ecs/world_utils.hpp"
 #include "../engine/runtime/main_camera_selection.hpp"
@@ -40,6 +45,11 @@ namespace hades
   {
     constexpr char ENTITY_WINDOW_TITLE[] = "Entities";
     constexpr char ADD_ENTITY_POPUP_TITLE[] = "Add Entity";
+    constexpr char ENTITY_DRAG_DROP_TYPE[] = "HADES_ENTITY";
+
+    // Fraction of a tree row, top and bottom, that reorders next to the row
+    // instead of dropping into it. The band in between reparents.
+    constexpr float ENTITY_DROP_EDGE_FRACTION = 0.3f;
 
     struct EntityPickerCategory
     {
@@ -65,9 +75,10 @@ namespace hades
         {"lighting", "Lighting", ICON_FA_LIGHTBULB},
     }};
 
-    constexpr std::array<EntityPickerOption, 10> ENTITY_PICKER_OPTIONS{{
+    constexpr std::array<EntityPickerOption, 11> ENTITY_PICKER_OPTIONS{{
         {"Camera", "Adds a camera and audio listener.", "main view listener", ICON_FA_CAMERA, "scene", EditorEntityPreset::Camera},
         {"Text", "Adds a text entity.", "ui label typography", ICON_FA_FONT, "scene", EditorEntityPreset::Text},
+        {"Model", "Adds an entity rendering an imported model (FBX/OBJ/glTF).", "fbx obj gltf mesh import animation", ICON_FA_PERSON, "scene", EditorEntityPreset::Model},
         {"Cube", "Adds a renderable cube.", "box mesh primitive", ICON_FA_CUBE, "primitives", EditorEntityPreset::Cube},
         {"Panel", "Adds a flat panel primitive.", "plane ground floor quad", ICON_FA_VECTOR_SQUARE, "primitives", EditorEntityPreset::Plane},
         {"Sphere", "Adds a renderable sphere.", "ball orb round primitive", ICON_FA_CIRCLE, "primitives", EditorEntityPreset::Sphere},
@@ -121,6 +132,25 @@ namespace hades
       }
 
       return false;
+    }
+
+    std::optional<Entity::EntityId> dragged_entity_from_payload(const ImGuiPayload *payload)
+    {
+      if (payload == nullptr || payload->Data == nullptr ||
+          payload->DataSize != static_cast<int>(sizeof(Entity::EntityId)))
+      {
+        return std::nullopt;
+      }
+
+      Entity::EntityId entity = Entity::INVALID;
+      std::memcpy(&entity, payload->Data, sizeof(entity));
+      return entity;
+    }
+
+    bool entity_drag_in_progress()
+    {
+      const ImGuiPayload *payload = ImGui::GetDragDropPayload();
+      return payload != nullptr && payload->IsDataType(ENTITY_DRAG_DROP_TYPE);
     }
 
     std::string entity_display_label(Entity::EntityId entity, ComponentManager &componentManager)
@@ -207,6 +237,8 @@ namespace hades
       remove_component_if_present<LightComponent>(componentManager, entity);
       remove_component_if_present<ScriptComponent>(componentManager, entity);
       remove_component_if_present<MeshRendererComponent>(componentManager, entity);
+      remove_component_if_present<ModelComponent>(componentManager, entity);
+      remove_component_if_present<AnimationComponent>(componentManager, entity);
       remove_component_if_present<ColliderComponent>(componentManager, entity);
       remove_component_if_present<RigidBodyComponent>(componentManager, entity);
       remove_component_if_present<RotationComponent3D>(componentManager, entity);
@@ -298,6 +330,14 @@ namespace hades
     pendingEntityDeletion_ = entity;
   }
 
+  void Editor::request_entity_reparent(
+      Entity::EntityId entity,
+      Entity::EntityId newParent,
+      int insertIndex)
+  {
+    pendingEntityReparent_ = PendingEntityReparent{entity, newParent, insertIndex};
+  }
+
   void Editor::render_add_entity_dialog(EntityManager &entityManager, ComponentManager &componentManager)
   {
     (void)entityManager;
@@ -321,7 +361,16 @@ namespace hades
 
     bool dialogOpen = true;
     ImGui::SetNextWindowSize(ImVec2(560.0f, 480.0f), ImGuiCond_Appearing);
-    if (!ImGui::BeginPopupModal(ADD_ENTITY_POPUP_TITLE, &dialogOpen, ImGuiWindowFlags_NoResize))
+
+    // Let the picker grid sit flush against the modal frame. Begin() latches
+    // WindowPadding into the window, so popping right after BeginPopupModal
+    // leaves the dialog contents on the normal style.
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    const bool popupVisible =
+        ImGui::BeginPopupModal(ADD_ENTITY_POPUP_TITLE, &dialogOpen, ImGuiWindowFlags_NoResize);
+    ImGui::PopStyleVar();
+
+    if (!popupVisible)
     {
       return;
     }
@@ -493,6 +542,9 @@ namespace hades
     case EditorEntityPreset::Sphere:
       createdEntity = EntityFactory::createSphere(entityManager, componentManager, parent);
       break;
+    case EditorEntityPreset::Model:
+      createdEntity = EntityFactory::createModel(entityManager, componentManager, parent);
+      break;
     case EditorEntityPreset::PhysicsCube:
       createdEntity = EntityFactory::createPhysicsCube(entityManager, componentManager, parent);
       break;
@@ -583,6 +635,28 @@ namespace hades
         state.selectedEntity = state.loadedWorld;
       }
     }
+  }
+
+  void Editor::handle_entity_reparent_requests(
+      EntityManager &entityManager,
+      ComponentManager &componentManager)
+  {
+    (void)entityManager;
+
+    if (!pendingEntityReparent_.has_value())
+    {
+      return;
+    }
+
+    const PendingEntityReparent request = *pendingEntityReparent_;
+    pendingEntityReparent_.reset();
+
+    if (!reparent_entity(request.entity, request.newParent, componentManager, request.insertIndex))
+    {
+      return;
+    }
+
+    state.selectedEntity = request.entity;
   }
 
   void Editor::handle_play_mode_requests(
@@ -839,6 +913,119 @@ namespace hades
     ImGui::End();
   }
 
+  void Editor::render_hierarchy_drag_source(
+      Entity::EntityId entity,
+      ComponentManager &componentManager)
+  {
+    // A world is the root of its own tree, so every drop target it could reach
+    // is one of its descendants. Nothing to drag it onto.
+    if (componentManager.hasComponent<WorldComponent>(entity))
+    {
+      return;
+    }
+
+    if (!ImGui::BeginDragDropSource())
+    {
+      return;
+    }
+
+    const Entity::EntityId payload = entity;
+    ImGui::SetDragDropPayload(ENTITY_DRAG_DROP_TYPE, &payload, sizeof(payload));
+    ImGui::TextUnformatted(entity_label(entity, componentManager).c_str());
+    ImGui::EndDragDropSource();
+  }
+
+  void Editor::render_hierarchy_drop_target(
+      Entity::EntityId entity,
+      ComponentManager &componentManager)
+  {
+    if (!componentManager.hasComponent<TransformHierarchyComponent>(entity) ||
+        !ImGui::BeginDragDropTarget())
+    {
+      return;
+    }
+
+    // Peek at the payload every frame so the drop intent can be previewed and
+    // rejected before the mouse is released.
+    const ImGuiDragDropFlags flags =
+        ImGuiDragDropFlags_AcceptBeforeDelivery | ImGuiDragDropFlags_AcceptNoDrawDefaultRect;
+    const ImGuiPayload *payload = ImGui::AcceptDragDropPayload(ENTITY_DRAG_DROP_TYPE, flags);
+    const auto dragged = dragged_entity_from_payload(payload);
+    if (!dragged.has_value())
+    {
+      ImGui::EndDragDropTarget();
+      return;
+    }
+
+    const ImVec2 rowMin = ImGui::GetItemRectMin();
+    const ImVec2 rowMax = ImGui::GetItemRectMax();
+    const float edge = (rowMax.y - rowMin.y) * ENTITY_DROP_EDGE_FRACTION;
+    const float mouseY = ImGui::GetMousePos().y;
+
+    // Rows without a parent (the world root) have no sibling list to slot into,
+    // so they only ever accept "become a child of this".
+    const std::optional<Entity::EntityId> parent =
+        componentManager.getComponent<TransformHierarchyComponent>(entity).parent;
+    const std::optional<int> ownIndex = child_index_in_parent(entity, componentManager);
+    const bool canOrder = parent.has_value() && ownIndex.has_value();
+
+    Entity::EntityId targetParent = entity;
+    int insertIndex = HIERARCHY_APPEND_INDEX;
+    std::optional<float> indicatorY;
+
+    if (canOrder && mouseY < rowMin.y + edge)
+    {
+      targetParent = *parent;
+      insertIndex = *ownIndex;
+      indicatorY = rowMin.y;
+    }
+    else if (canOrder && mouseY > rowMax.y - edge)
+    {
+      targetParent = *parent;
+      insertIndex = *ownIndex + 1;
+      indicatorY = rowMax.y;
+    }
+
+    if (can_reparent_entity(*dragged, targetParent, componentManager))
+    {
+      ImDrawList *drawList = ImGui::GetWindowDrawList();
+      const ImU32 color = ImGui::GetColorU32(ImGuiCol_DragDropTarget);
+      if (indicatorY.has_value())
+      {
+        drawList->AddLine(ImVec2(rowMin.x, *indicatorY), ImVec2(rowMax.x, *indicatorY), color, 2.0f);
+      }
+      else
+      {
+        drawList->AddRect(rowMin, rowMax, color, 0.0f, 0, 2.0f);
+      }
+
+      if (payload->IsDelivery())
+      {
+        request_entity_reparent(*dragged, targetParent, insertIndex);
+      }
+    }
+
+    ImGui::EndDragDropTarget();
+  }
+
+  void Editor::render_hierarchy_root_drop_zone(ComponentManager &componentManager)
+  {
+    // Only exists mid-drag so it never swallows clicks in the empty panel area.
+    if (!entity_drag_in_progress() || !state.loadedWorld.has_value())
+    {
+      return;
+    }
+
+    const ImVec2 available = ImGui::GetContentRegionAvail();
+    if (available.x <= 0.0f || available.y <= 0.0f)
+    {
+      return;
+    }
+
+    ImGui::InvisibleButton("##hierarchy_root_drop", available);
+    render_hierarchy_drop_target(*state.loadedWorld, componentManager);
+  }
+
   void Editor::render_hierarchy(
       Entity::EntityId entity,
       EntityManager &entityManager,
@@ -849,7 +1036,11 @@ namespace hades
       return;
     }
 
-    const auto &hierarchy = componentManager.getComponent<TransformHierarchyComponent>(entity);
+    // Copied because a drop delivered further down the tree can rewrite this
+    // list before the recursion below finishes walking it.
+    const std::vector<Entity::EntityId> children =
+        componentManager.getComponent<TransformHierarchyComponent>(entity).children;
+
     ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow |
                                ImGuiTreeNodeFlags_OpenOnDoubleClick |
                                ImGuiTreeNodeFlags_SpanAvailWidth;
@@ -857,7 +1048,7 @@ namespace hades
     {
       flags |= ImGuiTreeNodeFlags_Selected;
     }
-    if (hierarchy.children.empty())
+    if (children.empty())
     {
       flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
     }
@@ -876,6 +1067,9 @@ namespace hades
       select_entity(entity);
     }
 
+    render_hierarchy_drag_source(entity, componentManager);
+    render_hierarchy_drop_target(entity, componentManager);
+
     if (ImGui::BeginPopupContextItem())
     {
       if (ImGui::MenuItem(ICON_FA_CIRCLE_PLUS "  Add Entity"))
@@ -893,9 +1087,9 @@ namespace hades
       ImGui::EndPopup();
     }
 
-    if (open && !hierarchy.children.empty())
+    if (open && !children.empty())
     {
-      for (const auto &child : hierarchy.children)
+      for (const auto &child : children)
       {
         render_hierarchy(child, entityManager, componentManager);
       }
@@ -916,5 +1110,6 @@ namespace hades
     }
 
     render_hierarchy(*state.loadedWorld, entityManager, componentManager);
+    render_hierarchy_root_drop_zone(componentManager);
   }
 }

@@ -9,6 +9,7 @@
     __has_include(<shaders/mesh.vert.spv.hpp>)
 #include "shaders/mesh.vert.spv.hpp"
 #include "shaders/mesh.frag.spv.hpp"
+#include "shaders/mesh_skinned.vert.spv.hpp"
 #define HADES_MESH_SHADERS_EMBEDDED 1
 #else
 #define HADES_MESH_SHADERS_EMBEDDED 0
@@ -19,6 +20,11 @@ namespace hades
   namespace
   {
     constexpr uint32_t kMaxLights = 16;
+
+    // One bone palette slot per skinned draw; must be a multiple of the
+    // largest minUniformBufferOffsetAlignment the spec allows (256).
+    constexpr uint32_t kBoneStride = kMaxModelBones * sizeof(float) * 16;
+    constexpr uint32_t kInitialBoneSlots = 16;
 
     struct FrameUboData
     {
@@ -44,6 +50,19 @@ namespace hades
     void writeMat4(float *dst, const math::Mat4 &m)
     {
       std::memcpy(dst, &m.m[0][0], sizeof(float) * 16);
+    }
+
+    void fillPushConstants(PushConstants &pc, const math::Mat4 &model, const Material &material)
+    {
+      writeMat4(pc.model, model);
+      pc.baseColor[0] = material.baseColorR;
+      pc.baseColor[1] = material.baseColorG;
+      pc.baseColor[2] = material.baseColorB;
+      pc.baseColor[3] = material.opacity;
+      pc.metallicRoughness[0] = material.metallic;
+      pc.metallicRoughness[1] = material.roughness;
+      pc.metallicRoughness[2] = 0.0f;
+      pc.metallicRoughness[3] = 0.0f;
     }
   }
 
@@ -82,8 +101,10 @@ namespace hades
 
     // Shader modules.
     vertModule_ = createShaderModule(mesh_vert_spv, mesh_vert_spv_size);
+    skinnedVertModule_ = createShaderModule(mesh_skinned_vert_spv, mesh_skinned_vert_spv_size);
     fragModule_ = createShaderModule(mesh_frag_spv, mesh_frag_spv_size);
-    if (vertModule_ == VK_NULL_HANDLE || fragModule_ == VK_NULL_HANDLE)
+    if (vertModule_ == VK_NULL_HANDLE || skinnedVertModule_ == VK_NULL_HANDLE ||
+        fragModule_ == VK_NULL_HANDLE)
       return false;
 
     // Descriptor set layout (single UBO at binding 0, vertex + fragment).
@@ -103,12 +124,30 @@ namespace hades
       }
     }
 
-    // Pipeline layout (set + push constants).
+    // Bone set layout (dynamic-offset UBO at binding 0, vertex stage).
+    {
+      VkDescriptorSetLayoutBinding b{};
+      b.binding = 0;
+      b.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+      b.descriptorCount = 1;
+      b.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+      VkDescriptorSetLayoutCreateInfo ci{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+      ci.bindingCount = 1;
+      ci.pBindings = &b;
+      if (vkCreateDescriptorSetLayout(device_, &ci, allocator_, &boneSetLayout_) != VK_SUCCESS)
+      {
+        hades::Log::error_tagged("vulkan_mesh", "failed to create bone set layout");
+        return false;
+      }
+    }
+
+    // Pipeline layouts (sets + push constants).
     {
       VkPushConstantRange pc{};
       pc.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
       pc.offset = 0;
       pc.size = sizeof(PushConstants);
+
       VkPipelineLayoutCreateInfo ci{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
       ci.setLayoutCount = 1;
       ci.pSetLayouts = &setLayout_;
@@ -119,17 +158,28 @@ namespace hades
         hades::Log::error_tagged("vulkan_mesh", "failed to create pipeline layout");
         return false;
       }
+
+      VkDescriptorSetLayout skinnedSets[2] = {setLayout_, boneSetLayout_};
+      ci.setLayoutCount = 2;
+      ci.pSetLayouts = skinnedSets;
+      if (vkCreatePipelineLayout(device_, &ci, allocator_, &skinnedPipelineLayout_) != VK_SUCCESS)
+      {
+        hades::Log::error_tagged("vulkan_mesh", "failed to create skinned pipeline layout");
+        return false;
+      }
     }
 
     // Descriptor pool.
     {
-      VkDescriptorPoolSize sz{};
-      sz.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-      sz.descriptorCount = framesInFlight_;
+      VkDescriptorPoolSize sizes[2]{};
+      sizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+      sizes[0].descriptorCount = framesInFlight_;
+      sizes[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+      sizes[1].descriptorCount = framesInFlight_;
       VkDescriptorPoolCreateInfo ci{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
-      ci.maxSets = framesInFlight_;
-      ci.poolSizeCount = 1;
-      ci.pPoolSizes = &sz;
+      ci.maxSets = framesInFlight_ * 2;
+      ci.poolSizeCount = 2;
+      ci.pPoolSizes = sizes;
       if (vkCreateDescriptorPool(device_, &ci, allocator_, &descriptorPool_) != VK_SUCCESS)
       {
         hades::Log::error_tagged("vulkan_mesh", "failed to create descriptor pool");
@@ -169,6 +219,14 @@ namespace hades
       w.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
       w.pBufferInfo = &bi;
       vkUpdateDescriptorSets(device_, 1, &w, 0, nullptr);
+
+      // Bone palette descriptor set; the backing buffer is (re)created by
+      // ensureBoneCapacity.
+      ai.pSetLayouts = &boneSetLayout_;
+      if (vkAllocateDescriptorSets(device_, &ai, &f.boneDescriptorSet) != VK_SUCCESS)
+        return false;
+      if (!ensureBoneCapacity(f, kInitialBoneSlots))
+        return false;
     }
 
     initialized_ = true;
@@ -193,40 +251,102 @@ namespace hades
     {
       if (!meshReady_[i])
         continue;
-      auto &m = meshes_[i];
-      if (m.vertexBuffer) vkDestroyBuffer(device_, m.vertexBuffer, allocator_);
-      if (m.vertexMemory) vkFreeMemory(device_, m.vertexMemory, allocator_);
-      if (m.indexBuffer) vkDestroyBuffer(device_, m.indexBuffer, allocator_);
-      if (m.indexMemory) vkFreeMemory(device_, m.indexMemory, allocator_);
+      destroyMesh(meshes_[i]);
       meshReady_[i] = false;
     }
+
+    for (auto &kv : models_)
+    {
+      for (auto &mesh : kv.second.meshes)
+      {
+        destroyMesh(mesh);
+      }
+    }
+    models_.clear();
 
     for (auto &f : frameUniforms_)
     {
       if (f.mapped) vkUnmapMemory(device_, f.memory);
       if (f.buffer) vkDestroyBuffer(device_, f.buffer, allocator_);
       if (f.memory) vkFreeMemory(device_, f.memory, allocator_);
+      if (f.boneMapped) vkUnmapMemory(device_, f.boneMemory);
+      if (f.boneBuffer) vkDestroyBuffer(device_, f.boneBuffer, allocator_);
+      if (f.boneMemory) vkFreeMemory(device_, f.boneMemory, allocator_);
     }
     frameUniforms_.clear();
 
     if (descriptorPool_) vkDestroyDescriptorPool(device_, descriptorPool_, allocator_);
     if (pipelineLayout_) vkDestroyPipelineLayout(device_, pipelineLayout_, allocator_);
+    if (skinnedPipelineLayout_) vkDestroyPipelineLayout(device_, skinnedPipelineLayout_, allocator_);
     if (setLayout_) vkDestroyDescriptorSetLayout(device_, setLayout_, allocator_);
+    if (boneSetLayout_) vkDestroyDescriptorSetLayout(device_, boneSetLayout_, allocator_);
     if (vertModule_) vkDestroyShaderModule(device_, vertModule_, allocator_);
+    if (skinnedVertModule_) vkDestroyShaderModule(device_, skinnedVertModule_, allocator_);
     if (fragModule_) vkDestroyShaderModule(device_, fragModule_, allocator_);
     if (uploadPool_) vkDestroyCommandPool(device_, uploadPool_, allocator_);
 
     descriptorPool_ = VK_NULL_HANDLE;
     pipelineLayout_ = VK_NULL_HANDLE;
+    skinnedPipelineLayout_ = VK_NULL_HANDLE;
     setLayout_ = VK_NULL_HANDLE;
+    boneSetLayout_ = VK_NULL_HANDLE;
     vertModule_ = VK_NULL_HANDLE;
+    skinnedVertModule_ = VK_NULL_HANDLE;
     fragModule_ = VK_NULL_HANDLE;
     uploadPool_ = VK_NULL_HANDLE;
     device_ = VK_NULL_HANDLE;
     initialized_ = false;
   }
 
-  VkPipeline VulkanMeshPipeline::pipelineFor(VkRenderPass renderPass, VkPolygonMode polygonMode)
+  bool VulkanMeshPipeline::ensureBoneCapacity(FrameUniforms &frame, uint32_t slots)
+  {
+    if (frame.boneBuffer != VK_NULL_HANDLE && frame.boneCapacity >= slots)
+      return true;
+
+    uint32_t newCapacity = frame.boneCapacity > 0 ? frame.boneCapacity : kInitialBoneSlots;
+    while (newCapacity < slots)
+      newCapacity *= 2;
+
+    // The caller records for this frame slot only after its fence signalled,
+    // so the old buffer is no longer referenced by pending work.
+    if (frame.boneMapped)
+    {
+      vkUnmapMemory(device_, frame.boneMemory);
+      frame.boneMapped = nullptr;
+    }
+    if (frame.boneBuffer) vkDestroyBuffer(device_, frame.boneBuffer, allocator_);
+    if (frame.boneMemory) vkFreeMemory(device_, frame.boneMemory, allocator_);
+    frame.boneBuffer = VK_NULL_HANDLE;
+    frame.boneMemory = VK_NULL_HANDLE;
+    frame.boneCapacity = 0;
+
+    const VkDeviceSize size = static_cast<VkDeviceSize>(kBoneStride) * newCapacity;
+    if (!createBuffer(
+            size,
+            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            frame.boneBuffer, frame.boneMemory))
+      return false;
+    if (vkMapMemory(device_, frame.boneMemory, 0, size, 0, &frame.boneMapped) != VK_SUCCESS)
+      return false;
+
+    VkDescriptorBufferInfo bi{};
+    bi.buffer = frame.boneBuffer;
+    bi.offset = 0;
+    bi.range = kBoneStride;
+    VkWriteDescriptorSet w{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    w.dstSet = frame.boneDescriptorSet;
+    w.dstBinding = 0;
+    w.descriptorCount = 1;
+    w.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+    w.pBufferInfo = &bi;
+    vkUpdateDescriptorSets(device_, 1, &w, 0, nullptr);
+
+    frame.boneCapacity = newCapacity;
+    return true;
+  }
+
+  VkPipeline VulkanMeshPipeline::pipelineFor(VkRenderPass renderPass, VkPolygonMode polygonMode, bool skinned)
   {
     if (!initialized_ || renderPass == VK_NULL_HANDLE)
       return VK_NULL_HANDLE;
@@ -234,7 +354,7 @@ namespace hades
     if (polygonMode == VK_POLYGON_MODE_LINE && !supportsFillNonSolid_)
       polygonMode = VK_POLYGON_MODE_FILL;
 
-    PipelineKey key{renderPass, polygonMode};
+    PipelineKey key{renderPass, polygonMode, skinned};
     auto it = pipelines_.find(key);
     if (it != pipelines_.end())
       return it->second;
@@ -242,7 +362,7 @@ namespace hades
     VkPipelineShaderStageCreateInfo stages[2]{};
     stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    stages[0].module = vertModule_;
+    stages[0].module = skinned ? skinnedVertModule_ : vertModule_;
     stages[0].pName = "main";
     stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -251,27 +371,44 @@ namespace hades
 
     VkVertexInputBindingDescription binding{};
     binding.binding = 0;
-    binding.stride = sizeof(MeshVertex);
+    binding.stride = skinned ? sizeof(ModelVertex) : sizeof(MeshVertex);
     binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-    VkVertexInputAttributeDescription attrs[3]{};
+    VkVertexInputAttributeDescription attrs[5]{};
     attrs[0].location = 0;
     attrs[0].binding = 0;
     attrs[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attrs[0].offset = offsetof(MeshVertex, px);
     attrs[1].location = 1;
     attrs[1].binding = 0;
     attrs[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attrs[1].offset = offsetof(MeshVertex, nx);
     attrs[2].location = 2;
     attrs[2].binding = 0;
     attrs[2].format = VK_FORMAT_R32G32_SFLOAT;
-    attrs[2].offset = offsetof(MeshVertex, u);
+    if (skinned)
+    {
+      attrs[0].offset = offsetof(ModelVertex, px);
+      attrs[1].offset = offsetof(ModelVertex, nx);
+      attrs[2].offset = offsetof(ModelVertex, u);
+      attrs[3].location = 3;
+      attrs[3].binding = 0;
+      attrs[3].format = VK_FORMAT_R32G32B32A32_UINT;
+      attrs[3].offset = offsetof(ModelVertex, boneIndices);
+      attrs[4].location = 4;
+      attrs[4].binding = 0;
+      attrs[4].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+      attrs[4].offset = offsetof(ModelVertex, boneWeights);
+    }
+    else
+    {
+      attrs[0].offset = offsetof(MeshVertex, px);
+      attrs[1].offset = offsetof(MeshVertex, nx);
+      attrs[2].offset = offsetof(MeshVertex, u);
+    }
 
     VkPipelineVertexInputStateCreateInfo vi{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
     vi.vertexBindingDescriptionCount = 1;
     vi.pVertexBindingDescriptions = &binding;
-    vi.vertexAttributeDescriptionCount = 3;
+    vi.vertexAttributeDescriptionCount = skinned ? 5 : 3;
     vi.pVertexAttributeDescriptions = attrs;
 
     VkPipelineInputAssemblyStateCreateInfo ia{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
@@ -328,7 +465,7 @@ namespace hades
     info.pDepthStencilState = &ds;
     info.pColorBlendState = &cb;
     info.pDynamicState = &dynInfo;
-    info.layout = pipelineLayout_;
+    info.layout = skinned ? skinnedPipelineLayout_ : pipelineLayout_;
     info.renderPass = renderPass;
     info.subpass = 0;
 
@@ -396,6 +533,17 @@ namespace hades
     auto &frame = frameUniforms_[frameIndex];
     std::memcpy(frame.mapped, &ubo, sizeof(ubo));
 
+    // Reserve one bone palette slot per model item.
+    uint32_t modelItemCount = 0;
+    for (const auto &it : list.opaqueItems)
+      if (it.model != nullptr)
+        ++modelItemCount;
+    for (const auto &it : list.transparentItems)
+      if (it.model != nullptr)
+        ++modelItemCount;
+    if (modelItemCount > 0 && !ensureBoneCapacity(frame, modelItemCount))
+      return;
+
     VkViewport viewport{};
     viewport.x = 0;
     viewport.y = 0;
@@ -410,15 +558,82 @@ namespace hades
     scissor.extent = extent;
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
+    uint32_t boneSlot = 0;
+
+    const auto drawModelItem = [&](const RenderItem &it) {
+      GpuModel *model = ensureModel(it);
+      if (model == nullptr || !model->valid)
+        return;
+
+      // Write this item's bone palette into its slot.
+      const uint32_t dynOffset = boneSlot * kBoneStride;
+      ++boneSlot;
+      const std::size_t boneCount =
+          std::min<std::size_t>(it.boneMatrices.size(), kMaxModelBones);
+      if (boneCount > 0)
+      {
+        std::memcpy(
+            static_cast<uint8_t *>(frame.boneMapped) + dynOffset,
+            it.boneMatrices.data(),
+            boneCount * sizeof(math::Mat4));
+      }
+      else
+      {
+        const math::Mat4 identity = math::Mat4::identity();
+        std::memcpy(static_cast<uint8_t *>(frame.boneMapped) + dynOffset,
+                    &identity, sizeof(identity));
+      }
+
+      for (std::size_t m = 0; m < model->meshes.size(); ++m)
+      {
+        const auto &mesh = model->meshes[m];
+        if (mesh.indexCount == 0)
+          continue;
+
+        const Material &material = it.overrideMaterial ? it.material : model->materials[m];
+        VkPolygonMode mode = material.wireframe ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL;
+        VkPipeline pipeline = pipelineFor(renderPass, mode, true);
+        if (pipeline == VK_NULL_HANDLE)
+          continue;
+
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+        vkCmdBindDescriptorSets(
+            cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+            skinnedPipelineLayout_, 0, 1, &frame.descriptorSet, 0, nullptr);
+        vkCmdBindDescriptorSets(
+            cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+            skinnedPipelineLayout_, 1, 1, &frame.boneDescriptorSet, 1, &dynOffset);
+
+        VkDeviceSize offsets[1] = {0};
+        vkCmdBindVertexBuffers(cmd, 0, 1, &mesh.vertexBuffer, offsets);
+        vkCmdBindIndexBuffer(cmd, mesh.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+
+        PushConstants pc{};
+        fillPushConstants(pc, it.worldTransform, material);
+        vkCmdPushConstants(
+            cmd, skinnedPipelineLayout_,
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+            0, sizeof(PushConstants), &pc);
+
+        vkCmdDrawIndexed(cmd, mesh.indexCount, 1, 0, 0, 0);
+      }
+    };
+
     const auto drawItems = [&](const std::vector<RenderItem> &items) {
       for (const auto &it : items)
       {
+        if (it.model != nullptr)
+        {
+          drawModelItem(it);
+          continue;
+        }
+
         auto &mesh = ensureMesh(it.primitiveType);
         if (mesh.indexCount == 0)
           continue;
 
         VkPolygonMode mode = it.material.wireframe ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL;
-        VkPipeline pipeline = pipelineFor(renderPass, mode);
+        VkPipeline pipeline = pipelineFor(renderPass, mode, false);
         if (pipeline == VK_NULL_HANDLE)
           continue;
 
@@ -432,15 +647,7 @@ namespace hades
         vkCmdBindIndexBuffer(cmd, mesh.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
         PushConstants pc{};
-        writeMat4(pc.model, it.worldTransform);
-        pc.baseColor[0] = it.material.baseColorR;
-        pc.baseColor[1] = it.material.baseColorG;
-        pc.baseColor[2] = it.material.baseColorB;
-        pc.baseColor[3] = it.material.opacity;
-        pc.metallicRoughness[0] = it.material.metallic;
-        pc.metallicRoughness[1] = it.material.roughness;
-        pc.metallicRoughness[2] = 0.0f;
-        pc.metallicRoughness[3] = 0.0f;
+        fillPushConstants(pc, it.worldTransform, it.material);
         vkCmdPushConstants(
             cmd, pipelineLayout_,
             VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -474,16 +681,66 @@ namespace hades
     return meshes_[idx];
   }
 
+  VulkanMeshPipeline::GpuModel *VulkanMeshPipeline::ensureModel(const RenderItem &item)
+  {
+    auto it = models_.find(item.modelKey);
+    if (it != models_.end())
+      return &it->second;
+
+    GpuModel model;
+    model.valid = true;
+    for (const auto &meshData : item.model->meshes)
+    {
+      GpuMesh mesh;
+      if (!createModelMesh(meshData, mesh))
+      {
+        hades::Log::error_tagged(
+            "vulkan_mesh", "failed to upload model mesh for '%s'", item.modelKey.c_str());
+        destroyMesh(mesh);
+        model.valid = false;
+        break;
+      }
+      model.meshes.push_back(mesh);
+      model.materials.push_back(meshData.material);
+    }
+
+    if (!model.valid)
+    {
+      for (auto &mesh : model.meshes)
+        destroyMesh(mesh);
+      model.meshes.clear();
+      model.materials.clear();
+    }
+
+    auto [inserted, ok] = models_.emplace(item.modelKey, std::move(model));
+    (void)ok;
+    return &inserted->second;
+  }
+
   bool VulkanMeshPipeline::createMesh(const MeshCpuData &src, GpuMesh &out)
   {
     if (src.vertices.empty() || src.indices.empty())
       return false;
+    return createMeshBuffers(
+        src.vertices.data(), sizeof(MeshVertex) * src.vertices.size(), src.indices, out);
+  }
 
-    VkDeviceSize vbSize = sizeof(MeshVertex) * src.vertices.size();
-    VkDeviceSize ibSize = sizeof(uint32_t) * src.indices.size();
+  bool VulkanMeshPipeline::createModelMesh(const ModelMeshData &src, GpuMesh &out)
+  {
+    if (src.vertices.empty() || src.indices.empty())
+      return false;
+    return createMeshBuffers(
+        src.vertices.data(), sizeof(ModelVertex) * src.vertices.size(), src.indices, out);
+  }
+
+  bool VulkanMeshPipeline::createMeshBuffers(
+      const void *vertexData, VkDeviceSize vertexBytes,
+      const std::vector<uint32_t> &indices, GpuMesh &out)
+  {
+    VkDeviceSize ibSize = sizeof(uint32_t) * indices.size();
 
     if (!createBuffer(
-            vbSize,
+            vertexBytes,
             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
             out.vertexBuffer, out.vertexMemory))
@@ -495,13 +752,26 @@ namespace hades
             out.indexBuffer, out.indexMemory))
       return false;
 
-    if (!uploadViaStaging(src.vertices.data(), vbSize, out.vertexBuffer))
+    if (!uploadViaStaging(vertexData, vertexBytes, out.vertexBuffer))
       return false;
-    if (!uploadViaStaging(src.indices.data(), ibSize, out.indexBuffer))
+    if (!uploadViaStaging(indices.data(), ibSize, out.indexBuffer))
       return false;
 
-    out.indexCount = static_cast<uint32_t>(src.indices.size());
+    out.indexCount = static_cast<uint32_t>(indices.size());
     return true;
+  }
+
+  void VulkanMeshPipeline::destroyMesh(GpuMesh &m)
+  {
+    if (m.vertexBuffer) vkDestroyBuffer(device_, m.vertexBuffer, allocator_);
+    if (m.vertexMemory) vkFreeMemory(device_, m.vertexMemory, allocator_);
+    if (m.indexBuffer) vkDestroyBuffer(device_, m.indexBuffer, allocator_);
+    if (m.indexMemory) vkFreeMemory(device_, m.indexMemory, allocator_);
+    m.vertexBuffer = VK_NULL_HANDLE;
+    m.vertexMemory = VK_NULL_HANDLE;
+    m.indexBuffer = VK_NULL_HANDLE;
+    m.indexMemory = VK_NULL_HANDLE;
+    m.indexCount = 0;
   }
 
   uint32_t VulkanMeshPipeline::findMemoryType(uint32_t typeBits, VkMemoryPropertyFlags props) const

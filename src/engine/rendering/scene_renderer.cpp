@@ -3,9 +3,13 @@
 #include <algorithm>
 #include <cmath>
 
+#include "../assets/model_asset.hpp"
+#include "../assets/model_asset_cache.hpp"
+#include "../components/animation_component.hpp"
 #include "../components/camera_component.hpp"
 #include "../components/light_component.hpp"
 #include "../components/mesh_renderer_component.hpp"
+#include "../components/model_component.hpp"
 #include "../components/position_component_3d.hpp"
 #include "../components/primitive_component.hpp"
 #include "../components/rotation_component_3d.hpp"
@@ -173,7 +177,7 @@ namespace hades
       EntityManager &entityManager,
       std::optional<Entity::EntityId> worldFilter)
   {
-    // Collect entities with a PrimitiveComponent.
+    // Collect entities with a PrimitiveComponent or a ModelComponent.
     for (Entity::EntityId entity : entityManager.getActiveEntities())
     {
       if (worldFilter.has_value() &&
@@ -182,7 +186,9 @@ namespace hades
         continue;
       }
 
-      if (!componentManager.hasComponent<PrimitiveComponent>(entity))
+      const bool hasPrimitive = componentManager.hasComponent<PrimitiveComponent>(entity);
+      const bool hasModel = componentManager.hasComponent<ModelComponent>(entity);
+      if (!hasPrimitive && !hasModel)
       {
         continue;
       }
@@ -215,17 +221,74 @@ namespace hades
       item.worldPosition = position;
       item.worldTransform = math::buildModelMatrix(position, rotation, scale);
 
-      const auto &pc = componentManager.getComponent<PrimitiveComponent>(entity);
-      item.primitiveType = pc.type;
+      const float maxScale = std::max({std::abs(scale.x), std::abs(scale.y), std::abs(scale.z)});
+      std::size_t itemTriangles = 0;
 
-      // Read material if present.
-      if (componentManager.hasComponent<MeshRendererComponent>(entity))
+      if (hasModel)
       {
-        item.material = componentManager.getComponent<MeshRendererComponent>(entity).material;
-      }
+        auto &cache = ModelAssetCache::instance();
+        const auto &mc = componentManager.getComponent<ModelComponent>(entity);
+        const ModelAsset *asset = cache.get(mc.assetPath);
+        if (asset == nullptr)
+        {
+          // Missing or broken asset (already logged by the cache); nothing
+          // to draw for this entity.
+          continue;
+        }
 
-      // Compute bounds.
-      item.boundsRadius = computeBoundsRadius(scale);
+        item.model = asset;
+        item.modelKey = cache.resolvePath(mc.assetPath).string();
+        item.boundsRadius = asset->boundsRadius() * maxScale;
+        itemTriangles = asset->triangleCount();
+
+        // Pose: sample the animation clip when one is playing/scrubbed,
+        // otherwise fall back to the bind pose.
+        if (asset->hasAnimations() &&
+            componentManager.hasComponent<AnimationComponent>(entity))
+        {
+          const auto &anim = componentManager.getComponent<AnimationComponent>(entity);
+          asset->samplePose(anim.clipIndex, anim.time, item.boneMatrices);
+        }
+        else
+        {
+          item.boneMatrices = asset->bindPose();
+        }
+
+        if (componentManager.hasComponent<MeshRendererComponent>(entity))
+        {
+          item.material = componentManager.getComponent<MeshRendererComponent>(entity).material;
+          item.overrideMaterial = true;
+        }
+      }
+      else
+      {
+        const auto &pc = componentManager.getComponent<PrimitiveComponent>(entity);
+        item.primitiveType = pc.type;
+
+        // Read material if present.
+        if (componentManager.hasComponent<MeshRendererComponent>(entity))
+        {
+          item.material = componentManager.getComponent<MeshRendererComponent>(entity).material;
+        }
+
+        // Compute bounds.
+        item.boundsRadius = computeBoundsRadius(scale);
+
+        // Count triangles. Cube: 12, Plane: 2, Sphere: ~224 (16 segments × 14 rings).
+        switch (item.primitiveType)
+        {
+        case PrimitiveType::Cube:
+          itemTriangles = 12;
+          break;
+        case PrimitiveType::Sphere:
+          itemTriangles = 224;
+          break;
+        case PrimitiveType::Plane:
+        default:
+          itemTriangles = 2;
+          break;
+        }
+      }
 
       // Frustum culling.
       if (!camera.frustum.containsSphere(position, item.boundsRadius))
@@ -234,32 +297,19 @@ namespace hades
         continue;
       }
 
+      list.totalTriangles += itemTriangles;
+
       // Distance to camera for sorting.
       item.distanceToCamera = (position - camera.position).length();
-
-      // Count triangles. Cube: 12, Plane: 2, Sphere: ~224 (16 segments × 14 rings).
-      switch (item.primitiveType)
-      {
-      case PrimitiveType::Cube:
-        list.totalTriangles += 12;
-        break;
-      case PrimitiveType::Sphere:
-        list.totalTriangles += 224;
-        break;
-      case PrimitiveType::Plane:
-      default:
-        list.totalTriangles += 2;
-        break;
-      }
 
       // Route to opaque or transparent list.
       if (item.isTransparent())
       {
-        list.transparentItems.push_back(item);
+        list.transparentItems.push_back(std::move(item));
       }
       else
       {
-        list.opaqueItems.push_back(item);
+        list.opaqueItems.push_back(std::move(item));
       }
     }
   }

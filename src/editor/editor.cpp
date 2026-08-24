@@ -246,6 +246,7 @@ namespace hades
       HADES_FRAME_METRIC_SCOPE("plugins_pre");
       render_plugins(EditorPluginPhase::PreEntityDeletion, pluginContext);
     }
+    handle_entity_reparent_requests(entityManager, componentManager);
     handle_entity_deletion_requests(entityManager, componentManager, scriptRuntime);
     {
       HADES_FRAME_METRIC_SCOPE("plugins_post");

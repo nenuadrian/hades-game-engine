@@ -293,6 +293,7 @@ set(HADES_SHADER_HEADERS "")
 if(NOT EMSCRIPTEN)
   hades_add_shader("${SRC_DIR}/engine/rendering/shaders/mesh.vert.glsl" vert mesh_vert_spv)
   hades_add_shader("${SRC_DIR}/engine/rendering/shaders/mesh.frag.glsl" frag mesh_frag_spv)
+  hades_add_shader("${SRC_DIR}/engine/rendering/shaders/mesh_skinned.vert.glsl" vert mesh_skinned_vert_spv)
 endif()
 
 add_library(HadesEngine STATIC ${ENGINE_SOURCE_FILES} ${ENGINE_HEADER_FILES} ${HADES_SHADER_HEADERS})
@@ -315,7 +316,8 @@ if(EMSCRIPTEN)
     PUBLIC hades_imgui
            Jolt
            hades_soloud
-           nlohmann_json::nlohmann_json)
+           nlohmann_json::nlohmann_json
+           assimp::assimp)
 else()
   target_link_libraries(
     HadesEngine
@@ -323,6 +325,7 @@ else()
            Jolt
            hades_soloud
            nlohmann_json::nlohmann_json
+           assimp::assimp
            Vulkan::Vulkan)
   if(WIN32)
     target_compile_definitions(HadesEngine PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)

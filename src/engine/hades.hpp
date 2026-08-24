@@ -19,12 +19,14 @@
 #include "rendering/math3d.hpp"
 
 // Components
+#include "components/animation_component.hpp"
 #include "components/audio_listener_component.hpp"
 #include "components/audio_source_component.hpp"
 #include "components/camera_component.hpp"
 #include "components/collider_component.hpp"
 #include "components/light_component.hpp"
 #include "components/mesh_renderer_component.hpp"
+#include "components/model_component.hpp"
 #include "components/name_component.hpp"
 #include "components/position_component_2d.hpp"
 #include "components/position_component_3d.hpp"

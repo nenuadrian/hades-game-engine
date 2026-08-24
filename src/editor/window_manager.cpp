@@ -44,6 +44,7 @@ using EditorRenderer = hades::WebGPURenderer;
 using EditorRenderer = hades::VulkanRenderer;
 #endif
 #include "../engine/physics/physics_world.hpp"
+#include "../engine/systems/animation_system.hpp"
 #include "../engine/systems/audio_system.hpp"
 #include "../engine/systems/movement_system.hpp"
 #include "../engine/systems/physics_system.hpp"
@@ -1336,6 +1337,7 @@ namespace hades
     physicsSystem = systemManager.registerSystem<PhysicsSystem>(SystemPhase::Physics);
     physicsSystem->setPhysicsWorld(physics_world.get());
     systemManager.registerSystem<MovementSystem>(SystemPhase::Logic);
+    systemManager.registerSystem<AnimationSystem>(SystemPhase::Logic);
     renderSystem = systemManager.registerSystem<RenderSystem>(SystemPhase::Render);
     audioSystem = systemManager.registerSystem<AudioSystem>(SystemPhase::Audio);
     audioSystem->setAudioEngine(audio_engine.get());

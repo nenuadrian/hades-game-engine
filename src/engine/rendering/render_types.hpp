@@ -2,6 +2,7 @@
 #define HADES_ENGINE_RENDERING_RENDER_TYPES_HPP
 
 #include <cstddef>
+#include <string>
 #include <vector>
 
 #include "../components/primitive_component.hpp"
@@ -10,6 +11,8 @@
 
 namespace hades
 {
+  class ModelAsset;
+
   // -------------------------------------------------------------------------
   // RenderCamera — fully resolved camera for rendering
   // -------------------------------------------------------------------------
@@ -70,11 +73,26 @@ namespace hades
     math::Mat4 worldTransform;
     math::Vec3 worldPosition;
 
-    /// Primitive shape to render.
+    /// Primitive shape to render (used when `model` is null).
     PrimitiveType primitiveType = PrimitiveType::Cube;
 
-    /// Material for this item.
+    /// Imported model asset to render instead of a primitive. The pointer is
+    /// owned by ModelAssetCache and stays valid for the frame.
+    const ModelAsset *model = nullptr;
+
+    /// Cache key (resolved asset path) for backend GPU mesh caches.
+    std::string modelKey;
+
+    /// Bone palette for this frame's pose; empty means bind pose.
+    std::vector<math::Mat4> boneMatrices;
+
+    /// Material for this item. For models this is an override applied to all
+    /// meshes when `overrideMaterial` is set; otherwise the imported
+    /// per-mesh materials are used.
     Material material;
+
+    /// True when a MeshRendererComponent overrides the model's materials.
+    bool overrideMaterial = false;
 
     /// Distance to camera (for sorting).
     float distanceToCamera = 0.0f;

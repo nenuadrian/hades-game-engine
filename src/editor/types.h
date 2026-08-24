@@ -27,6 +27,7 @@ namespace hades
     PhysicsCube,
     Plane,
     Sphere,
+    Model,
     DirectionalLight,
     PointLight,
     SpotLight,

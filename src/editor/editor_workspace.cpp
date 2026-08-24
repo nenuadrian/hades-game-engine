@@ -11,6 +11,7 @@
 
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
+#include "../engine/assets/model_asset_cache.hpp"
 #include "../engine/core/ecs/component_manager.hpp"
 #include "../engine/core/ecs/entity_manager.hpp"
 #include "../engine/core/ecs/scene_serializer.hpp"
@@ -78,6 +79,30 @@ namespace hades
       {
         const std::string componentName = component.string();
         if (is_ignored_script_scan_component(componentName))
+        {
+          return false;
+        }
+      }
+
+      return true;
+    }
+
+    bool should_include_workspace_model_file(
+        const std::filesystem::path &workspacePath,
+        const std::filesystem::path &path)
+    {
+      std::string ext = path.extension().string();
+      std::transform(ext.begin(), ext.end(), ext.begin(),
+                     [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+      if (ext != ".fbx" && ext != ".obj" && ext != ".gltf" && ext != ".glb" && ext != ".dae")
+      {
+        return false;
+      }
+
+      const std::filesystem::path relativePath = path.lexically_relative(workspacePath);
+      for (const auto &component : relativePath)
+      {
+        if (is_ignored_script_scan_component(component.string()))
         {
           return false;
         }
@@ -160,6 +185,7 @@ namespace hades
         const std::filesystem::path &workspacePath,
         Editor::WorkspaceTreeNode &node,
         std::vector<std::string> &scriptFiles,
+        std::vector<std::string> &modelFiles,
         std::string *errorMessage)
     {
       node.path = path;
@@ -171,6 +197,10 @@ namespace hades
         if (should_include_workspace_script_file(workspacePath, path))
         {
           scriptFiles.push_back(relative_workspace_path(workspacePath, path));
+        }
+        if (should_include_workspace_model_file(workspacePath, path))
+        {
+          modelFiles.push_back(relative_workspace_path(workspacePath, path));
         }
         return true;
       }
@@ -215,7 +245,7 @@ namespace hades
       for (const auto &entry : entries)
       {
         Editor::WorkspaceTreeNode child;
-        build_workspace_tree(entry.path(), workspacePath, child, scriptFiles, errorMessage);
+        build_workspace_tree(entry.path(), workspacePath, child, scriptFiles, modelFiles, errorMessage);
         node.children.push_back(std::move(child));
       }
 
@@ -232,11 +262,16 @@ namespace hades
       workspaceGridCurrentDir_.clear();
       workspaceTreeRoot_.reset();
       workspaceScriptFiles_.clear();
+      workspaceModelFiles_.clear();
       workspaceScanError_.clear();
       workspaceScriptListDirty_ = false;
       parsedScriptCache_.clear();
       parsedScriptModTimes_.clear();
       cachedDiskWorlds_.clear();
+
+      // Model asset paths resolve relative to the workspace.
+      ModelAssetCache::instance().setAssetRoot(activeWorkspacePath_);
+      ModelAssetCache::instance().clear();
     }
 
     if (activeWorkspacePath_.empty() || workspaceTreeRoot_.has_value())
@@ -246,10 +281,13 @@ namespace hades
 
     WorkspaceTreeNode rootNode;
     std::vector<std::string> scriptFiles;
+    std::vector<std::string> modelFiles;
     std::string scanError;
-    build_workspace_tree(activeWorkspacePath_, activeWorkspacePath_, rootNode, scriptFiles, &scanError);
+    build_workspace_tree(activeWorkspacePath_, activeWorkspacePath_, rootNode, scriptFiles, modelFiles, &scanError);
     std::sort(scriptFiles.begin(), scriptFiles.end());
+    std::sort(modelFiles.begin(), modelFiles.end());
     workspaceScriptFiles_ = std::move(scriptFiles);
+    workspaceModelFiles_ = std::move(modelFiles);
     workspaceTreeRoot_ = std::move(rootNode);
     workspaceScanError_ = std::move(scanError);
     cachedDiskWorlds_ = list_saved_worlds(activeWorkspacePath_);

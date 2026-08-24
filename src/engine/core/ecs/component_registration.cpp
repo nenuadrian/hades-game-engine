@@ -7,9 +7,11 @@
 
 #include "../log.hpp"
 
+#include "../../components/animation_component.hpp"
 #include "../../components/audio_listener_component.hpp"
 #include "../../components/audio_source_component.hpp"
 #include "../../components/camera_component.hpp"
+#include "../../components/model_component.hpp"
 #include "../../components/collider_component.hpp"
 #include "../../components/light_component.hpp"
 #include "../../components/mesh_renderer_component.hpp"
@@ -479,6 +481,51 @@ namespace hades
               c.ambientContribution = in["ambientContribution"].get<float>();
               c.castShadows = in["castShadows"].get<bool>();
               c.enabled = in["enabled"].get<bool>();
+              cm.addComponent(entity, c);
+              return true;
+            });
+
+        // ModelComponent
+        registry.registerComponent<ModelComponent>(
+            "model",
+            [](Entity::EntityId entity, ComponentManager &cm, json &out) -> bool
+            {
+              if (!cm.hasComponent<ModelComponent>(entity))
+                return false;
+              const auto &c = cm.getComponent<ModelComponent>(entity);
+              out = {{"assetPath", c.assetPath}};
+              return true;
+            },
+            [](Entity::EntityId entity, ComponentManager &cm, const json &in, const auto &) -> bool
+            {
+              ModelComponent c;
+              c.assetPath = in.value("assetPath", std::string{});
+              cm.addComponent(entity, c);
+              return true;
+            });
+
+        // AnimationComponent
+        registry.registerComponent<AnimationComponent>(
+            "animation",
+            [](Entity::EntityId entity, ComponentManager &cm, json &out) -> bool
+            {
+              if (!cm.hasComponent<AnimationComponent>(entity))
+                return false;
+              const auto &c = cm.getComponent<AnimationComponent>(entity);
+              out = {
+                  {"clipIndex", c.clipIndex},
+                  {"playing", c.playing},
+                  {"looping", c.looping},
+                  {"speed", c.speed}};
+              return true;
+            },
+            [](Entity::EntityId entity, ComponentManager &cm, const json &in, const auto &) -> bool
+            {
+              AnimationComponent c;
+              c.clipIndex = in.value("clipIndex", 0);
+              c.playing = in.value("playing", true);
+              c.looping = in.value("looping", true);
+              c.speed = in.value("speed", 1.0f);
               cm.addComponent(entity, c);
               return true;
             });

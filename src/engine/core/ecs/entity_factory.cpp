@@ -1,16 +1,19 @@
 #include "entity_factory.hpp"
 
+#include "../../components/animation_component.hpp"
 #include "../../components/audio_listener_component.hpp"
 #include "../../components/light_component.hpp"
 #include "../../components/audio_source_component.hpp"
 #include "../../components/camera_component.hpp"
 #include "../../components/collider_component.hpp"
 #include "../../components/mesh_renderer_component.hpp"
+#include "../../components/model_component.hpp"
 #include "../../components/name_component.hpp"
 #include "../../components/position_component_3d.hpp"
 #include "../../components/primitive_component.hpp"
 #include "../../components/rigid_body_component.hpp"
 #include "../../components/rotation_component_3d.hpp"
+#include "../../components/scale_component_3d.hpp"
 #include "../../components/text_component.hpp"
 #include "../../components/transform_hierarchy_component.hpp"
 #include "../../components/world_component.hpp"
@@ -97,6 +100,19 @@ namespace hades
     const auto entity = createBaseEntity(entityManager, componentManager, "Sphere", parent);
     componentManager.addComponent(entity, PrimitiveComponent{PrimitiveType::Sphere});
     componentManager.addComponent(entity, MeshRendererComponent{});
+    return entity;
+  }
+
+  Entity::EntityId EntityFactory::createModel(
+      EntityManager &entityManager,
+      ComponentManager &componentManager,
+      std::optional<Entity::EntityId> parent)
+  {
+    const auto entity = createBaseEntity(entityManager, componentManager, "Model", parent);
+    componentManager.addComponent(entity, ModelComponent{});
+    componentManager.addComponent(entity, AnimationComponent{});
+    componentManager.addComponent(entity, RotationComponent3D{});
+    componentManager.addComponent(entity, ScaleComponent3D{});
     return entity;
   }
 

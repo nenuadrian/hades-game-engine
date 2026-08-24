@@ -131,6 +131,7 @@ namespace hades
     std::filesystem::path activeWorkspacePath_;
     std::optional<WorkspaceTreeNode> workspaceTreeRoot_;
     std::vector<std::string> workspaceScriptFiles_;
+    std::vector<std::string> workspaceModelFiles_;
     std::string workspaceScanError_;
     std::vector<std::string> cachedDiskWorlds_;
     bool workspaceScriptListDirty_ = false;
@@ -189,7 +190,18 @@ namespace hades
     std::optional<Entity::EntityId> prePlaySelectedEntity_;
     std::optional<Entity::EntityId> prePlayLoadedWorld_;
 
+    // Scene-tree drag and drop. The move is queued rather than applied inline
+    // because the hierarchy is being walked by reference while it renders.
+    struct PendingEntityReparent
+    {
+      Entity::EntityId entity = Entity::INVALID;
+      Entity::EntityId newParent = Entity::INVALID;
+      // Slot in the new parent's child list; negative means append.
+      int insertIndex = -1;
+    };
+
     std::optional<Entity::EntityId> pendingEntityDeletion_;
+    std::optional<PendingEntityReparent> pendingEntityReparent_;
     bool openAddEntityDialog_ = false;
     bool focusAddEntitySearch_ = false;
     std::optional<Entity::EntityId> pendingAddEntityParent_;
@@ -273,10 +285,12 @@ namespace hades
     void request_entity_creation(EditorEntityPreset preset, Entity::EntityId parent);
     void request_add_entity_picker(Entity::EntityId parent);
     void request_entity_deletion(Entity::EntityId entity);
+    void request_entity_reparent(Entity::EntityId entity, Entity::EntityId newParent, int insertIndex);
     void select_entity(Entity::EntityId entity);
     void workspace(EntityManager &entityManager, ComponentManager &componentManager);
     void handle_entity_creation_requests(EntityManager &entityManager, ComponentManager &componentManager);
     void handle_entity_deletion_requests(EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime);
+    void handle_entity_reparent_requests(EntityManager &entityManager, ComponentManager &componentManager);
     void render_add_entity_dialog(EntityManager &entityManager, ComponentManager &componentManager);
     void handle_play_mode_requests(EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime);
     void start_play_mode(EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime);
@@ -288,6 +302,9 @@ namespace hades
     void properties(EntityManager &entityManager, ComponentManager &componentManager);
     void render_hierarchy(Entity::EntityId entity, EntityManager &entityManager, ComponentManager &componentManager);
     void render_hierarchies(EntityManager &entityManager, ComponentManager &componentManager);
+    void render_hierarchy_drag_source(Entity::EntityId entity, ComponentManager &componentManager);
+    void render_hierarchy_drop_target(Entity::EntityId entity, ComponentManager &componentManager);
+    void render_hierarchy_root_drop_zone(ComponentManager &componentManager);
     void debug(float deltaTime, EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime);
     void save_worlds(EntityManager &entityManager, ComponentManager &componentManager);
     void open_world_from_disk(const std::string &worldName, EntityManager &entityManager, ComponentManager &componentManager);

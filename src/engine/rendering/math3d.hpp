@@ -268,6 +268,15 @@ namespace hades::math
     Quat() = default;
     Quat(float x, float y, float z, float w) : x(x), y(y), z(z), w(w) {}
 
+    Quat normalized() const
+    {
+      float len = std::sqrt(x * x + y * y + z * z + w * w);
+      if (len < 1e-6f)
+        return {};
+      float inv = 1.0f / len;
+      return {x * inv, y * inv, z * inv, w * inv};
+    }
+
     /// Rotate a vector by this quaternion: q * v * q^-1 (simplified).
     Vec3 rotate(const Vec3 &v) const
     {
@@ -298,6 +307,47 @@ namespace hades::math
       return r;
     }
   };
+
+  /// Linear interpolation between two vectors.
+  inline Vec3 lerp(const Vec3 &a, const Vec3 &b, float t)
+  {
+    return a + (b - a) * t;
+  }
+
+  /// Spherical interpolation between two quaternions (shortest path).
+  /// Falls back to normalized lerp when the quaternions are nearly parallel.
+  inline Quat slerp(const Quat &a, const Quat &b, float t)
+  {
+    float cosom = a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+    Quat end = b;
+    if (cosom < 0.0f)
+    {
+      cosom = -cosom;
+      end = {-b.x, -b.y, -b.z, -b.w};
+    }
+
+    float s0;
+    float s1;
+    if (cosom < 0.9995f)
+    {
+      const float omega = std::acos(cosom);
+      const float invSin = 1.0f / std::sin(omega);
+      s0 = std::sin((1.0f - t) * omega) * invSin;
+      s1 = std::sin(t * omega) * invSin;
+    }
+    else
+    {
+      s0 = 1.0f - t;
+      s1 = t;
+    }
+
+    return Quat{
+        s0 * a.x + s1 * end.x,
+        s0 * a.y + s1 * end.y,
+        s0 * a.z + s1 * end.z,
+        s0 * a.w + s1 * end.w}
+        .normalized();
+  }
 
   // -------------------------------------------------------------------------
   // Frustum — 6-plane frustum for culling

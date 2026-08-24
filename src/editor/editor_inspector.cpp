@@ -1,5 +1,6 @@
 #include "editor.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -8,7 +9,11 @@
 
 #include "imgui.h"
 #include "misc/cpp/imgui_stdlib.h"
+#include "../engine/assets/model_asset.hpp"
+#include "../engine/assets/model_asset_cache.hpp"
+#include "../engine/components/animation_component.hpp"
 #include "../engine/components/audio_listener_component.hpp"
+#include "../engine/components/model_component.hpp"
 #include "../engine/components/audio_source_component.hpp"
 #include "../engine/components/camera_component.hpp"
 #include "../engine/components/light_component.hpp"
@@ -109,7 +114,7 @@ namespace hades
     }
     {
       static int selectedComponentType = 0;
-      const char *componentTypes[] = {"Script Component", "Rigid Body", "Mesh Renderer"};
+      const char *componentTypes[] = {"Script Component", "Rigid Body", "Mesh Renderer", "Model", "Animation"};
       ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.65f);
       ImGui::Combo("##AddComponentType", &selectedComponentType, componentTypes, IM_ARRAYSIZE(componentTypes));
       ImGui::SameLine();
@@ -150,6 +155,20 @@ namespace hades
             componentManager.addComponent(entity, MeshRendererComponent{});
           }
         }
+        else if (selectedComponentType == 3)
+        {
+          if (!componentManager.hasComponent<ModelComponent>(entity))
+          {
+            componentManager.addComponent(entity, ModelComponent{});
+          }
+        }
+        else if (selectedComponentType == 4)
+        {
+          if (!componentManager.hasComponent<AnimationComponent>(entity))
+          {
+            componentManager.addComponent(entity, AnimationComponent{});
+          }
+        }
       }
     }
     if (isWorld)
@@ -187,6 +206,125 @@ namespace hades
       ImGui::DragFloat("Roughness", &mat.roughness, 0.01f, 0.0f, 1.0f);
       ImGui::DragFloat("Opacity", &mat.opacity, 0.01f, 0.0f, 1.0f);
       ImGui::Checkbox("Wireframe", &mat.wireframe);
+    }
+
+    if (componentManager.hasComponent<ModelComponent>(entity) && ImGui::CollapsingHeader("Model", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+      auto &model = componentManager.getComponent<ModelComponent>(entity);
+      auto &modelCache = ModelAssetCache::instance();
+
+      std::vector<std::string> modelOptions = workspaceModelFiles_;
+      if (!model.assetPath.empty() &&
+          std::find(modelOptions.begin(), modelOptions.end(), model.assetPath) == modelOptions.end())
+      {
+        modelOptions.push_back(model.assetPath);
+        std::sort(modelOptions.begin(), modelOptions.end());
+      }
+
+      const std::string previewValue =
+          model.assetPath.empty() ? "<Select a workspace model>" : model.assetPath;
+      if (ImGui::BeginCombo("Model Asset", previewValue.c_str()))
+      {
+        const bool noneSelected = model.assetPath.empty();
+        if (ImGui::Selectable("<None>", noneSelected))
+        {
+          model.assetPath.clear();
+        }
+        if (noneSelected)
+        {
+          ImGui::SetItemDefaultFocus();
+        }
+
+        for (const auto &modelPath : modelOptions)
+        {
+          const bool selected = (model.assetPath == modelPath);
+          if (ImGui::Selectable(modelPath.c_str(), selected))
+          {
+            model.assetPath = modelPath;
+          }
+          if (selected)
+          {
+            ImGui::SetItemDefaultFocus();
+          }
+        }
+        ImGui::EndCombo();
+      }
+
+      if (modelOptions.empty())
+      {
+        ImGui::TextDisabled("No model files (.fbx/.obj/.gltf/.glb/.dae) in the workspace.");
+      }
+
+      if (!model.assetPath.empty())
+      {
+        const ModelAsset *asset = modelCache.get(model.assetPath);
+        if (asset != nullptr)
+        {
+          ImGui::TextDisabled(
+              "%zu meshes, %zu triangles, %zu bones, %zu clips",
+              asset->meshes.size(), asset->triangleCount(), asset->bones.size(), asset->clips.size());
+        }
+        else
+        {
+          const std::string loadError = modelCache.errorFor(model.assetPath);
+          ImGui::TextColored(
+              ImVec4(0.88f, 0.42f, 0.42f, 1.0f), "Failed to load: %s",
+              loadError.empty() ? "unknown error" : loadError.c_str());
+        }
+      }
+
+      ImGui::TextDisabled("Add a Mesh Renderer component to override the imported materials.");
+    }
+
+    if (componentManager.hasComponent<AnimationComponent>(entity) && ImGui::CollapsingHeader("Animation", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+      auto &anim = componentManager.getComponent<AnimationComponent>(entity);
+
+      const ModelAsset *asset = nullptr;
+      if (componentManager.hasComponent<ModelComponent>(entity))
+      {
+        asset = ModelAssetCache::instance().get(
+            componentManager.getComponent<ModelComponent>(entity).assetPath);
+      }
+
+      if (asset == nullptr)
+      {
+        ImGui::TextDisabled("Add a Model component with a loaded asset to play animations.");
+      }
+      else if (asset->clips.empty())
+      {
+        ImGui::TextDisabled("This model has no animation clips.");
+      }
+      else
+      {
+        anim.clipIndex = std::clamp(anim.clipIndex, 0, static_cast<int>(asset->clips.size()) - 1);
+        const auto &activeClip = asset->clips[anim.clipIndex];
+
+        if (ImGui::BeginCombo("Clip", activeClip.name.c_str()))
+        {
+          for (int i = 0; i < static_cast<int>(asset->clips.size()); ++i)
+          {
+            const bool selected = (i == anim.clipIndex);
+            if (ImGui::Selectable(asset->clips[i].name.c_str(), selected))
+            {
+              anim.clipIndex = i;
+              anim.time = 0.0f;
+            }
+            if (selected)
+            {
+              ImGui::SetItemDefaultFocus();
+            }
+          }
+          ImGui::EndCombo();
+        }
+
+        ImGui::Checkbox("Playing", &anim.playing);
+        ImGui::SameLine();
+        ImGui::Checkbox("Looping", &anim.looping);
+        ImGui::DragFloat("Speed", &anim.speed, 0.01f, -4.0f, 4.0f);
+        ImGui::SliderFloat("Time", &anim.time, 0.0f, activeClip.duration, "%.2f s");
+        ImGui::TextDisabled("Playback advances in play mode; scrub Time to preview here.");
+      }
     }
 
     if (componentManager.hasComponent<RigidBodyComponent>(entity) && ImGui::CollapsingHeader("Rigid Body"))
