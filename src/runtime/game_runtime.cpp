@@ -1,6 +1,7 @@
 #include "game_runtime.hpp"
 
 #include <cstdlib>
+#include <unordered_set>
 
 #include <SDL.h>
 
@@ -13,15 +14,20 @@
 #include "engine/physics/physics_world.hpp"
 #include "engine/rendering/vulkan.hpp"
 #include "engine/assets/model_asset_cache.hpp"
+#include "engine/animation/animation_clip_cache.hpp"
+#include "engine/animation/animation_runtime.hpp"
 #include "engine/runtime/main_camera_selection.hpp"
 #include "engine/components/name_component.hpp"
 #include "engine/components/position_component_3d.hpp"
 #include "engine/core/ecs/query.hpp"
 #include "engine/systems/animation_system.hpp"
+#include "engine/systems/animator_system.hpp"
 #include "engine/systems/audio_system.hpp"
 #include "engine/systems/movement_system.hpp"
 #include "engine/systems/physics_system.hpp"
 #include "engine/systems/render_system.hpp"
+#include "engine/ui/script_ui.hpp"
+#include "engine/ui/ui_input.hpp"
 
 namespace
 {
@@ -96,6 +102,7 @@ namespace hades
   GameRuntime::~GameRuntime()
   {
     scriptRuntime_.stop();
+    blueprintRuntime_.stop();
   }
 
   std::string GameRuntime::project_name() const
@@ -183,17 +190,21 @@ namespace hades
     }
 
     componentManager_ = ComponentManager(&entityManager_);
+    // Publish the live ECS so hades::UI can reach UICanvasComponent data.
+    register_script_ui_components(&componentManager_);
 
     physicsSystem_ = systemManager_.registerSystem<PhysicsSystem>(SystemPhase::Physics);
     physicsSystem_->setPhysicsWorld(physicsWorld_.get());
     systemManager_.registerSystem<MovementSystem>(SystemPhase::Logic);
     systemManager_.registerSystem<AnimationSystem>(SystemPhase::Logic);
+    systemManager_.registerSystem<AnimatorSystem>(SystemPhase::Logic);
     renderSystem_ = systemManager_.registerSystem<RenderSystem>(SystemPhase::Render);
     audioSystem_ = systemManager_.registerSystem<AudioSystem>(SystemPhase::Audio);
     audioSystem_->setAudioEngine(audioEngine_.get());
 
-    // Model asset paths resolve relative to the project directory.
+    // Model and animation asset paths resolve relative to the project directory.
     ModelAssetCache::instance().setAssetRoot(projectPath_);
+    AnimationClipCache::instance().setAssetRoot(projectPath_);
 
     // Load all worlds from the project.
     std::string loadError;
@@ -239,6 +250,21 @@ namespace hades
       }
     }
 
+    // Blueprints run beside the C++ scripts and share the same host services.
+    blueprintHost_.bind(&componentManager_, physicsWorld_.get(), audioEngine_.get());
+    blueprintHost_.set_script_runtime(&scriptRuntime_);
+    blueprintRuntime_.set_host(&blueprintHost_);
+    blueprintRuntime_.attach_event_bus(eventBus_);
+
+    std::string blueprintError;
+    if (!blueprintRuntime_.start(componentManager_, entityManager_, projectPath_, activeWorld_, &blueprintError))
+    {
+      if (!blueprintError.empty())
+      {
+        Log::error_tagged("runtime", "blueprint runtime failed to start: %s", blueprintError.c_str());
+      }
+    }
+
     initialized_ = true;
     return true;
   }
@@ -261,6 +287,7 @@ namespace hades
       if (event.type == SDL_KEYDOWN)
       {
         scriptRuntime_.on_key_down(static_cast<int>(event.key.keysym.sym));
+        blueprintRuntime_.on_key_down(static_cast<int>(event.key.keysym.sym));
         if (scriptRuntime_.faulted())
         {
           Log::error("script: %s", scriptRuntime_.last_error().c_str());
@@ -270,6 +297,7 @@ namespace hades
       else if (event.type == SDL_KEYUP)
       {
         scriptRuntime_.on_key_up(static_cast<int>(event.key.keysym.sym));
+        blueprintRuntime_.on_key_up(static_cast<int>(event.key.keysym.sym));
         if (scriptRuntime_.faulted())
         {
           Log::error("script: %s", scriptRuntime_.last_error().c_str());
@@ -278,7 +306,23 @@ namespace hades
       }
       else if (event.type == SDL_MOUSEBUTTONDOWN)
       {
+        // Screen-space UI hears the click first (button events + script
+        // "ui.clicked" messages); the raw event still reaches gameplay.
+        if (event.button.button == SDL_BUTTON_LEFT && window_ != nullptr)
+        {
+          int windowW = 0, windowH = 0;
+          SDL_GetWindowSize(window_.get(), &windowW, &windowH);
+          ui::dispatch_ui_click(
+              componentManager_, entityManager_, activeWorld_,
+              static_cast<float>(event.button.x), static_cast<float>(event.button.y),
+              static_cast<float>(windowW), static_cast<float>(windowH),
+              &blueprintRuntime_, &scriptRuntime_);
+        }
         scriptRuntime_.on_mouse_down(
+            static_cast<int>(event.button.button),
+            static_cast<float>(event.button.x),
+            static_cast<float>(event.button.y));
+        blueprintRuntime_.on_mouse_down(
             static_cast<int>(event.button.button),
             static_cast<float>(event.button.x),
             static_cast<float>(event.button.y));
@@ -294,6 +338,10 @@ namespace hades
             static_cast<int>(event.button.button),
             static_cast<float>(event.button.x),
             static_cast<float>(event.button.y));
+        blueprintRuntime_.on_mouse_up(
+            static_cast<int>(event.button.button),
+            static_cast<float>(event.button.x),
+            static_cast<float>(event.button.y));
         if (scriptRuntime_.faulted())
         {
           Log::error("script: %s", scriptRuntime_.last_error().c_str());
@@ -302,7 +350,13 @@ namespace hades
       }
       else if (event.type == SDL_MOUSEMOTION)
       {
+        ui::set_ui_pointer(
+            static_cast<float>(event.motion.x),
+            static_cast<float>(event.motion.y));
         scriptRuntime_.on_mouse_move(
+            static_cast<float>(event.motion.x),
+            static_cast<float>(event.motion.y));
+        blueprintRuntime_.on_mouse_move(
             static_cast<float>(event.motion.x),
             static_cast<float>(event.motion.y));
         if (scriptRuntime_.faulted())
@@ -345,6 +399,19 @@ namespace hades
       handle_pending_world_load();
     }
 
+    if (blueprintRuntime_.is_running())
+    {
+      blueprintRuntime_.update(deltaTime, componentManager_, entityManager_);
+      if (blueprintRuntime_.faulted())
+      {
+        Log::error("blueprint: %s", blueprintRuntime_.last_error().c_str());
+        running_ = false;
+        return;
+      }
+
+      handle_pending_world_load();
+    }
+
     // Dispatch pending events, then update all engine systems.
     eventBus_.dispatch();
     SystemContext context{componentManager_, entityManager_, eventBus_};
@@ -364,7 +431,8 @@ namespace hades
                                  : 1.0f;
         const RenderCamera camera = sceneRenderer_.buildCamera(*cameraSelection.entity, aspect, componentManager_);
         const RenderList list = sceneRenderer_.buildRenderList(
-            camera, componentManager_, entityManager_, activeWorld_);
+            camera, componentManager_, entityManager_, activeWorld_,
+            static_cast<float>(windowW), static_cast<float>(windowH));
         renderer_->render_scene_to_main(list);
       }
       // Present the frame (clear + present, no ImGui).
@@ -381,6 +449,19 @@ namespace hades
       if (scriptRuntime_.faulted())
       {
         Log::error("script: %s", scriptRuntime_.last_error().c_str());
+        running_ = false;
+        return;
+      }
+
+      handle_pending_world_load();
+    }
+
+    if (blueprintRuntime_.is_running())
+    {
+      blueprintRuntime_.update(deltaTime, componentManager_, entityManager_);
+      if (blueprintRuntime_.faulted())
+      {
+        Log::error("blueprint: %s", blueprintRuntime_.last_error().c_str());
         running_ = false;
         return;
       }
@@ -408,11 +489,13 @@ namespace hades
     {
       run_api_loop();
       scriptRuntime_.stop();
+      blueprintRuntime_.stop();
       if (audioEngine_ != nullptr)
       {
         audioEngine_->stop_all();
       }
       register_script_audio_engine(nullptr);
+      register_script_ui_components(nullptr);
       return EXIT_SUCCESS;
     }
 #endif
@@ -423,11 +506,13 @@ namespace hades
     }
 
     scriptRuntime_.stop();
+    blueprintRuntime_.stop();
     if (audioEngine_ != nullptr)
     {
       audioEngine_->stop_all();
     }
     register_script_audio_engine(nullptr);
+    register_script_ui_components(nullptr);
 
     return EXIT_SUCCESS;
   }
@@ -471,10 +556,17 @@ namespace hades
   void GameRuntime::reset_game()
   {
     scriptRuntime_.stop();
+    blueprintRuntime_.stop();
 
     // Restore the initial world state from the snapshot taken at startup.
     std::unordered_map<Entity::EntityId, Entity::EntityId> idMap;
     restore_all_worlds_from_snapshot(initialWorldSnapshot_, entityManager_, componentManager_, &idMap);
+
+    // The restore destroys and re-creates in one call, so the earliest point
+    // the reset entities can be given clean animators is right after it. They
+    // have none yet -- AnimatorSystem has not run -- so this only drops the
+    // pre-reset state that the recycled ids would otherwise inherit.
+    AnimationRuntime::instance().clear();
 
     // Re-resolve the active world after restore (IDs may have changed).
     if (activeWorld_.has_value())
@@ -506,6 +598,15 @@ namespace hades
       if (!scriptError.empty())
       {
         Log::warn("script runtime failed to restart: %s", scriptError.c_str());
+      }
+    }
+
+    std::string blueprintError;
+    if (!blueprintRuntime_.start(componentManager_, entityManager_, projectPath_, activeWorld_, &blueprintError))
+    {
+      if (!blueprintError.empty())
+      {
+        Log::error_tagged("runtime", "blueprint runtime failed to restart: %s", blueprintError.c_str());
       }
     }
 
@@ -552,16 +653,18 @@ namespace hades
         const int ticks = api_->consume_pending_step();
         auto inputs = api_->consume_pending_inputs();
 
-        // Inject queued key events into the script runtime.
+        // Inject queued key events into the script and Blueprint runtimes.
         for (const auto &input : inputs)
         {
           if (input.down)
           {
             scriptRuntime_.on_key_down(input.keyCode);
+            blueprintRuntime_.on_key_down(input.keyCode);
           }
           else
           {
             scriptRuntime_.on_key_up(input.keyCode);
+            blueprintRuntime_.on_key_up(input.keyCode);
           }
 
           if (scriptRuntime_.faulted())
@@ -620,11 +723,30 @@ namespace hades
     }
 
     scriptRuntime_.stop();
+    blueprintRuntime_.stop();
 
     if (activeWorld_.has_value())
     {
       destroy_world_tree(*activeWorld_, entityManager_, componentManager_);
     }
+
+    // Entity ids carry no generation counter, so the ids the destroy above
+    // just released go straight back onto the free list and the reload hands
+    // them to brand-new entities. Any animator state still keyed by one of
+    // them is adopted whole: the reloaded world would start mid-animation in
+    // the previous occupant's state, with its own authored parameter, speed
+    // and playOnStart overrides silently skipped (AnimatorSystem's "first
+    // sight" test is what applies them, and an inherited instance makes it
+    // false). destroy_world_tree drops the state for the entities it destroys,
+    // but a Blueprint's Destroy Entity node in the same tick does not, so the
+    // free list can still carry an id with live state.
+    //
+    // Take the live set here and purge exactly the ids the reload claims,
+    // rather than clearing the whole runtime: every other world in the project
+    // is loaded and running too (load_all_worlds at startup), and clearing
+    // would yank all of their animators back to their authored defaults.
+    const std::unordered_set<Entity::EntityId> liveBeforeLoad(
+        entityManager_.getAllEntities().begin(), entityManager_.getAllEntities().end());
 
     auto newWorld = load_world_from_file(worldFilePath, entityManager_, componentManager_);
     if (!newWorld.has_value())
@@ -632,6 +754,16 @@ namespace hades
       Log::error("Failed to load world: %s", worldName->c_str());
       running_ = false;
       return;
+    }
+
+    // Before the scripts start: onStart is allowed to call hades::Animation
+    // and create instances, and those are the new world's own, not inherited.
+    for (Entity::EntityId entity : entityManager_.getAllEntities())
+    {
+      if (liveBeforeLoad.find(entity) == liveBeforeLoad.end())
+      {
+        AnimationRuntime::instance().remove(entity);
+      }
     }
 
     activeWorld_ = newWorld;
@@ -650,6 +782,14 @@ namespace hades
     if (!scriptRuntime_.start(componentManager_, entityManager_, projectPath_, newWorld, &scriptError))
     {
       Log::error("World load script error: %s", scriptError.c_str());
+      running_ = false;
+      return;
+    }
+
+    std::string blueprintError;
+    if (!blueprintRuntime_.start(componentManager_, entityManager_, projectPath_, newWorld, &blueprintError))
+    {
+      Log::error("World load blueprint error: %s", blueprintError.c_str());
       running_ = false;
     }
   }

@@ -15,6 +15,7 @@
 #include "../engine/core/ecs/component_manager.hpp"
 #include "../engine/core/ecs/entity_manager.hpp"
 #include "../engine/core/ecs/scene_serializer.hpp"
+#include "../engine/blueprint/blueprint_asset.hpp"
 #include "../engine/core/ecs/world_utils.hpp"
 
 namespace hades
@@ -180,7 +181,22 @@ namespace hades
       }
 
       std::filesystem::path targetPath = parentPath / rawName;
-      if (kind == Editor::WorkspaceCreateKind::Script)
+      if (kind == Editor::WorkspaceCreateKind::Blueprint)
+      {
+        if (!targetPath.has_extension())
+        {
+          targetPath += kBlueprintFileExtension;
+        }
+        else if (targetPath.extension() != kBlueprintFileExtension)
+        {
+          if (errorMessage != nullptr)
+          {
+            *errorMessage = std::string("Blueprints must use the ") + kBlueprintFileExtension + " extension.";
+          }
+          return false;
+        }
+      }
+      else if (kind == Editor::WorkspaceCreateKind::Script)
       {
         if (!targetPath.has_extension())
         {
@@ -216,6 +232,12 @@ namespace hades
           return false;
         }
         return true;
+      }
+
+      if (kind == Editor::WorkspaceCreateKind::Blueprint)
+      {
+        const Blueprint blueprint = make_starter_blueprint(targetPath.stem().string());
+        return save_blueprint(targetPath, blueprint, errorMessage);
       }
 
       std::ofstream output(targetPath);
@@ -266,16 +288,21 @@ namespace hades
     }
 
     const bool creatingScript = pendingWorkspaceCreateKind_ == WorkspaceCreateKind::Script;
-    ImGui::TextWrapped("%s", creatingScript ? "New Script" : "New Folder");
+    const bool creatingBlueprint = pendingWorkspaceCreateKind_ == WorkspaceCreateKind::Blueprint;
+    const char *title = creatingBlueprint ? "New Blueprint" : (creatingScript ? "New Script" : "New Folder");
+    const char *fieldLabel = creatingBlueprint ? "Blueprint Name" : (creatingScript ? "Script Name" : "Folder Name");
+    const char *createLabel = creatingBlueprint ? "Create Blueprint" : (creatingScript ? "Create Script" : "Create Folder");
+
+    ImGui::TextWrapped("%s", title);
     ImGui::TextWrapped("%s", pendingWorkspaceCreateParentPath_.string().c_str());
-    ImGui::InputText(creatingScript ? "Script Name" : "Folder Name", workspaceCreateNameBuffer_.data(), workspaceCreateNameBuffer_.size());
+    ImGui::InputText(fieldLabel, workspaceCreateNameBuffer_.data(), workspaceCreateNameBuffer_.size());
 
     if (!workspaceCreateError_.empty())
     {
       ImGui::TextColored(ImVec4(0.88f, 0.42f, 0.42f, 1.0f), "%s", workspaceCreateError_.c_str());
     }
 
-    if (ImGui::Button(creatingScript ? "Create Script" : "Create Folder"))
+    if (ImGui::Button(createLabel))
     {
       std::string errorMessage;
       if (create_workspace_item(

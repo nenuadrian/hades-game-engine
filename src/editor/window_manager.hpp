@@ -13,6 +13,8 @@
 #include "../engine/core/ecs/component_manager.hpp"
 #include "../engine/core/ecs/entity_manager.hpp"
 #include "../engine/core/ecs/system_manager.hpp"
+#include "../engine/blueprint/blueprint_engine_host.hpp"
+#include "../engine/blueprint/blueprint_runtime.hpp"
 #include "../engine/core/events/event_bus.hpp"
 #include "../engine/runtime/script_runtime.hpp"
 #include "detached_play_window.hpp"
@@ -79,6 +81,8 @@ namespace hades
     SystemManager systemManager;
     EventBus eventBus;
     ScriptRuntime scriptRuntime;
+    BlueprintRuntime blueprintRuntime;
+    EngineBlueprintHost blueprintHost;
     WorkspaceManager workspaceManager;
     Editor editor;
     // Keep destruction order: ImGui, audio, renderer, SDL window, then SDL itself.

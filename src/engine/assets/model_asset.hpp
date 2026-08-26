@@ -32,6 +32,18 @@ namespace hades
     std::vector<ModelVertex> vertices;
     std::vector<uint32_t> indices;
     Material material;
+    /// Node whose bind-pose global transform carries these vertices into
+    /// model space, or -1 when they already live there.
+    ///
+    /// Vertices are stored exactly as the source file authored them, which is
+    /// mesh-local: a rigid mesh only reaches model space through the node that
+    /// references it. A mesh that arrived with skin weights is already in
+    /// model space, because assimp folds that transform into the bone offset
+    /// matrices — hence -1 for those, and for a mesh whose vertices have been
+    /// baked into model space by `apply_rig`. Anything that measures or
+    /// re-skins raw vertices (auto-weighting, rig application) has to apply
+    /// this factor or it compares two different spaces.
+    int nodeIndex = -1;
   };
 
   /// Node of the imported scene hierarchy, flattened parent-before-child.
@@ -107,11 +119,58 @@ namespace hades
     /// clamped into the clip; looping is the caller's concern.
     void samplePose(int clipIndex, float timeSeconds, std::vector<math::Mat4> &outBoneMatrices) const;
 
-    /// Compute bind pose and bounds. Call once after all data is filled in.
+    /// Same, for a clip that is not (or not yet) part of this asset — the
+    /// animation editor previews an unsaved clip through this overload.
+    void samplePose(const AnimationClip &clip, float timeSeconds, std::vector<math::Mat4> &outBoneMatrices) const;
+
+    /// Transform of every *node*, in ROOT-NODE space — not the space the
+    /// skinned mesh is drawn in. A skeleton view wants
+    /// `globalInverseTransform * nodeGlobal`, the same premultiplication the
+    /// palette gets, or it draws the skeleton offset from its own mesh.
+    ///
+    /// This exists because the bone palette only covers nodes that skin
+    /// vertices and is post-multiplied by the offset matrix, so joint
+    /// positions cannot be recovered from it. Pass a null clip for the bind
+    /// pose.
+    ///
+    /// An unkeyed node contributes its `localTransform` verbatim. A keyed one
+    /// is rebuilt from sampled TRS, and whatever its `localTransform` carried
+    /// that TRS cannot express (shear — a COLLADA `<matrix>` node) is
+    /// re-applied as a fixed residual, so keying one channel of a sheared
+    /// node does not silently move it off the bind pose on the channels the
+    /// clip leaves alone. Costs nothing for a rig whose nodes really are TRS.
+    void evaluateNodeGlobals(const AnimationClip *clip, float timeSeconds, std::vector<math::Mat4> &outNodeGlobals) const;
+
+    /// Bind-pose node globals — `evaluateNodeGlobals(nullptr, 0, out)`.
+    void bindPoseNodeGlobals(std::vector<math::Mat4> &outNodeGlobals) const;
+
+    /// Turn model-space node transforms into the skinning palette.
+    void paletteFromNodeGlobals(const std::vector<math::Mat4> &globals, std::vector<math::Mat4> &out) const;
+
+    /// Compute bind pose, bounds and per-node rest corrections. Call once
+    /// after all data is filled in.
     void finalize();
 
   private:
     void evaluatePalette(const AnimationClip *clip, float timeSeconds, std::vector<math::Mat4> &out) const;
+
+    /// Non-TRS residual of one node's local transform, as described on
+    /// evaluateNodeGlobals().
+    struct NodeRestCorrection
+    {
+      math::Mat4 correction = math::Mat4::identity();
+      bool active = false;
+    };
+
+    /// Parallel to `nodes`. A pure function of `nodes[i].localTransform`, so
+    /// finalize() computes it once: deriving it per keyed channel instead
+    /// costs three extra matrix products on a path scene_renderer walks per
+    /// animated entity per frame — measured at 6.2 → 10.1 us per samplePose
+    /// on a 128-bone, fully-keyed rig, against 6.6 us precomputed.
+    /// evaluateNodeGlobals falls back to computing it inline when the sizes
+    /// disagree, which is the "filled in nodes without re-running finalize()"
+    /// case — slower, but never silently unrepaired.
+    std::vector<NodeRestCorrection> nodeRestCorrections_;
 
     std::vector<math::Mat4> bindPose_;
     float boundsRadius_ = 0.5f;

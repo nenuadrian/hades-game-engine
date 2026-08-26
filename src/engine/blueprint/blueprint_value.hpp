@@ -102,6 +102,13 @@ namespace hades
     /// trimmed, so `1.5` reads as "1.5" rather than "1.500000".
     std::string to_display_string() const;
 
+    /// Round-trippable text form, used for the string-keyed per-entity
+    /// variable overrides stored on `BlueprintComponent` (the same shape the
+    /// script component uses for its public fields). Vectors serialise as
+    /// "x,y,z"; `parse` accepts that as well as the "(x, y, z)" display form.
+    std::string to_storage_string() const;
+    static BlueprintValue parse(const std::string &text, ValueType type);
+
   private:
     explicit BlueprintValue(Storage storage) : storage_(std::move(storage)) {}
 

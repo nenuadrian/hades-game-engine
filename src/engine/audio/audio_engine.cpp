@@ -230,6 +230,71 @@ namespace hades
     }
   }
 
+  void AudioEngine::play_source(
+      Entity::EntityId entity,
+      const AudioSourceComponent &source,
+      const PositionComponent3D *position)
+  {
+    if (!initialized || source.assetPath.empty())
+    {
+      return;
+    }
+
+    if (!ensure_source(entity, source))
+    {
+      return;
+    }
+
+    auto &managed = managedSources.at(entity);
+    SoLoud::Bus *bus = bus_for(managed.bus);
+    if (bus == nullptr || !managed.audioSource)
+    {
+      return;
+    }
+
+    // Retriggering replaces the previous voice rather than layering on top of
+    // it, which is what a one-shot Play Sound call is expected to do.
+    if (managed.voiceHandle != 0 && soloud.isValidVoiceHandle(managed.voiceHandle))
+    {
+      soloud.stop(managed.voiceHandle);
+    }
+
+    const float volume = clamp_non_negative(source.volume);
+    const PositionComponent3D origin = (position != nullptr) ? *position : PositionComponent3D();
+
+    if (managed.spatialized)
+    {
+      managed.voiceHandle = bus->play3d(
+          *managed.audioSource,
+          origin.x, origin.y, origin.z,
+          0.0f, 0.0f, 0.0f,
+          volume);
+    }
+    else
+    {
+      managed.voiceHandle = bus->play(*managed.audioSource, volume);
+    }
+
+    // Keep sync_source from starting a second voice on the next frame.
+    managed.autoplayConsumed = true;
+  }
+
+  void AudioEngine::stop_source(Entity::EntityId entity)
+  {
+    const auto it = managedSources.find(entity);
+    if (it == managedSources.end())
+    {
+      return;
+    }
+
+    if (it->second.voiceHandle != 0 && soloud.isValidVoiceHandle(it->second.voiceHandle))
+    {
+      soloud.stop(it->second.voiceHandle);
+    }
+    it->second.voiceHandle = 0;
+    it->second.autoplayConsumed = true;
+  }
+
   SoLoud::Bus &AudioEngine::bus_raw(AudioBus bus)
   {
     switch (bus)

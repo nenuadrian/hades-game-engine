@@ -30,11 +30,17 @@ namespace hades
         float farClip) const;
 
     /// Build the complete render list for the current frame.
+    ///
+    /// `uiViewportWidth/Height` is the pixel size screen-space UI canvases
+    /// lay out against. Leave 0 (edit-mode viewports) to collect world-space
+    /// UI only and keep HUDs out of the view.
     RenderList buildRenderList(
         const RenderCamera &camera,
         ComponentManager &componentManager,
         EntityManager &entityManager,
-        std::optional<Entity::EntityId> worldFilter = std::nullopt);
+        std::optional<Entity::EntityId> worldFilter = std::nullopt,
+        float uiViewportWidth = 0.0f,
+        float uiViewportHeight = 0.0f);
 
   private:
     void collectLights(

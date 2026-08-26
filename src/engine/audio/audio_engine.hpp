@@ -39,6 +39,16 @@ namespace hades
         const AudioSourceComponent &source,
         const PositionComponent3D *position);
 
+    // Explicit triggers, independent of `playOnStart`. `sync_source` only
+    // starts a voice once, on the frame it first sees the component; these let
+    // gameplay code (the Blueprint Play/Stop Sound nodes) retrigger a source
+    // as often as it likes.
+    void play_source(
+        Entity::EntityId entity,
+        const AudioSourceComponent &source,
+        const PositionComponent3D *position);
+    void stop_source(Entity::EntityId entity);
+
     // Escape hatches for scripts that want direct SoLoud access (procedural
     // sources, custom filters, etc.). Returns the live engine handles --
     // callers must respect AudioEngine's lifecycle (valid while init()d).

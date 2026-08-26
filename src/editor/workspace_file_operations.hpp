@@ -16,6 +16,10 @@ namespace hades
     std::vector<std::string> removedScriptPaths;
     std::size_t removedScriptAssignments = 0;
     std::size_t affectedScriptComponents = 0;
+
+    std::vector<std::string> removedBlueprintPaths;
+    std::size_t removedBlueprintAssignments = 0;
+    std::size_t affectedBlueprintComponents = 0;
   };
 
   bool copy_file_to_directory(

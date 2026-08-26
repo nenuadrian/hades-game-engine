@@ -235,6 +235,8 @@ set(HADES_SHADER_HEADERS "")
 hades_add_shader("${SRC_DIR}/engine/rendering/shaders/mesh.vert.glsl" vert mesh_vert_spv)
 hades_add_shader("${SRC_DIR}/engine/rendering/shaders/mesh.frag.glsl" frag mesh_frag_spv)
 hades_add_shader("${SRC_DIR}/engine/rendering/shaders/mesh_skinned.vert.glsl" vert mesh_skinned_vert_spv)
+hades_add_shader("${SRC_DIR}/engine/rendering/shaders/ui.vert.glsl" vert ui_vert_spv)
+hades_add_shader("${SRC_DIR}/engine/rendering/shaders/ui.frag.glsl" frag ui_frag_spv)
 
 add_library(HadesEngine STATIC ${ENGINE_SOURCE_FILES} ${ENGINE_HEADER_FILES} ${HADES_SHADER_HEADERS})
 hades_configure_cxx_standard(HadesEngine PUBLIC)
@@ -364,6 +366,11 @@ hades_configure_cxx_standard(hades_tests PRIVATE)
 target_include_directories(hades_tests PRIVATE "${SRC_DIR}" "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(hades_tests PRIVATE HadesEngine gtest_main)
 
+# Lets tests reach the checked-in sample project, so shipped fixtures (saved
+# worlds, Blueprint assets) can be validated against the live engine.
+target_compile_definitions(
+  hades_tests PRIVATE "HADES_TEST_PROJECT_DIR=\"${CMAKE_SOURCE_DIR}/tests/test_project\"")
+
 if(HADES_ENABLE_HNE_TRAINING AND TARGET hne_training)
   target_link_libraries(hades_tests PRIVATE hne_training)
   target_compile_definitions(hades_tests PRIVATE HADES_HAS_HNE_TRAINING=1)
@@ -371,7 +378,86 @@ endif()
 
 hades_stage_windows_runtime_dlls(hades_tests)
 
+# ---------------------------------------------------------------------------
+# Headless editor smoke test
+# ---------------------------------------------------------------------------
+# Runs the editor's ImGui panels against Dear ImGui's null backend so their draw
+# paths (and ImGui's own balance assertions) are covered by ctest. Reuses every
+# editor source except main.cpp, which owns the real entry point.
+set(EDITOR_SMOKE_SOURCE_FILES ${EDITOR_SOURCE_FILES})
+list(REMOVE_ITEM EDITOR_SMOKE_SOURCE_FILES "${SRC_DIR}/main.cpp")
+
+add_executable(
+  hades_editor_smoke
+  ${EDITOR_SMOKE_SOURCE_FILES}
+  "${SRC_DIR}/tools/editor_smoke.cpp")
+hades_configure_cxx_standard(hades_editor_smoke PRIVATE)
+target_include_directories(hades_editor_smoke PRIVATE "${SRC_DIR}" "${CMAKE_BINARY_DIR}/generated")
+target_link_libraries(hades_editor_smoke PRIVATE HadesEngine CLI11::CLI11)
+
+if(HADES_ENABLE_HNE_TRAINING AND TARGET hne_training)
+  target_compile_definitions(hades_editor_smoke PRIVATE HADES_HAS_HNE_TRAINING=1)
+  if(NOT (HADES_ENABLE_HNE_WANDB AND TARGET hne_wandb))
+    target_link_libraries(hades_editor_smoke PRIVATE hne_training)
+  endif()
+endif()
+if(HADES_ENABLE_HNE_WIDGETS AND TARGET hne_imgui)
+  target_link_libraries(hades_editor_smoke PRIVATE hne_imgui)
+  target_compile_definitions(hades_editor_smoke PRIVATE HADES_HAS_HNE_WIDGETS=1)
+endif()
+if(HADES_ENABLE_HNE_WANDB AND TARGET hne_wandb)
+  target_link_libraries(hades_editor_smoke PRIVATE hne_wandb)
+  target_compile_definitions(hades_editor_smoke PRIVATE HADES_HAS_HNE_WANDB=1)
+endif()
+if(TARGET SDL2::SDL2main)
+  target_link_libraries(hades_editor_smoke PRIVATE SDL2::SDL2main)
+endif()
+if(APPLE)
+  target_link_libraries(hades_editor_smoke PRIVATE "-framework AppKit")
+endif()
+hades_stage_windows_runtime_dlls(hades_editor_smoke)
+
 enable_testing()
+add_test(NAME EditorSmoke COMMAND hades_editor_smoke)
+
+# ---------------------------------------------------------------------------
+# Headless animation editor smoke test
+# ---------------------------------------------------------------------------
+# Same idea for the Animation and Animator panels: a synthetic workspace (a real
+# skinned glTF, an authored clip, an animator graph) driven through every tab and
+# mode of both panels, with each frame's ImGui stacks checked for balance.
+add_executable(
+  hades_animation_smoke
+  ${EDITOR_SMOKE_SOURCE_FILES}
+  "${SRC_DIR}/tools/animation_smoke.cpp")
+hades_configure_cxx_standard(hades_animation_smoke PRIVATE)
+target_include_directories(hades_animation_smoke PRIVATE "${SRC_DIR}" "${CMAKE_BINARY_DIR}/generated")
+target_link_libraries(hades_animation_smoke PRIVATE HadesEngine CLI11::CLI11)
+
+if(HADES_ENABLE_HNE_TRAINING AND TARGET hne_training)
+  target_compile_definitions(hades_animation_smoke PRIVATE HADES_HAS_HNE_TRAINING=1)
+  if(NOT (HADES_ENABLE_HNE_WANDB AND TARGET hne_wandb))
+    target_link_libraries(hades_animation_smoke PRIVATE hne_training)
+  endif()
+endif()
+if(HADES_ENABLE_HNE_WIDGETS AND TARGET hne_imgui)
+  target_link_libraries(hades_animation_smoke PRIVATE hne_imgui)
+  target_compile_definitions(hades_animation_smoke PRIVATE HADES_HAS_HNE_WIDGETS=1)
+endif()
+if(HADES_ENABLE_HNE_WANDB AND TARGET hne_wandb)
+  target_link_libraries(hades_animation_smoke PRIVATE hne_wandb)
+  target_compile_definitions(hades_animation_smoke PRIVATE HADES_HAS_HNE_WANDB=1)
+endif()
+if(TARGET SDL2::SDL2main)
+  target_link_libraries(hades_animation_smoke PRIVATE SDL2::SDL2main)
+endif()
+if(APPLE)
+  target_link_libraries(hades_animation_smoke PRIVATE "-framework AppKit")
+endif()
+hades_stage_windows_runtime_dlls(hades_animation_smoke)
+
+add_test(NAME AnimationSmoke COMMAND hades_animation_smoke)
+
 include(GoogleTest)
 if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.18)
   gtest_discover_tests(hades_tests DISCOVERY_MODE PRE_TEST)

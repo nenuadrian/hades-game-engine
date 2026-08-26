@@ -8,8 +8,10 @@
 #include "../log.hpp"
 
 #include "../../components/animation_component.hpp"
+#include "../../components/animator_component.hpp"
 #include "../../components/audio_listener_component.hpp"
 #include "../../components/audio_source_component.hpp"
+#include "../../components/blueprint_component.hpp"
 #include "../../components/camera_component.hpp"
 #include "../../components/model_component.hpp"
 #include "../../components/collider_component.hpp"
@@ -25,6 +27,7 @@
 #include "../../components/script_component.hpp"
 #include "../../components/text_component.hpp"
 #include "../../components/transform_hierarchy_component.hpp"
+#include "../../components/ui_canvas_component.hpp"
 #include "../../components/world_component.hpp"
 #include "component_manager.hpp"
 
@@ -32,6 +35,81 @@ using json = nlohmann::json;
 
 namespace hades
 {
+  namespace
+  {
+    json ui_widget_to_json(const UIWidget &w)
+    {
+      json out = {
+          {"id", w.id},
+          {"type", w.type},
+          {"visible", w.visible},
+          {"anchorX", w.anchorX},
+          {"anchorY", w.anchorY},
+          {"offsetX", w.offsetX},
+          {"offsetY", w.offsetY},
+          {"width", w.width},
+          {"height", w.height},
+          {"colorR", w.colorR},
+          {"colorG", w.colorG},
+          {"colorB", w.colorB},
+          {"colorA", w.colorA},
+          {"fillColorR", w.fillColorR},
+          {"fillColorG", w.fillColorG},
+          {"fillColorB", w.fillColorB},
+          {"fillColorA", w.fillColorA},
+          {"text", w.text},
+          {"textSize", w.textSize},
+          {"value", w.value},
+          {"bindVariable", w.bindVariable},
+          {"onClickEvent", w.onClickEvent}};
+      if (!w.children.empty())
+      {
+        json children = json::array();
+        for (const auto &child : w.children)
+        {
+          children.push_back(ui_widget_to_json(child));
+        }
+        out["children"] = std::move(children);
+      }
+      return out;
+    }
+
+    UIWidget ui_widget_from_json(const json &in)
+    {
+      UIWidget w;
+      w.id = in.value("id", std::string());
+      w.type = in.value("type", std::string("panel"));
+      w.visible = in.value("visible", true);
+      w.anchorX = in.value("anchorX", 0.5f);
+      w.anchorY = in.value("anchorY", 0.5f);
+      w.offsetX = in.value("offsetX", 0.0f);
+      w.offsetY = in.value("offsetY", 0.0f);
+      w.width = in.value("width", 100.0f);
+      w.height = in.value("height", 24.0f);
+      w.colorR = in.value("colorR", 1.0f);
+      w.colorG = in.value("colorG", 1.0f);
+      w.colorB = in.value("colorB", 1.0f);
+      w.colorA = in.value("colorA", 1.0f);
+      w.fillColorR = in.value("fillColorR", 1.0f);
+      w.fillColorG = in.value("fillColorG", 1.0f);
+      w.fillColorB = in.value("fillColorB", 1.0f);
+      w.fillColorA = in.value("fillColorA", 1.0f);
+      w.text = in.value("text", std::string());
+      w.textSize = in.value("textSize", 16.0f);
+      w.value = in.value("value", 1.0f);
+      w.bindVariable = in.value("bindVariable", std::string());
+      w.onClickEvent = in.value("onClickEvent", std::string());
+      if (in.contains("children") && in.at("children").is_array())
+      {
+        for (const auto &child : in.at("children"))
+        {
+          w.children.push_back(ui_widget_from_json(child));
+        }
+      }
+      return w;
+    }
+  }
+
   void register_builtin_components()
   {
     static bool registered = false;
@@ -332,6 +410,45 @@ namespace hades
               return true;
             });
 
+        // BlueprintComponent
+        registry.registerComponent<BlueprintComponent>(
+            "blueprint",
+            [](Entity::EntityId entity, ComponentManager &cm, json &out) -> bool
+            {
+              if (!cm.hasComponent<BlueprintComponent>(entity))
+                return false;
+              const auto &c = cm.getComponent<BlueprintComponent>(entity);
+              json attachments = json::array();
+              for (const auto &a : c.attachments)
+              {
+                json attachment;
+                attachment["assetPath"] = a.assetPath;
+                attachment["enabled"] = a.enabled;
+                attachment["variableOverrides"] = a.variableOverrides;
+                attachments.push_back(attachment);
+              }
+              out = {{"attachments", attachments}};
+              return true;
+            },
+            [](Entity::EntityId entity, ComponentManager &cm, const json &in, const auto &) -> bool
+            {
+              BlueprintComponent c;
+              for (const auto &a : in["attachments"])
+              {
+                BlueprintAttachment attachment;
+                attachment.assetPath = a.value("assetPath", std::string{});
+                attachment.enabled = a.value("enabled", true);
+                if (a.contains("variableOverrides"))
+                {
+                  attachment.variableOverrides =
+                      a["variableOverrides"].get<std::map<std::string, std::string>>();
+                }
+                c.attachments.push_back(std::move(attachment));
+              }
+              cm.addComponent(entity, c);
+              return true;
+            });
+
         // RotationComponent3D
         registry.registerComponent<RotationComponent3D>(
             "rotation3d",
@@ -530,6 +647,63 @@ namespace hades
               return true;
             });
 
+        // AnimatorComponent
+        registry.registerComponent<AnimatorComponent>(
+            "animator",
+            [](Entity::EntityId entity, ComponentManager &cm, json &out) -> bool
+            {
+              if (!cm.hasComponent<AnimatorComponent>(entity))
+                return false;
+              const auto &c = cm.getComponent<AnimatorComponent>(entity);
+              json parameters = json::array();
+              for (const auto &p : c.parameters)
+              {
+                parameters.push_back({
+                    {"name", p.name},
+                    {"type", p.type},
+                    {"float", p.floatValue},
+                    {"int", p.intValue},
+                    {"bool", p.boolValue}});
+              }
+              out = {
+                  {"graphPath", c.graphPath},
+                  {"defaultClip", c.defaultClip},
+                  {"playOnStart", c.playOnStart},
+                  {"looping", c.looping},
+                  {"speed", c.speed},
+                  {"defaultBlendSeconds", c.defaultBlendSeconds},
+                  {"parameters", parameters}};
+              return true;
+            },
+            [](Entity::EntityId entity, ComponentManager &cm, const json &in, const auto &) -> bool
+            {
+              AnimatorComponent c;
+              c.graphPath = in.value("graphPath", std::string());
+              c.defaultClip = in.value("defaultClip", std::string());
+              c.playOnStart = in.value("playOnStart", true);
+              c.looping = in.value("looping", true);
+              c.speed = in.value("speed", 1.0f);
+              c.defaultBlendSeconds = in.value("defaultBlendSeconds", 0.15f);
+              if (in.contains("parameters") && in.at("parameters").is_array())
+              {
+                for (const auto &entry : in.at("parameters"))
+                {
+                  AnimatorParamOverride p;
+                  p.name = entry.value("name", std::string());
+                  p.type = entry.value("type", std::string("float"));
+                  p.floatValue = entry.value("float", 0.0f);
+                  p.intValue = entry.value("int", 0);
+                  p.boolValue = entry.value("bool", false);
+                  if (!p.name.empty())
+                  {
+                    c.parameters.push_back(std::move(p));
+                  }
+                }
+              }
+              cm.addComponent(entity, c);
+              return true;
+            });
+
         // MeshRendererComponent
         registry.registerComponent<MeshRendererComponent>(
             "meshRenderer",
@@ -558,6 +732,61 @@ namespace hades
               c.material.roughness = in.value("roughness", 0.5f);
               c.material.opacity = in.value("opacity", 1.0f);
               c.material.wireframe = in.value("wireframe", false);
+              cm.addComponent(entity, c);
+              return true;
+            });
+
+        // UICanvasComponent
+        registry.registerComponent<UICanvasComponent>(
+            "uiCanvas",
+            [](Entity::EntityId entity, ComponentManager &cm, json &out) -> bool
+            {
+              if (!cm.hasComponent<UICanvasComponent>(entity))
+                return false;
+              const auto &c = cm.getComponent<UICanvasComponent>(entity);
+              json widgets = json::array();
+              for (const auto &widget : c.widgets)
+              {
+                widgets.push_back(ui_widget_to_json(widget));
+              }
+              out = {
+                  {"space", static_cast<int>(c.space)},
+                  {"visible", c.visible},
+                  {"referenceWidth", c.referenceWidth},
+                  {"referenceHeight", c.referenceHeight},
+                  {"worldWidth", c.worldWidth},
+                  {"offsetX", c.offsetX},
+                  {"offsetY", c.offsetY},
+                  {"offsetZ", c.offsetZ},
+                  {"billboard", c.billboard},
+                  {"maxDistance", c.maxDistance},
+                  {"fadeDistance", c.fadeDistance},
+                  {"sortOrder", c.sortOrder},
+                  {"widgets", std::move(widgets)}};
+              return true;
+            },
+            [](Entity::EntityId entity, ComponentManager &cm, const json &in, const auto &) -> bool
+            {
+              UICanvasComponent c;
+              c.space = static_cast<UICanvasSpace>(in.value("space", 0));
+              c.visible = in.value("visible", true);
+              c.referenceWidth = in.value("referenceWidth", 400.0f);
+              c.referenceHeight = in.value("referenceHeight", 200.0f);
+              c.worldWidth = in.value("worldWidth", 2.0f);
+              c.offsetX = in.value("offsetX", 0.0f);
+              c.offsetY = in.value("offsetY", 1.5f);
+              c.offsetZ = in.value("offsetZ", 0.0f);
+              c.billboard = in.value("billboard", true);
+              c.maxDistance = in.value("maxDistance", 0.0f);
+              c.fadeDistance = in.value("fadeDistance", 0.0f);
+              c.sortOrder = in.value("sortOrder", 0);
+              if (in.contains("widgets") && in.at("widgets").is_array())
+              {
+                for (const auto &widget : in.at("widgets"))
+                {
+                  c.widgets.push_back(ui_widget_from_json(widget));
+                }
+              }
               cm.addComponent(entity, c);
               return true;
             });

@@ -1,4 +1,5 @@
 #include "editor.hpp"
+#include "../engine/blueprint/blueprint_runtime.hpp"
 
 #include <algorithm>
 #include <array>
@@ -35,6 +36,7 @@
 #include "../engine/core/ecs/entity_manager.hpp"
 #include "../engine/core/ecs/hierarchy_utils.hpp"
 #include "../engine/core/ecs/scene_serializer.hpp"
+#include "../engine/animation/animation_runtime.hpp"
 #include "../engine/core/ecs/world_utils.hpp"
 #include "../engine/runtime/main_camera_selection.hpp"
 #include "../engine/runtime/script_runtime.hpp"
@@ -218,6 +220,10 @@ namespace hades
       // one: entity IDs are recycled, so a type missed here would reappear on
       // whichever entity is created next.
       componentManager.removeAllComponents(entity);
+
+      // Animator state is not a component, so the sweep above misses it. This
+      // path deletes from the hierarchy panel, which stays live during play.
+      AnimationRuntime::instance().remove(entity);
 
       entityManager.destroyEntity(entity);
     }
@@ -548,7 +554,8 @@ namespace hades
   void Editor::handle_entity_deletion_requests(
       EntityManager &entityManager,
       ComponentManager &componentManager,
-      ScriptRuntime &scriptRuntime)
+      ScriptRuntime &scriptRuntime,
+      BlueprintRuntime &blueprintRuntime)
   {
     if (!pendingEntityDeletion_.has_value())
     {
@@ -565,7 +572,7 @@ namespace hades
 
     if (state.isPlaying)
     {
-      stop_play_mode(entityManager, componentManager, scriptRuntime);
+      stop_play_mode(entityManager, componentManager, scriptRuntime, blueprintRuntime);
       state.playModeMessage = "Play mode stopped because an entity hierarchy was deleted.";
       log_warning(state.playModeMessage);
     }
@@ -637,7 +644,8 @@ namespace hades
   void Editor::handle_play_mode_requests(
       EntityManager &entityManager,
       ComponentManager &componentManager,
-      ScriptRuntime &scriptRuntime)
+      ScriptRuntime &scriptRuntime,
+      BlueprintRuntime &blueprintRuntime)
   {
     switch (state.pendingPlayAction)
     {
@@ -646,10 +654,10 @@ namespace hades
     case EditorPlayAction::Start:
       openDebugConsoleWindow_ = true;
       focusDebugConsoleWindow_ = true;
-      start_play_mode(entityManager, componentManager, scriptRuntime);
+      start_play_mode(entityManager, componentManager, scriptRuntime, blueprintRuntime);
       break;
     case EditorPlayAction::Stop:
-      stop_play_mode(entityManager, componentManager, scriptRuntime);
+      stop_play_mode(entityManager, componentManager, scriptRuntime, blueprintRuntime);
       break;
     }
 
@@ -659,11 +667,16 @@ namespace hades
   void Editor::start_play_mode(
       EntityManager &entityManager,
       ComponentManager &componentManager,
-      ScriptRuntime &scriptRuntime)
+      ScriptRuntime &scriptRuntime,
+      BlueprintRuntime &blueprintRuntime)
   {
     playModeSnapshot_ = snapshot_all_worlds(entityManager, componentManager);
     prePlaySelectedEntity_ = state.selectedEntity;
     prePlayLoadedWorld_ = state.loadedWorld;
+
+    // The animation editor's scrub preview overrides whatever the animator
+    // produces, so it has to go before the game drives the same entities.
+    AnimationRuntime::instance().clear();
 
     // Policy Preview path: caller set state.pendingPreviewRequest before
     // firing EditorPlayAction::Start. Locate the requested world by name,
@@ -781,6 +794,21 @@ namespace hades
       return;
     }
 
+    // Blueprints load, compile and fire BeginPlay alongside the C++ scripts.
+    // A graph that fails to compile stops play mode as loudly as a script that
+    // fails to build.
+    std::string blueprintError;
+    if (!blueprintRuntime.start(componentManager, entityManager, activeWorkspacePath_, startupWorld, &blueprintError))
+    {
+      // The scripts already ran their onStart by this point, so the scene has
+      // been mutated. Unwind through stop_play_mode so the pre-play snapshot is
+      // restored rather than becoming the baseline for the next Play.
+      stop_play_mode(entityManager, componentManager, scriptRuntime, blueprintRuntime);
+      state.playModeMessage = blueprintError;
+      log_error("Play mode failed: " + blueprintError);
+      return;
+    }
+
     state.isPlaying = true;
     state.activeWorld = startupWorld;
     state.activeCamera = selection.entity;
@@ -790,9 +818,11 @@ namespace hades
   void Editor::stop_play_mode(
       EntityManager &entityManager,
       ComponentManager &componentManager,
-      ScriptRuntime &scriptRuntime)
+      ScriptRuntime &scriptRuntime,
+      BlueprintRuntime &blueprintRuntime)
   {
     scriptRuntime.stop();
+    blueprintRuntime.stop();
 
     if (!playModeSnapshot_.empty())
     {
@@ -823,6 +853,10 @@ namespace hades
       prePlaySelectedEntity_.reset();
       prePlayLoadedWorld_.reset();
     }
+
+    // Entity ids are remapped by the snapshot restore, so every animator
+    // instance keyed by the old id is stale.
+    AnimationRuntime::instance().clear();
 
     state.isPlaying = false;
     state.activeWorld.reset();

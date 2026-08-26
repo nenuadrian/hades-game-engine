@@ -12,6 +12,7 @@
 #include "component_manager.hpp"
 #include "component_registry.hpp"
 #include "entity_manager.hpp"
+#include "../../animation/animation_runtime.hpp"
 #include "../../components/name_component.hpp"
 #include "../../components/transform_hierarchy_component.hpp"
 #include "../../components/world_component.hpp"
@@ -401,6 +402,15 @@ namespace hades
     // Destroy in reverse order (children before parents).
     for (auto it = toDestroy.rbegin(); it != toDestroy.rend(); ++it)
     {
+      // Animator state does not live in a component, so removeAllComponents
+      // cannot reach it. Entity ids are recycled with no generation counter,
+      // so an instance left behind here is adopted by whichever entity claims
+      // the id next: a reloaded world would start mid-animation in the
+      // previous occupant's state, with its own authored parameter, speed and
+      // playOnStart overrides silently skipped. Dropping it at the single
+      // destruction site covers every world load, snapshot restore and
+      // play-mode transition at once.
+      AnimationRuntime::instance().remove(*it);
       componentManager.removeAllComponents(*it);
       entityManager.destroyEntity(*it);
     }

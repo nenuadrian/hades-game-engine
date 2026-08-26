@@ -288,6 +288,123 @@ namespace hades::math
               v.z + w * tz + (x * ty - y * tx)};
     }
 
+    /// Hamilton product: `a * b` applies b first, then a.
+    Quat operator*(const Quat &rhs) const
+    {
+      return {
+          w * rhs.x + x * rhs.w + y * rhs.z - z * rhs.y,
+          w * rhs.y - x * rhs.z + y * rhs.w + z * rhs.x,
+          w * rhs.z + x * rhs.y - y * rhs.x + z * rhs.w,
+          w * rhs.w - x * rhs.x - y * rhs.y - z * rhs.z};
+    }
+
+    Quat conjugate() const { return {-x, -y, -z, w}; }
+
+    /// Inverse of a unit quaternion. Equal to the conjugate for normalised
+    /// rotations; the length division keeps it correct if it has drifted.
+    Quat inverse() const
+    {
+      const float lenSq = x * x + y * y + z * z + w * w;
+      if (lenSq < 1e-12f)
+        return {};
+      const float inv = 1.0f / lenSq;
+      return {-x * inv, -y * inv, -z * inv, w * inv};
+    }
+
+    static Quat fromAxisAngle(const Vec3 &axis, float radians)
+    {
+      const Vec3 n = axis.normalized();
+      const float half = radians * 0.5f;
+      const float s = std::sin(half);
+      return Quat{n.x * s, n.y * s, n.z * s, std::cos(half)};
+    }
+
+    /// Euler angles in degrees, in the engine's (roll = X, pitch = Y,
+    /// yaw = Z) convention — the same one RotationComponent3D and the
+    /// inspector use, so values round-trip through the UI unchanged.
+    static Quat fromEulerDegrees(const Vec3 &degrees)
+    {
+      constexpr float kDegToRad = 0.01745329251994329f;
+      const float hr = degrees.x * kDegToRad * 0.5f;
+      const float hp = degrees.y * kDegToRad * 0.5f;
+      const float hy = degrees.z * kDegToRad * 0.5f;
+
+      const float sr = std::sin(hr), cr = std::cos(hr);
+      const float sp = std::sin(hp), cp = std::cos(hp);
+      const float sy = std::sin(hy), cy = std::cos(hy);
+
+      return Quat{
+          sr * cp * cy - cr * sp * sy,
+          cr * sp * cy + sr * cp * sy,
+          cr * cp * sy - sr * sp * cy,
+          cr * cp * cy + sr * sp * sy};
+    }
+
+    Vec3 toEulerDegrees() const
+    {
+      const float sinRoll = 2.0f * (w * x + y * z);
+      const float cosRoll = 1.0f - 2.0f * (x * x + y * y);
+      const float roll = std::atan2(sinRoll, cosRoll);
+
+      float sinPitch = 2.0f * (w * y - z * x);
+      sinPitch = sinPitch < -1.0f ? -1.0f : (sinPitch > 1.0f ? 1.0f : sinPitch);
+      const float pitch = std::asin(sinPitch);
+
+      const float sinYaw = 2.0f * (w * z + x * y);
+      const float cosYaw = 1.0f - 2.0f * (y * y + z * z);
+      const float yaw = std::atan2(sinYaw, cosYaw);
+
+      constexpr float kRadToDeg = 57.2957795130823f;
+      return Vec3{roll * kRadToDeg, pitch * kRadToDeg, yaw * kRadToDeg};
+    }
+
+    /// Rotation part of a matrix. The upper 3x3 must be orthonormal — scale
+    /// it out first, or use decomposeTRS() which does that for you.
+    static Quat fromMat4(const Mat4 &m)
+    {
+      const float trace = m.m[0][0] + m.m[1][1] + m.m[2][2];
+      if (trace > 0.0f)
+      {
+        const float s = std::sqrt(trace + 1.0f) * 2.0f;
+        const float inv = 1.0f / s;
+        return Quat{(m.m[1][2] - m.m[2][1]) * inv,
+                    (m.m[2][0] - m.m[0][2]) * inv,
+                    (m.m[0][1] - m.m[1][0]) * inv,
+                    0.25f * s}
+            .normalized();
+      }
+
+      if (m.m[0][0] > m.m[1][1] && m.m[0][0] > m.m[2][2])
+      {
+        const float s = std::sqrt(1.0f + m.m[0][0] - m.m[1][1] - m.m[2][2]) * 2.0f;
+        const float inv = 1.0f / s;
+        return Quat{0.25f * s,
+                    (m.m[1][0] + m.m[0][1]) * inv,
+                    (m.m[2][0] + m.m[0][2]) * inv,
+                    (m.m[1][2] - m.m[2][1]) * inv}
+            .normalized();
+      }
+
+      if (m.m[1][1] > m.m[2][2])
+      {
+        const float s = std::sqrt(1.0f + m.m[1][1] - m.m[0][0] - m.m[2][2]) * 2.0f;
+        const float inv = 1.0f / s;
+        return Quat{(m.m[1][0] + m.m[0][1]) * inv,
+                    0.25f * s,
+                    (m.m[2][1] + m.m[1][2]) * inv,
+                    (m.m[2][0] - m.m[0][2]) * inv}
+            .normalized();
+      }
+
+      const float s = std::sqrt(1.0f + m.m[2][2] - m.m[0][0] - m.m[1][1]) * 2.0f;
+      const float inv = 1.0f / s;
+      return Quat{(m.m[2][0] + m.m[0][2]) * inv,
+                  (m.m[2][1] + m.m[1][2]) * inv,
+                  0.25f * s,
+                  (m.m[0][1] - m.m[1][0]) * inv}
+          .normalized();
+    }
+
     Mat4 toMat4() const
     {
       float xx = x * x, yy = y * y, zz = z * z;
@@ -347,6 +464,71 @@ namespace hades::math
         s0 * a.z + s1 * end.z,
         s0 * a.w + s1 * end.w}
         .normalized();
+  }
+
+  /// Normalised linear interpolation. Cheaper than slerp and good enough for
+  /// small deltas (per-frame pose blending); shortest-path corrected.
+  inline Quat nlerp(const Quat &a, const Quat &b, float t)
+  {
+    const float dot = a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+    const float sign = dot < 0.0f ? -1.0f : 1.0f;
+    return Quat{
+        a.x + (b.x * sign - a.x) * t,
+        a.y + (b.y * sign - a.y) * t,
+        a.z + (b.z * sign - a.z) * t,
+        a.w + (b.w * sign - a.w) * t}
+        .normalized();
+  }
+
+  /// Split an affine transform into translation, rotation and scale.
+  ///
+  /// Returns false for a degenerate matrix (a zero-length basis vector), in
+  /// which case the outputs are set to identity for the parts that could not
+  /// be recovered. A negative determinant is folded into `outScale.x`, which
+  /// is the convention every DCC tool uses for mirrored transforms.
+  inline bool decomposeTRS(const Mat4 &matrix, Vec3 &outTranslation, Quat &outRotation, Vec3 &outScale)
+  {
+    outTranslation = Vec3{matrix.m[3][0], matrix.m[3][1], matrix.m[3][2]};
+
+    Vec3 c0{matrix.m[0][0], matrix.m[0][1], matrix.m[0][2]};
+    Vec3 c1{matrix.m[1][0], matrix.m[1][1], matrix.m[1][2]};
+    Vec3 c2{matrix.m[2][0], matrix.m[2][1], matrix.m[2][2]};
+
+    float sx = c0.length();
+    const float sy = c1.length();
+    const float sz = c2.length();
+
+    if (c0.dot(c1.cross(c2)) < 0.0f)
+    {
+      sx = -sx;
+      c0 = Vec3{-c0.x, -c0.y, -c0.z};
+    }
+
+    outScale = Vec3{sx, sy, sz};
+
+    if (std::abs(sx) < 1e-8f || sy < 1e-8f || sz < 1e-8f)
+    {
+      outRotation = Quat{};
+      return false;
+    }
+
+    const float ix = 1.0f / std::abs(sx);
+    const float iy = 1.0f / sy;
+    const float iz = 1.0f / sz;
+
+    Mat4 rotation = Mat4::identity();
+    rotation.m[0][0] = c0.x * ix;
+    rotation.m[0][1] = c0.y * ix;
+    rotation.m[0][2] = c0.z * ix;
+    rotation.m[1][0] = c1.x * iy;
+    rotation.m[1][1] = c1.y * iy;
+    rotation.m[1][2] = c1.z * iy;
+    rotation.m[2][0] = c2.x * iz;
+    rotation.m[2][1] = c2.y * iz;
+    rotation.m[2][2] = c2.z * iz;
+
+    outRotation = Quat::fromMat4(rotation);
+    return true;
   }
 
   // -------------------------------------------------------------------------

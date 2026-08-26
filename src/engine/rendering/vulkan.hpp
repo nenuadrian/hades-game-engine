@@ -63,6 +63,7 @@ namespace hades
 
   class VulkanMeshPipeline;
   class VulkanSceneTargets;
+  class VulkanUiPipeline;
 
   class VulkanRenderer : public Renderer
   {
@@ -71,10 +72,12 @@ namespace hades
     bool window_initialized = false;
     bool imgui_backend_initialized = false;
     bool mesh_pipeline_initialized = false;
+    bool ui_pipeline_initialized = false;
     bool scene_targets_initialized = false;
     bool vsync_ = true;
 
     std::unique_ptr<VulkanMeshPipeline> mesh_pipeline_;
+    std::unique_ptr<VulkanUiPipeline> ui_pipeline_;
     std::unique_ptr<VulkanSceneTargets> scene_targets_;
     bool has_pending_main_scene_ = false;
     RenderList pending_main_scene_;
@@ -146,6 +149,9 @@ namespace hades
     void destroyDepthResources(Vulkan_Frame *frame);
     void ensureMeshPipelineInitialized();
     void ensureSceneTargetsInitialized();
+    /// The UI pipeline draws inside the same render passes as the mesh
+    /// pipeline, so a null pointer simply skips UI drawing.
+    VulkanUiPipeline *uiPipelineForRecording();
   };
 
 }

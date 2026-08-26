@@ -105,6 +105,43 @@ namespace hades
   };
 
   // -------------------------------------------------------------------------
+  // UIDrawData — resolved UI geometry riding along with the frame
+  // -------------------------------------------------------------------------
+  struct UIVertex
+  {
+    /// World batches: world position. Screen batches: x/y in viewport
+    /// pixels (origin top-left), z unused.
+    float x = 0.0f, y = 0.0f, z = 0.0f;
+    float r = 1.0f, g = 1.0f, b = 1.0f, a = 1.0f;
+  };
+
+  struct UIDrawData
+  {
+    /// World-space widgets (health bars over entities): drawn after the 3D
+    /// scene with depth test on / depth write off, back-to-front.
+    std::vector<UIVertex> worldTriangles;
+    std::vector<UIVertex> worldLines;
+
+    /// Screen-space widgets (HUD, menus): drawn last, no depth.
+    std::vector<UIVertex> screenTriangles;
+    std::vector<UIVertex> screenLines;
+
+    bool empty() const
+    {
+      return worldTriangles.empty() && worldLines.empty() &&
+             screenTriangles.empty() && screenLines.empty();
+    }
+
+    void clear()
+    {
+      worldTriangles.clear();
+      worldLines.clear();
+      screenTriangles.clear();
+      screenLines.clear();
+    }
+  };
+
+  // -------------------------------------------------------------------------
   // RenderList — complete output of the render pipeline
   // -------------------------------------------------------------------------
   struct RenderList
@@ -119,6 +156,9 @@ namespace hades
     /// Transparent items sorted back-to-front (for alpha blending).
     std::vector<RenderItem> transparentItems;
 
+    /// Resolved UI geometry for this frame's viewport.
+    UIDrawData ui;
+
     /// Stats.
     std::size_t totalVisibleEntities = 0;
     std::size_t totalCulledEntities = 0;
@@ -129,6 +169,7 @@ namespace hades
       lights.clear();
       opaqueItems.clear();
       transparentItems.clear();
+      ui.clear();
       totalVisibleEntities = 0;
       totalCulledEntities = 0;
       totalTriangles = 0;

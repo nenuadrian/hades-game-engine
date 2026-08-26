@@ -9,6 +9,8 @@
 #include <nlohmann/json.hpp>
 
 #include "../engine/components/animation_component.hpp"
+#include "../engine/components/animator_component.hpp"
+#include "../engine/components/blueprint_component.hpp"
 #include "../engine/components/camera_component.hpp"
 #include "../engine/components/collider_component.hpp"
 #include "../engine/components/light_component.hpp"
@@ -22,6 +24,7 @@
 #include "../engine/components/script_component.hpp"
 #include "../engine/components/text_component.hpp"
 #include "../engine/components/transform_hierarchy_component.hpp"
+#include "../engine/components/ui_canvas_component.hpp"
 #include "../engine/components/world_component.hpp"
 #include "../engine/core/ecs/component_manager.hpp"
 #include "../engine/core/ecs/component_registry.hpp"
@@ -59,6 +62,9 @@ namespace hades
           "meshRenderer",
           "model",
           "animation",
+          "animator",
+          "blueprint",
+          "uiCanvas",
       };
       return keys;
     }
@@ -122,6 +128,17 @@ namespace hades
       componentManager.addComponent(scripted, script);
       componentManager.addComponent(scripted, MeshRendererComponent{});
 
+      const auto blueprinted = EntityFactory::createCube(entityManager, componentManager, world);
+      componentManager.getComponent<NameComponent>(blueprinted).value = "Blueprinted";
+      BlueprintComponent blueprintComponent;
+      BlueprintAttachment blueprintAttachment;
+      blueprintAttachment.assetPath = "Blueprints/Patrol.hbp";
+      blueprintAttachment.enabled = false;
+      blueprintAttachment.variableOverrides["Speed"] = "3.25";
+      blueprintAttachment.variableOverrides["Waypoint"] = "1,2,3";
+      blueprintComponent.attachments.push_back(blueprintAttachment);
+      componentManager.addComponent(blueprinted, blueprintComponent);
+
       const auto model = EntityFactory::createCube(entityManager, componentManager, world);
       componentManager.getComponent<NameComponent>(model).value = "Model";
       componentManager.removeComponent<PrimitiveComponent>(model);
@@ -130,8 +147,65 @@ namespace hades
       componentManager.addComponent(model, modelComponent);
       componentManager.addComponent(model, AnimationComponent{2, false, false, 0.5f, 1.25f});
 
+      AnimatorComponent animatorComponent;
+      animatorComponent.graphPath = "locomotion";
+      animatorComponent.defaultClip = "idle";
+      animatorComponent.playOnStart = false;
+      animatorComponent.looping = false;
+      animatorComponent.speed = 1.75f;
+      animatorComponent.defaultBlendSeconds = 0.4f;
+      animatorComponent.parameters.push_back(AnimatorParamOverride{"speed", "float", 3.5f, 0, false});
+      animatorComponent.parameters.push_back(AnimatorParamOverride{"grounded", "bool", 0.0f, 0, true});
+      componentManager.addComponent(model, animatorComponent);
+
       const auto audio = EntityFactory::createAudioEmitter(entityManager, componentManager, model);
       componentManager.getComponent<NameComponent>(audio).value = "AudioEmitter";
+
+      UICanvasComponent uiCanvas;
+      uiCanvas.space = UICanvasSpace::World;
+      uiCanvas.visible = false;
+      uiCanvas.referenceWidth = 640.0f;
+      uiCanvas.referenceHeight = 360.0f;
+      uiCanvas.worldWidth = 3.5f;
+      uiCanvas.offsetX = 0.25f;
+      uiCanvas.offsetY = 2.5f;
+      uiCanvas.offsetZ = -0.75f;
+      uiCanvas.billboard = false;
+      uiCanvas.maxDistance = 40.0f;
+      uiCanvas.fadeDistance = 5.0f;
+      uiCanvas.sortOrder = 3;
+      UIWidget bar;
+      bar.id = "healthBar";
+      bar.type = "bar";
+      bar.visible = false;
+      bar.anchorX = 0.25f;
+      bar.anchorY = 0.75f;
+      bar.offsetX = 4.0f;
+      bar.offsetY = -6.0f;
+      bar.width = 220.0f;
+      bar.height = 18.0f;
+      bar.colorR = 0.11f;
+      bar.colorG = 0.12f;
+      bar.colorB = 0.13f;
+      bar.colorA = 0.9f;
+      bar.fillColorR = 0.85f;
+      bar.fillColorG = 0.2f;
+      bar.fillColorB = 0.25f;
+      bar.fillColorA = 0.95f;
+      bar.text = "unused-but-round-tripped";
+      bar.textSize = 22.0f;
+      bar.value = 0.42f;
+      bar.bindVariable = "health";
+      bar.onClickEvent = "BarClicked";
+      UIWidget label;
+      label.id = "nameLabel";
+      label.type = "text";
+      label.text = "GOBLIN";
+      label.textSize = 24.0f;
+      label.anchorY = 0.0f;
+      bar.children.push_back(label);
+      uiCanvas.widgets.push_back(bar);
+      componentManager.addComponent(model, uiCanvas);
 
       return world;
     }

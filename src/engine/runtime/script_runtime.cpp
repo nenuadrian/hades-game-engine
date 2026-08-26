@@ -695,6 +695,61 @@ namespace hades
     impl_->viewportHeight = height;
   }
 
+  ScriptValue ScriptRuntime::send_message(
+      Entity::EntityId entity,
+      const std::string &name,
+      const ScriptValue &value)
+  {
+    if (!impl_->running || impl_->componentManager == nullptr || impl_->entityManager == nullptr)
+    {
+      return ScriptValue();
+    }
+
+    EntityInstances *entry = impl_->find_entity(entity);
+    if (entry == nullptr)
+    {
+      return ScriptValue();
+    }
+
+    ScriptContext ctx = impl_->makeContext(entry->entity);
+    for (auto &instance : entry->scripts)
+    {
+      ScriptValue reply = instance.script->onMessage(ctx, name, value);
+      if (!reply.empty())
+      {
+        return reply;
+      }
+    }
+
+    return ScriptValue();
+  }
+
+  ScriptValue ScriptRuntime::broadcast_message(const std::string &name, const ScriptValue &value)
+  {
+    if (!impl_->running || impl_->componentManager == nullptr || impl_->entityManager == nullptr)
+    {
+      return ScriptValue();
+    }
+
+    ScriptValue result;
+    for (auto &entry : impl_->instances)
+    {
+      ScriptContext ctx = impl_->makeContext(entry.entity);
+      for (auto &instance : entry.scripts)
+      {
+        ScriptValue reply = instance.script->onMessage(ctx, name, value);
+        // Every script still hears the broadcast; only the first answer is
+        // kept, so a listener cannot silence the ones behind it.
+        if (result.empty() && !reply.empty())
+        {
+          result = std::move(reply);
+        }
+      }
+    }
+
+    return result;
+  }
+
   std::optional<std::string> ScriptRuntime::consume_pending_world_load()
   {
     return HadesAPI::consumePendingWorldLoad();

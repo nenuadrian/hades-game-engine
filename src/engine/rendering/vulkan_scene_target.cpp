@@ -7,6 +7,7 @@
 
 #include "../core/log.hpp"
 #include "vulkan_mesh_pipeline.hpp"
+#include "vulkan_ui_pipeline.hpp"
 #include "render_types.hpp"
 
 namespace hades
@@ -129,6 +130,7 @@ namespace hades
       uint64_t handle,
       const RenderList &list,
       VulkanMeshPipeline &pipeline,
+      VulkanUiPipeline *uiPipeline,
       uint32_t frameIndex)
   {
     auto it = targets_.find(handle);
@@ -168,6 +170,10 @@ namespace hades
 
     VkExtent2D ext{static_cast<uint32_t>(t.width), static_cast<uint32_t>(t.height)};
     pipeline.drawRenderList(cmd, renderPass_, list, ext, frameIndex);
+    if (uiPipeline != nullptr)
+    {
+      uiPipeline->drawUi(cmd, renderPass_, list, ext, frameIndex);
+    }
 
     vkCmdEndRenderPass(cmd);
     t.hasValidContent = true;

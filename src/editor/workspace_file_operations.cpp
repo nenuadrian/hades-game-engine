@@ -4,6 +4,8 @@
 #include <system_error>
 #include <unordered_set>
 
+#include "../engine/blueprint/blueprint_asset.hpp"
+#include "../engine/components/blueprint_component.hpp"
 #include "../engine/components/script_component.hpp"
 #include "../engine/core/ecs/component_manager.hpp"
 #include "../engine/core/ecs/entity_manager.hpp"
@@ -78,9 +80,10 @@ namespace hades
              relativeString.rfind("../", 0) != 0;
     }
 
-    bool collect_deleted_script_paths(
+    bool collect_deleted_paths_with_extension(
         const std::filesystem::path &workspacePath,
         const std::filesystem::path &targetPath,
+        const char *extension,
         std::vector<std::string> &scriptPaths,
         std::string *errorMessage)
     {
@@ -96,7 +99,7 @@ namespace hades
 
       if (!targetIsDirectory)
       {
-        if (targetPath.extension() == ".cpp")
+        if (targetPath.extension() == extension)
         {
           scriptPaths.push_back(relative_workspace_path(workspacePath, targetPath));
         }
@@ -113,7 +116,7 @@ namespace hades
           continue;
         }
 
-        if (iterator->path().extension() == ".cpp")
+        if (iterator->path().extension() == extension)
         {
           scriptPaths.push_back(relative_workspace_path(workspacePath, iterator->path()));
         }
@@ -166,6 +169,46 @@ namespace hades
         {
           removedAssignments += previousSize - scriptComponent.attachments.size();
           ++affectedScriptComponents;
+        }
+      }
+
+      return removedAssignments;
+    }
+
+    std::size_t remove_deleted_blueprint_assignments(
+        const std::unordered_set<std::string> &removedBlueprintPaths,
+        EntityManager &entityManager,
+        ComponentManager &componentManager,
+        std::size_t &affectedBlueprintComponents)
+    {
+      std::size_t removedAssignments = 0;
+      affectedBlueprintComponents = 0;
+
+      for (const Entity::EntityId entity : entityManager.getAllEntities())
+      {
+        if (!componentManager.hasComponent<BlueprintComponent>(entity))
+        {
+          continue;
+        }
+
+        auto &blueprintComponent = componentManager.getComponent<BlueprintComponent>(entity);
+        const std::size_t previousSize = blueprintComponent.attachments.size();
+
+        blueprintComponent.attachments.erase(
+            std::remove_if(
+                blueprintComponent.attachments.begin(),
+                blueprintComponent.attachments.end(),
+                [&removedBlueprintPaths](const BlueprintAttachment &attachment)
+                {
+                  return removedBlueprintPaths.find(normalize_script_attachment_path(attachment.assetPath)) !=
+                         removedBlueprintPaths.end();
+                }),
+            blueprintComponent.attachments.end());
+
+        if (blueprintComponent.attachments.size() != previousSize)
+        {
+          removedAssignments += previousSize - blueprintComponent.attachments.size();
+          ++affectedBlueprintComponents;
         }
       }
 
@@ -370,7 +413,17 @@ namespace hades
     }
 
     std::vector<std::string> removedScriptPaths;
-    if (!collect_deleted_script_paths(normalizedWorkspace, normalizedTarget, removedScriptPaths, errorMessage))
+    if (!collect_deleted_paths_with_extension(
+            normalizedWorkspace, normalizedTarget, ".cpp", removedScriptPaths, errorMessage))
+    {
+      return false;
+    }
+
+    // Deleting a Blueprint has to detach it too, otherwise play mode fails on
+    // an asset path that no longer resolves.
+    std::vector<std::string> removedBlueprintPaths;
+    if (!collect_deleted_paths_with_extension(
+            normalizedWorkspace, normalizedTarget, kBlueprintFileExtension, removedBlueprintPaths, errorMessage))
     {
       return false;
     }
@@ -417,6 +470,7 @@ namespace hades
 
     WorkspaceDeleteResult deleteResult;
     deleteResult.removedScriptPaths = removedScriptPaths;
+    deleteResult.removedBlueprintPaths = removedBlueprintPaths;
 
     if (!removedScriptPaths.empty())
     {
@@ -428,6 +482,18 @@ namespace hades
           entityManager,
           componentManager,
           deleteResult.affectedScriptComponents);
+    }
+
+    if (!removedBlueprintPaths.empty())
+    {
+      const std::unordered_set<std::string> removedPathSet(
+          removedBlueprintPaths.begin(),
+          removedBlueprintPaths.end());
+      deleteResult.removedBlueprintAssignments = remove_deleted_blueprint_assignments(
+          removedPathSet,
+          entityManager,
+          componentManager,
+          deleteResult.affectedBlueprintComponents);
     }
 
     if (result != nullptr)

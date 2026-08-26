@@ -1,5 +1,6 @@
 #include "vulkan_mesh_pipeline.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <cassert>
 
@@ -264,6 +265,15 @@ namespace hades
     }
     models_.clear();
 
+    // vkDeviceWaitIdle above already retired everything still queued.
+    for (auto &retired : retiredMeshes_)
+    {
+      destroyMesh(retired.mesh);
+    }
+    retiredMeshes_.clear();
+    retireFrame_ = UINT32_MAX;
+    frameSerial_ = 0;
+
     for (auto &f : frameUniforms_)
     {
       if (f.mapped) vkUnmapMemory(device_, f.memory);
@@ -492,6 +502,22 @@ namespace hades
     if (frameIndex >= framesInFlight_)
       frameIndex = frameIndex % framesInFlight_;
 
+    // Age out buffers superseded by a re-upload. Every drawRenderList call in
+    // one presented frame records into the same command buffer and the same
+    // frame slot (vulkan.cpp), so gating on the slot changing advances the
+    // queue once per frame rather than once per render target.
+    //
+    // A single frame slot would make that gate fire exactly once and then
+    // never again, stranding the queue and freezing the identity check with
+    // it; retirement lifetimes are floored at 2 slots (retireModel) so
+    // advancing per call in that degenerate case is still safe.
+    if (frameIndex != retireFrame_ || framesInFlight_ <= 1)
+    {
+      retireFrame_ = frameIndex;
+      ++frameSerial_;
+      collectRetiredMeshes();
+    }
+
     // Upload frame UBO.
     FrameUboData ubo{};
     writeMat4(ubo.view, list.camera.view);
@@ -681,14 +707,173 @@ namespace hades
     return meshes_[idx];
   }
 
+  VulkanMeshPipeline::ModelSourceId VulkanMeshPipeline::sourceIdFor(const ModelAsset &asset)
+  {
+    ModelSourceId id;
+    id.asset = &asset;
+    id.meshCount = asset.meshes.size();
+    id.nodeCount = asset.nodes.size();
+    id.boneCount = asset.bones.size();
+
+    // Layout half: where the vectors createModelMesh reads actually live.
+    // Cheap, and it catches a re-import that landed somewhere else.
+    uint64_t digest = 1469598103934665603ull;
+    const auto mix = [&digest](uint64_t value) {
+      digest ^= value + 0x9e3779b97f4a7c15ull + (digest << 6) + (digest >> 2);
+    };
+    for (const auto &mesh : asset.meshes)
+    {
+      mix(static_cast<uint64_t>(reinterpret_cast<std::uintptr_t>(mesh.vertices.data())));
+      mix(static_cast<uint64_t>(mesh.vertices.size()));
+      mix(static_cast<uint64_t>(reinterpret_cast<std::uintptr_t>(mesh.indices.data())));
+      mix(static_cast<uint64_t>(mesh.indices.size()));
+    }
+    id.meshDigest = digest;
+
+    // Content half, and the half that does the real work. The layout digest
+    // above cannot be trusted on its own: ModelAssetCache::invalidate() frees
+    // the asset before the re-import allocates, so the allocator replays the
+    // same sequence and the new vertex/index vectors come back at the same
+    // addresses with the same sizes. Measured over repeated real re-imports
+    // that only re-bound the weights (joint count unchanged, so the counts
+    // above are unchanged too), the layout digest missed the change in
+    // 189/199, 198/199 and 5/99 cycles depending on mesh size.
+    //
+    // So sample the payload itself. The sample is bounded — this runs once per
+    // model per frame (GpuModel::validatedFrame), not once per render item —
+    // and strided across the whole mesh, because a rig rebind rewrites the
+    // bone indices and weights of every vertex it touches.
+    //
+    // The budget is spread over the meshes rather than spent greedily on the
+    // first few: RigMeshBinding is per mesh, so a rig can rebind mesh 9 of 10
+    // and leave the rest byte-identical. Every mesh keeps a floor of samples.
+    constexpr std::size_t kSamplesPerMesh = 256;
+    constexpr std::size_t kMinSamplesPerMesh = 8;
+    constexpr std::size_t kSampleBudget = 2048;
+
+    const std::size_t meshCount = asset.meshes.size();
+    const std::size_t perMesh =
+        meshCount == 0
+            ? 0
+            : std::min<std::size_t>(
+                  kSamplesPerMesh,
+                  std::max<std::size_t>(kMinSamplesPerMesh, kSampleBudget / meshCount));
+
+    uint64_t content = 1469598103934665603ull;
+    const auto mixContent = [&content](uint64_t value) {
+      content ^= value + 0x9e3779b97f4a7c15ull + (content << 6) + (content >> 2);
+    };
+    const auto bits = [](float f) {
+      uint32_t out = 0;
+      std::memcpy(&out, &f, sizeof(out));
+      return static_cast<uint64_t>(out);
+    };
+
+    for (const auto &mesh : asset.meshes)
+    {
+      // Materials are cached in GpuModel too, so a re-import that only changed
+      // one still has to invalidate.
+      const Material &mat = mesh.material;
+      mixContent(bits(mat.baseColorR) | (bits(mat.baseColorG) << 32));
+      mixContent(bits(mat.baseColorB) | (bits(mat.metallic) << 32));
+      mixContent(bits(mat.roughness) | (bits(mat.opacity) << 32));
+      mixContent(mat.wireframe ? 1ull : 0ull);
+      mixContent(static_cast<uint64_t>(static_cast<int64_t>(mesh.nodeIndex)));
+
+      if (!mesh.indices.empty())
+      {
+        mixContent(mesh.indices.front());
+        mixContent(mesh.indices.back());
+      }
+
+      const std::size_t count = mesh.vertices.size();
+      if (count == 0 || perMesh == 0)
+        continue;
+
+      const std::size_t take = std::min(count, perMesh);
+      const std::size_t stride = count / take; // >= 1
+      for (std::size_t s = 0; s < take; ++s)
+      {
+        const ModelVertex &v = mesh.vertices[std::min(s * stride, count - 1)];
+        mixContent(bits(v.px) | (bits(v.py) << 32));
+        mixContent(bits(v.pz) | (bits(v.nx) << 32));
+        mixContent(bits(v.ny) | (bits(v.nz) << 32));
+        for (int k = 0; k < 4; ++k)
+        {
+          mixContent(static_cast<uint64_t>(v.boneIndices[k]) | (bits(v.boneWeights[k]) << 32));
+        }
+      }
+    }
+    id.contentDigest = content;
+    return id;
+  }
+
+  void VulkanMeshPipeline::retireModel(GpuModel &model)
+  {
+    for (auto &mesh : model.meshes)
+    {
+      if (mesh.vertexBuffer == VK_NULL_HANDLE && mesh.indexBuffer == VK_NULL_HANDLE)
+        continue;
+      RetiredMesh retired;
+      retired.mesh = mesh;
+      // Floor of 2: with a single frame slot the queue is advanced once per
+      // drawRenderList call rather than once per frame, and two calls of the
+      // same frame record into one command buffer that is not submitted yet.
+      retired.framesRemaining = std::max(framesInFlight_, 2u);
+      retiredMeshes_.push_back(retired);
+    }
+    model.meshes.clear();
+    model.materials.clear();
+  }
+
+  void VulkanMeshPipeline::collectRetiredMeshes()
+  {
+    for (std::size_t i = retiredMeshes_.size(); i > 0; --i)
+    {
+      RetiredMesh &retired = retiredMeshes_[i - 1];
+      if (retired.framesRemaining > 0)
+        --retired.framesRemaining;
+      if (retired.framesRemaining > 0)
+        continue;
+
+      // The slot this mesh was last recorded into has come round again, so
+      // its fence signalled — the same argument ensureBoneCapacity relies on.
+      destroyMesh(retired.mesh);
+      retiredMeshes_.erase(retiredMeshes_.begin() + static_cast<std::ptrdiff_t>(i - 1));
+    }
+  }
+
   VulkanMeshPipeline::GpuModel *VulkanMeshPipeline::ensureModel(const RenderItem &item)
   {
     auto it = models_.find(item.modelKey);
     if (it != models_.end())
-      return &it->second;
+    {
+      // Already checked against the CPU asset this frame. Every drawRenderList
+      // call of one presented frame is recorded back to back with no UI in
+      // between, so nothing can re-import between two of them; re-hashing per
+      // item would just multiply the cost by the entity count.
+      if (it->second.validatedFrame == frameSerial_)
+        return &it->second;
+
+      if (it->second.source == sourceIdFor(*item.model))
+      {
+        it->second.validatedFrame = frameSerial_;
+        return &it->second;
+      }
+
+      // Same resolved path, different CPU asset: the model was re-imported
+      // (a rig save re-bakes every vertex's bone indices and weights). Drop
+      // the stale buffers rather than keep drawing the pre-save skin. They
+      // are retired, not destroyed: ensureModel runs while a command buffer
+      // is being recorded and earlier frames may still be reading them.
+      retireModel(it->second);
+      models_.erase(it);
+    }
 
     GpuModel model;
     model.valid = true;
+    model.source = sourceIdFor(*item.model);
+    model.validatedFrame = frameSerial_;
     for (const auto &meshData : item.model->meshes)
     {
       GpuMesh mesh;

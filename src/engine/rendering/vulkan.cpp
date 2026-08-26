@@ -7,6 +7,7 @@
 #include "../core/log.hpp"
 #include "vulkan_mesh_pipeline.hpp"
 #include "vulkan_scene_target.hpp"
+#include "vulkan_ui_pipeline.hpp"
 
 #include <SDL.h>
 #include <SDL_vulkan.h>
@@ -54,6 +55,13 @@ namespace hades
         mesh_pipeline_initialized = false;
       }
 
+      if (ui_pipeline_initialized && ui_pipeline_)
+      {
+        ui_pipeline_->destroy();
+        ui_pipeline_.reset();
+        ui_pipeline_initialized = false;
+      }
+
       if (window_initialized)
       {
         CleanupVulkanWindow();
@@ -72,6 +80,8 @@ namespace hades
       scene_targets_initialized = false;
       mesh_pipeline_.reset();
       mesh_pipeline_initialized = false;
+      ui_pipeline_.reset();
+      ui_pipeline_initialized = false;
       window_initialized = false;
       vulkan_initialized = false;
     }
@@ -558,7 +568,7 @@ namespace hades
       for (const auto &p : pending_target_renders_)
       {
         scene_targets_->recordRender(
-            fd->CommandBuffer, p.handle, p.list, *mesh_pipeline_,
+            fd->CommandBuffer, p.handle, p.list, *mesh_pipeline_, uiPipelineForRecording(),
             frame_counter_ % mesh_pipeline_->framesInFlight());
       }
       pending_target_renders_.clear();
@@ -584,10 +594,15 @@ namespace hades
     {
       VkExtent2D ext{static_cast<uint32_t>(g_MainWindowData.Width),
                      static_cast<uint32_t>(g_MainWindowData.Height)};
+      const uint32_t frameSlot = frame_counter_ % mesh_pipeline_->framesInFlight();
       mesh_pipeline_->drawRenderList(
           fd->CommandBuffer, g_MainWindowData.RenderPass,
-          pending_main_scene_, ext,
-          frame_counter_ % mesh_pipeline_->framesInFlight());
+          pending_main_scene_, ext, frameSlot);
+      if (VulkanUiPipeline *ui = uiPipelineForRecording())
+      {
+        ui->drawUi(fd->CommandBuffer, g_MainWindowData.RenderPass,
+                   pending_main_scene_, ext, frameSlot);
+      }
       has_pending_main_scene_ = false;
     }
 
@@ -1165,7 +1180,7 @@ namespace hades
       for (const auto &p : pending_target_renders_)
       {
         scene_targets_->recordRender(
-            fd->CommandBuffer, p.handle, p.list, *mesh_pipeline_,
+            fd->CommandBuffer, p.handle, p.list, *mesh_pipeline_, uiPipelineForRecording(),
             frame_counter_ % mesh_pipeline_->framesInFlight());
       }
       pending_target_renders_.clear();
@@ -1190,10 +1205,15 @@ namespace hades
     {
       VkExtent2D ext{static_cast<uint32_t>(g_MainWindowData.Width),
                      static_cast<uint32_t>(g_MainWindowData.Height)};
+      const uint32_t frameSlot = frame_counter_ % mesh_pipeline_->framesInFlight();
       mesh_pipeline_->drawRenderList(
           fd->CommandBuffer, g_MainWindowData.RenderPass,
-          pending_main_scene_, ext,
-          frame_counter_ % mesh_pipeline_->framesInFlight());
+          pending_main_scene_, ext, frameSlot);
+      if (VulkanUiPipeline *ui = uiPipelineForRecording())
+      {
+        ui->drawUi(fd->CommandBuffer, g_MainWindowData.RenderPass,
+                   pending_main_scene_, ext, frameSlot);
+      }
       has_pending_main_scene_ = false;
     }
 
@@ -1325,6 +1345,27 @@ namespace hades
       return;
     }
     mesh_pipeline_initialized = true;
+
+    // The UI pipeline records into the same render passes right after the
+    // scene; failure only disables UI drawing, never the scene itself.
+    ui_pipeline_ = std::make_unique<VulkanUiPipeline>();
+    VulkanUiPipeline::InitInfo uiInfo{};
+    uiInfo.device = g_Device;
+    uiInfo.physicalDevice = g_PhysicalDevice;
+    uiInfo.framesInFlight = info.framesInFlight;
+    uiInfo.allocator = g_Allocator;
+    if (!ui_pipeline_->init(uiInfo))
+    {
+      hades::Log::warn_tagged("vulkan", "UI pipeline init failed; in-game UI disabled");
+      ui_pipeline_.reset();
+      return;
+    }
+    ui_pipeline_initialized = true;
+  }
+
+  VulkanUiPipeline *VulkanRenderer::uiPipelineForRecording()
+  {
+    return ui_pipeline_initialized ? ui_pipeline_.get() : nullptr;
   }
 
   void VulkanRenderer::ensureSceneTargetsInitialized()

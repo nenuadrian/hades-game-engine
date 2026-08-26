@@ -11,6 +11,8 @@
 #include "engine/core/ecs/component_manager.hpp"
 #include "engine/core/ecs/entity_manager.hpp"
 #include "engine/core/ecs/system_manager.hpp"
+#include "engine/blueprint/blueprint_engine_host.hpp"
+#include "engine/blueprint/blueprint_runtime.hpp"
 #include "engine/core/events/event_bus.hpp"
 #include "engine/rendering/scene_renderer.hpp"
 #include "engine/runtime/script_runtime.hpp"
@@ -65,6 +67,8 @@ namespace hades
     SystemManager systemManager_;
     EventBus eventBus_;
     ScriptRuntime scriptRuntime_;
+    BlueprintRuntime blueprintRuntime_;
+    EngineBlueprintHost blueprintHost_;
     SdlSession sdlSession_;
     WindowPtr window_{nullptr};
     std::unique_ptr<Renderer> renderer_;

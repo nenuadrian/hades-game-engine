@@ -30,6 +30,8 @@ Add an **Animation** component (the *Model* entity preset includes one already).
 
 During play mode the `AnimationSystem` advances the clip time each frame; one-shot clips clamp at the end and stop, looping clips wrap.
 
+Authoring your own clips, driving them from an animator state machine, and rigging a model that arrived without a skeleton are covered in [Animation](animation.md).
+
 ## How it works
 
 - `ModelAssetCache` loads each file once (lazily, on first use) into a CPU-side `ModelAsset`: meshes with per-vertex bone indices/weights, the node hierarchy, a bone palette, and animation clips with TRS keyframes.

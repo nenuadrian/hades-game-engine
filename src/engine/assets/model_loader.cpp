@@ -194,6 +194,10 @@ namespace hades
 
       ModelMeshData data;
       data.material = importMaterial(scene, mesh->mMaterialIndex);
+      // A skinned mesh reaches model space through its bone offset matrices,
+      // which already carry the mesh's own placement; only a rigid mesh is
+      // placed by the node that references it.
+      data.nodeIndex = mesh->mNumBones > 0 ? -1 : meshNode;
       data.vertices.resize(mesh->mNumVertices);
 
       for (unsigned int i = 0; i < mesh->mNumVertices; ++i)

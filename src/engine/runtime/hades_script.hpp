@@ -13,6 +13,7 @@
 #include "../core/ecs/entity.hpp"
 #include "../core/ecs/entity_manager.hpp"
 #include "../rendering/math3d.hpp"
+#include "hades_value.hpp"
 
 namespace hades
 {
@@ -38,6 +39,27 @@ namespace hades
     virtual void onMouseDown(ScriptContext &ctx, int button, float screenX, float screenY) {}
     virtual void onMouseUp(ScriptContext &ctx, int button, float screenX, float screenY) {}
     virtual void onMouseMove(ScriptContext &ctx, float screenX, float screenY) {}
+
+    /// Called by the Blueprint nodes `Send Script Message` and
+    /// `Call Script Function`, which is how a graph reaches into C++.
+    ///
+    /// `name` is whatever the node's Name pin carries, `value` its Value pin.
+    /// The returned value is what `Call Script Function` reads back on its
+    /// Result pin; `Send Script Message` ignores it. Returning the default
+    /// (empty) `ScriptValue` means "not handled", and when an entity carries
+    /// several scripts the first non-empty answer wins.
+    ///
+    /// Dispatch is synchronous: Blueprints update after scripts, so a message
+    /// sent from a graph lands inside the same frame. Sending an event back
+    /// with `hades::Blueprints::sendEvent` from here is safe — that path is
+    /// queued and will not re-enter the graph that is currently running.
+    virtual ScriptValue onMessage(ScriptContext &ctx, const std::string &name, const ScriptValue &value)
+    {
+      (void)ctx;
+      (void)name;
+      (void)value;
+      return ScriptValue();
+    }
   };
 
   class HadesAPI

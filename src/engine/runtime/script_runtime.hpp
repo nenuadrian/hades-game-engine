@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "../core/ecs/entity.hpp"
+#include "hades_value.hpp"
 
 namespace hades
 {
@@ -93,6 +94,18 @@ namespace hades
     void on_mouse_up(int button, float screenX, float screenY);
     void on_mouse_move(float screenX, float screenY);
     void set_viewport_size(float width, float height);
+
+    /// Call `onMessage` on every script attached to `entity`, in attachment
+    /// order. Returns the first non-empty reply, or an empty value when the
+    /// entity has no scripts or none of them handled the message.
+    ///
+    /// This is what the Blueprint `Send Script Message` / `Call Script
+    /// Function` nodes land on, via `EngineBlueprintHost`.
+    ScriptValue send_message(Entity::EntityId entity, const std::string &name, const ScriptValue &value);
+
+    /// Same, for every scripted entity in the world. Returns the first
+    /// non-empty reply in iteration order.
+    ScriptValue broadcast_message(const std::string &name, const ScriptValue &value);
 
     /// Check if a script has requested a world load. Returns the world name if so.
     static std::optional<std::string> consume_pending_world_load();

@@ -5,6 +5,7 @@
 
 #include "../assets/model_asset.hpp"
 #include "../assets/model_asset_cache.hpp"
+#include "../animation/animation_runtime.hpp"
 #include "../components/animation_component.hpp"
 #include "../components/camera_component.hpp"
 #include "../components/light_component.hpp"
@@ -18,6 +19,7 @@
 #include "../core/ecs/entity_manager.hpp"
 #include "../core/ecs/query.hpp"
 #include "../core/ecs/world_utils.hpp"
+#include "../ui/ui_render.hpp"
 
 namespace hades
 {
@@ -96,7 +98,9 @@ namespace hades
       const RenderCamera &camera,
       ComponentManager &componentManager,
       EntityManager &entityManager,
-      std::optional<Entity::EntityId> worldFilter)
+      std::optional<Entity::EntityId> worldFilter,
+      float uiViewportWidth,
+      float uiViewportHeight)
   {
     RenderList list;
     list.camera = camera;
@@ -132,6 +136,12 @@ namespace hades
               });
 
     list.totalVisibleEntities = list.opaqueItems.size() + list.transparentItems.size();
+
+    // World-space canvases (health bars, nameplates) always; screen-space
+    // canvases (HUD, menus) only when the caller supplied a viewport size.
+    ui::collect_ui(list, camera, componentManager, entityManager, worldFilter,
+                   uiViewportWidth, uiViewportHeight);
+
     return list;
   }
 
@@ -250,19 +260,41 @@ namespace hades
         }
 
         item.model = asset;
-        item.modelKey = cache.resolvePath(mc.assetPath).string();
         item.boundsRadius = asset->boundsRadius() * maxScale;
+
+        // Visibility needs nothing below this point, and everything below it
+        // is expensive: a second path resolve for the key, a locked palette
+        // copy and, for a full 128-bone model, 8 KB of matrices the frustum
+        // test at the bottom of the loop would only throw away.
+        if (!camera.frustum.containsSphere(position, item.boundsRadius))
+        {
+          ++list.totalCulledEntities;
+          continue;
+        }
+
+        item.modelKey = cache.resolvePath(mc.assetPath).string();
         itemTriangles = asset->triangleCount();
 
-        // Pose: sample the animation clip when one is playing/scrubbed,
-        // otherwise fall back to the bind pose.
-        if (asset->hasAnimations() &&
-            componentManager.hasComponent<AnimationComponent>(entity))
+        // Pose, in priority order: the animation editor's preview, then the
+        // animator (graph or authored clip), then the legacy per-model clip
+        // player, then the bind pose.
+        if (!AnimationRuntime::instance().palette_for(entity, item.boneMatrices))
         {
-          const auto &anim = componentManager.getComponent<AnimationComponent>(entity);
-          asset->samplePose(anim.clipIndex, anim.time, item.boneMatrices);
+          if (asset->hasAnimations() &&
+              componentManager.hasComponent<AnimationComponent>(entity))
+          {
+            const auto &anim = componentManager.getComponent<AnimationComponent>(entity);
+            asset->samplePose(anim.clipIndex, anim.time, item.boneMatrices);
+          }
+          else
+          {
+            item.boneMatrices = asset->bindPose();
+          }
         }
-        else
+
+        // A stale palette (model swapped under a running animator) would be
+        // uploaded as garbage; fall back rather than index out of range.
+        if (item.boneMatrices.size() != asset->bindPose().size())
         {
           item.boneMatrices = asset->bindPose();
         }
@@ -303,7 +335,9 @@ namespace hades
         }
       }
 
-      // Frustum culling.
+      // Frustum culling. Primitives are only tested here, because their
+      // bounds radius is not known until the branch above has run; a model
+      // has already passed the same test and simply passes it again.
       if (!camera.frustum.containsSphere(position, item.boundsRadius))
       {
         ++list.totalCulledEntities;

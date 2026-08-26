@@ -28,6 +28,7 @@ namespace hades
     savedSettings.sceneCameraDistance = 18.0f;
     savedSettings.sceneCameraYawDegrees = 135.0f;
     savedSettings.sceneCameraPitchDegrees = -25.0f;
+    savedSettings.sceneGameView = true;
     savedSettings.pluginVisibility["workspace"] = true;
     savedSettings.pluginVisibility["entities"] = false;
 
@@ -45,6 +46,7 @@ namespace hades
     EXPECT_FLOAT_EQ(loadedSettings.sceneCameraDistance, 18.0f);
     EXPECT_FLOAT_EQ(loadedSettings.sceneCameraYawDegrees, 135.0f);
     EXPECT_FLOAT_EQ(loadedSettings.sceneCameraPitchDegrees, -25.0f);
+    EXPECT_TRUE(loadedSettings.sceneGameView);
     ASSERT_EQ(loadedSettings.pluginVisibility.size(), 2U);
     EXPECT_TRUE(loadedSettings.pluginVisibility["workspace"]);
     EXPECT_FALSE(loadedSettings.pluginVisibility["entities"]);

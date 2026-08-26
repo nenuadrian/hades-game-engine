@@ -6,12 +6,22 @@
 #include <filesystem>
 #include <set>
 #include <string>
+#include <vector>
 
+#include "IconsFontAwesome6.h"
 #include "imgui.h"
 #include "misc/cpp/imgui_stdlib.h"
+#include "../engine/animation/animation_clip_cache.hpp"
+#include "../engine/animation/animation_runtime.hpp"
+#include "../engine/animation/animator_graph.hpp"
+#include "../engine/animation/animator_instance.hpp"
 #include "../engine/assets/model_asset.hpp"
 #include "../engine/assets/model_asset_cache.hpp"
+#include "blueprint/blueprint_editor_panel.hpp"
+#include "../engine/blueprint/blueprint_asset.hpp"
 #include "../engine/components/animation_component.hpp"
+#include "../engine/components/blueprint_component.hpp"
+#include "../engine/components/animator_component.hpp"
 #include "../engine/components/audio_listener_component.hpp"
 #include "../engine/components/model_component.hpp"
 #include "../engine/components/audio_source_component.hpp"
@@ -28,6 +38,9 @@
 #include "../engine/components/scale_component_3d.hpp"
 #include "../engine/components/script_component.hpp"
 #include "../engine/components/text_component.hpp"
+#include "../engine/components/ui_canvas_component.hpp"
+#include "../engine/ui/ui_widget_registry.hpp"
+#include "../engine/ui/ui_widget_ops.hpp"
 #include "../engine/components/transform_hierarchy_component.hpp"
 #include "../engine/components/world_component.hpp"
 #include "../engine/core/ecs/component_manager.hpp"
@@ -75,6 +88,43 @@ namespace hades
       return label;
     }
 
+    // AnimatorParamOverride stores its type as a string so the scene file stays
+    // readable; these keep the combo and the string in step.
+    constexpr const char *ANIMATOR_PARAM_TYPE_LABELS[] = {"float", "int", "bool"};
+
+    int animator_param_type_index(const std::string &type)
+    {
+      if (type == "int")
+      {
+        return 1;
+      }
+      if (type == "bool")
+      {
+        return 2;
+      }
+
+      return 0;
+    }
+
+    /// Authorable override type for a graph parameter. Triggers are never
+    /// authored, so they fall back to the bool editor rather than vanishing
+    /// from the picker.
+    const char *animator_override_type_for(AnimParamType type)
+    {
+      switch (type)
+      {
+      case AnimParamType::Int:
+        return "int";
+      case AnimParamType::Bool:
+      case AnimParamType::Trigger:
+        return "bool";
+      case AnimParamType::Float:
+        break;
+      }
+
+      return "float";
+    }
+
   }
 
   void Editor::properties(EntityManager &entityManager, ComponentManager &componentManager)
@@ -114,7 +164,7 @@ namespace hades
     }
     {
       static int selectedComponentType = 0;
-      const char *componentTypes[] = {"Script Component", "Rigid Body", "Mesh Renderer", "Model", "Animation"};
+      const char *componentTypes[] = {"Script Component", "Rigid Body", "Mesh Renderer", "Model", "Animation", "Animator", "Blueprint", "UI Canvas"};
       ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.65f);
       ImGui::Combo("##AddComponentType", &selectedComponentType, componentTypes, IM_ARRAYSIZE(componentTypes));
       ImGui::SameLine();
@@ -169,6 +219,33 @@ namespace hades
             componentManager.addComponent(entity, AnimationComponent{});
           }
         }
+        else if (selectedComponentType == 5)
+        {
+          if (!componentManager.hasComponent<AnimatorComponent>(entity))
+          {
+            componentManager.addComponent(entity, AnimatorComponent{});
+          }
+        }
+        else if (selectedComponentType == 6)
+        {
+          if (!componentManager.hasComponent<BlueprintComponent>(entity))
+          {
+            BlueprintComponent blueprintComponent;
+            blueprintComponent.attachments.push_back(BlueprintAttachment());
+            componentManager.addComponent(entity, blueprintComponent);
+          }
+          else
+          {
+            componentManager.getComponent<BlueprintComponent>(entity).attachments.push_back(BlueprintAttachment());
+          }
+        }
+        else if (selectedComponentType == 7)
+        {
+          if (!componentManager.hasComponent<UICanvasComponent>(entity))
+          {
+            componentManager.addComponent(entity, UICanvasComponent{});
+          }
+        }
       }
     }
     if (isWorld)
@@ -206,6 +283,152 @@ namespace hades
       ImGui::DragFloat("Roughness", &mat.roughness, 0.01f, 0.0f, 1.0f);
       ImGui::DragFloat("Opacity", &mat.opacity, 0.01f, 0.0f, 1.0f);
       ImGui::Checkbox("Wireframe", &mat.wireframe);
+    }
+
+    if (componentManager.hasComponent<UICanvasComponent>(entity) && ImGui::CollapsingHeader("UI Canvas"))
+    {
+      // Widget labels here ("Visible", "Offset", ...) collide with other
+      // sections, so scope the whole canvas editor (see the animator
+      // section's note on ImGui's shared ActiveId).
+      ImGui::PushID("UICanvasSection");
+      auto &canvas = componentManager.getComponent<UICanvasComponent>(entity);
+      register_builtin_ui_widgets();
+
+      int space = static_cast<int>(canvas.space);
+      if (ImGui::Combo("Space", &space, "Screen (HUD / menus)\0World (attached to entity)\0"))
+      {
+        canvas.space = static_cast<UICanvasSpace>(space);
+      }
+      ImGui::Checkbox("Visible", &canvas.visible);
+
+      if (canvas.space == UICanvasSpace::World)
+      {
+        ImGui::DragFloat2("Reference Size (px)", &canvas.referenceWidth, 1.0f, 1.0f, 8192.0f);
+        ImGui::DragFloat("World Width", &canvas.worldWidth, 0.05f, 0.01f, 100.0f);
+        ImGui::DragFloat3("Offset", &canvas.offsetX, 0.05f);
+        ImGui::Checkbox("Billboard", &canvas.billboard);
+        ImGui::DragFloat("Max Distance", &canvas.maxDistance, 0.5f, 0.0f, 10000.0f);
+        ImGui::DragFloat("Fade Distance", &canvas.fadeDistance, 0.5f, 0.0f, 10000.0f);
+        ImGui::TextDisabled("Widgets lay out in reference pixels, mapped onto a %.2f-unit-wide quad.",
+                            canvas.worldWidth);
+      }
+      else
+      {
+        ImGui::DragInt("Sort Order", &canvas.sortOrder, 1.0f);
+        ImGui::TextDisabled("Widgets lay out in viewport pixels (anchors are viewport fractions).");
+      }
+
+      ImGui::SeparatorText("Widgets");
+
+      // Recursive widget tree editor. Removal is deferred to after the walk
+      // so the vector is never mutated mid-iteration.
+      struct WidgetTreeEditor
+      {
+        static void add_widget_controls(std::vector<UIWidget> &siblings, const char *comboId)
+        {
+          const auto &types = UIWidgetRegistry::instance().all();
+          static int selectedType = 0;
+          if (selectedType >= static_cast<int>(types.size()))
+          {
+            selectedType = 0;
+          }
+          ImGui::SetNextItemWidth(140.0f);
+          if (ImGui::BeginCombo(comboId, types.empty() ? "?" : types[selectedType].displayName.c_str()))
+          {
+            for (int i = 0; i < static_cast<int>(types.size()); ++i)
+            {
+              if (ImGui::Selectable(types[i].displayName.c_str(), i == selectedType))
+              {
+                selectedType = i;
+              }
+            }
+            ImGui::EndCombo();
+          }
+          ImGui::SameLine();
+          if (ImGui::Button("Add Widget") && !types.empty())
+          {
+            const UIWidgetType &type = types[selectedType];
+            UIWidget widget = type.defaults;
+            widget.type = type.name;
+            // Auto-id: type name plus a counter that skips taken names.
+            int suffix = 1;
+            std::string id;
+            do
+            {
+              id = type.name + std::to_string(suffix++);
+            } while (hades::ui::find_widget(siblings, id) != nullptr);
+            widget.id = id;
+            siblings.push_back(std::move(widget));
+          }
+        }
+
+        static void draw(std::vector<UIWidget> &widgets)
+        {
+          int removeIndex = -1;
+          for (int i = 0; i < static_cast<int>(widgets.size()); ++i)
+          {
+            auto &widget = widgets[i];
+            ImGui::PushID(i);
+            const std::string label = widget.id + "  (" + widget.type + ")";
+            const bool open = ImGui::TreeNode("##widget", "%s", label.c_str());
+            ImGui::SameLine(ImGui::GetContentRegionAvail().x - 20.0f);
+            if (ImGui::SmallButton("x"))
+            {
+              removeIndex = i;
+            }
+            if (open)
+            {
+              ImGui::InputText("Id", &widget.id);
+              ImGui::Checkbox("Visible", &widget.visible);
+              ImGui::DragFloat2("Anchor", &widget.anchorX, 0.01f, 0.0f, 1.0f);
+              ImGui::DragFloat2("Offset (px)", &widget.offsetX, 1.0f);
+              ImGui::DragFloat2("Size (px)", &widget.width, 1.0f, 0.0f, 8192.0f);
+              ImGui::ColorEdit4("Color", &widget.colorR);
+              if (widget.type == "bar" || widget.type == "button")
+              {
+                ImGui::ColorEdit4("Fill / Label Color", &widget.fillColorR);
+              }
+              if (widget.type == "text" || widget.type == "button")
+              {
+                ImGui::InputText("Text", &widget.text);
+                ImGui::DragFloat("Text Size (px)", &widget.textSize, 0.5f, 1.0f, 512.0f);
+              }
+              if (widget.type == "bar")
+              {
+                ImGui::SliderFloat("Value", &widget.value, 0.0f, 1.0f);
+              }
+              ImGui::InputText("Bind Variable", &widget.bindVariable);
+              ImGui::SetItemTooltip("Blueprint variable on this entity that drives the value/text.");
+              const UIWidgetType *typeInfo = UIWidgetRegistry::instance().find(widget.type);
+              if ((typeInfo != nullptr && typeInfo->clickable) || !widget.onClickEvent.empty())
+              {
+                ImGui::InputText("Click Event", &widget.onClickEvent);
+                ImGui::SetItemTooltip(
+                    "Blueprint Custom Event fired on click; the widget id is the payload.");
+              }
+
+              draw(widget.children);
+              add_widget_controls(widget.children, "##childType");
+              ImGui::TreePop();
+            }
+            ImGui::PopID();
+          }
+          if (removeIndex >= 0)
+          {
+            widgets.erase(widgets.begin() + removeIndex);
+          }
+        }
+      };
+
+      WidgetTreeEditor::draw(canvas.widgets);
+      WidgetTreeEditor::add_widget_controls(canvas.widgets, "##rootType");
+
+      ImGui::Spacing();
+      if (ImGui::Button("Remove UI Canvas"))
+      {
+        componentManager.removeComponent<UICanvasComponent>(entity);
+      }
+      ImGui::PopID();
     }
 
     if (componentManager.hasComponent<ModelComponent>(entity) && ImGui::CollapsingHeader("Model", ImGuiTreeNodeFlags_DefaultOpen))
@@ -285,7 +508,16 @@ namespace hades
 
     if (componentManager.hasComponent<AnimationComponent>(entity) && ImGui::CollapsingHeader("Animation", ImGuiTreeNodeFlags_DefaultOpen))
     {
+      // Scoped for the same reason as the Animator section below: "Looping"
+      // here collides with the Audio Source section's "Looping".
+      ImGui::PushID("animation_component");
+
       auto &anim = componentManager.getComponent<AnimationComponent>(entity);
+
+      if (componentManager.hasComponent<AnimatorComponent>(entity))
+      {
+        ImGui::TextDisabled("An Animator component is attached; it supersedes this clip player.");
+      }
 
       const ModelAsset *asset = nullptr;
       if (componentManager.hasComponent<ModelComponent>(entity))
@@ -332,6 +564,335 @@ namespace hades
         ImGui::SliderFloat("Time", &anim.time, 0.0f, activeClip.duration, "%.2f s");
         ImGui::TextDisabled("Playback advances in play mode; scrub Time to preview here.");
       }
+
+      ImGui::PopID();
+    }
+
+    if (componentManager.hasComponent<AnimatorComponent>(entity) && ImGui::CollapsingHeader("Animator", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+      // CollapsingHeader does not open an ID scope, so every widget below would
+      // otherwise sit at the window root alongside the legacy Animation and
+      // Audio Source sections — which use the same visible labels ("Looping",
+      // "Speed", "Play On Start"). Two live items with one ID share ImGui's
+      // ActiveId, so dragging one "Speed" drags both. Scope the whole section.
+      ImGui::PushID("animator_component");
+
+      auto &animator = componentManager.getComponent<AnimatorComponent>(entity);
+      auto &animationCache = AnimationClipCache::instance();
+
+      // Nothing re-roots AnimationClipCache on a workspace switch the way
+      // refresh_workspace_cache() re-roots ModelAssetCache, so every consumer
+      // keeps it honest itself (see AnimationEditorPlugin::sync_asset_roots and
+      // AnimatorGraphPlugin::sync_asset_root). Without this the combos below
+      // scan `.hades/animators` relative to the process working directory and
+      // come up empty. setAssetRoot drops every entry, hence the guard.
+      if (animationCache.assetRoot() != activeWorkspacePath_)
+      {
+        animationCache.setAssetRoot(activeWorkspacePath_);
+      }
+
+      // AnimatorSystem iterates query<ModelComponent, AnimatorComponent> and
+      // skips entities whose model asset failed to load, so an animator with
+      // no model never runs. Say so here: "Add Component > Animator" does not
+      // pull a ModelComponent in, and the failure is otherwise silent.
+      if (!componentManager.hasComponent<ModelComponent>(entity))
+      {
+        ImGui::TextColored(
+            ImVec4(0.88f, 0.72f, 0.34f, 1.0f),
+            "No Model component. Add one with a skinned model or this animator\n"
+            "will never be evaluated.");
+      }
+      else if (ModelAssetCache::instance().get(
+                   componentManager.getComponent<ModelComponent>(entity).assetPath) == nullptr)
+      {
+        ImGui::TextColored(
+            ImVec4(0.88f, 0.72f, 0.34f, 1.0f),
+            "The Model component has no loaded asset, so there is no skeleton\n"
+            "to pose and this animator will never be evaluated.");
+      }
+
+      const std::string graphPreview = animator.graphPath.empty() ? "(none)" : animator.graphPath;
+      if (ImGui::BeginCombo("Graph", graphPreview.c_str()))
+      {
+        const bool noneSelected = animator.graphPath.empty();
+        if (ImGui::Selectable("(none)", noneSelected))
+        {
+          animator.graphPath.clear();
+        }
+        if (noneSelected)
+        {
+          ImGui::SetItemDefaultFocus();
+        }
+
+        for (const auto &graphName : animationCache.listGraphs())
+        {
+          const bool selected = (animator.graphPath == graphName);
+          if (ImGui::Selectable(graphName.c_str(), selected))
+          {
+            animator.graphPath = graphName;
+          }
+          if (selected)
+          {
+            ImGui::SetItemDefaultFocus();
+          }
+        }
+        ImGui::EndCombo();
+      }
+
+      const AnimatorGraph *graph =
+          animator.graphPath.empty() ? nullptr : animationCache.graph(animator.graphPath);
+      if (!animator.graphPath.empty() && graph == nullptr)
+      {
+        const std::string loadError = animationCache.errorFor(animator.graphPath);
+        ImGui::TextColored(
+            ImVec4(0.88f, 0.42f, 0.42f, 1.0f), "Failed to load graph: %s",
+            loadError.empty() ? "unknown error" : loadError.c_str());
+      }
+
+      // A graph owns state selection, so the default clip is only the clip-mode
+      // fallback. Dim it rather than hide it, so the authored value stays visible.
+      const bool graphDrivesPlayback = !animator.graphPath.empty();
+      if (graphDrivesPlayback)
+      {
+        ImGui::BeginDisabled();
+      }
+      const std::string clipPreview = animator.defaultClip.empty() ? "(none)" : animator.defaultClip;
+      if (ImGui::BeginCombo("Default Clip", clipPreview.c_str()))
+      {
+        const bool noneSelected = animator.defaultClip.empty();
+        if (ImGui::Selectable("(none)", noneSelected))
+        {
+          animator.defaultClip.clear();
+        }
+        if (noneSelected)
+        {
+          ImGui::SetItemDefaultFocus();
+        }
+
+        for (const auto &clipName : animationCache.listClips())
+        {
+          const bool selected = (animator.defaultClip == clipName);
+          if (ImGui::Selectable(clipName.c_str(), selected))
+          {
+            animator.defaultClip = clipName;
+          }
+          if (selected)
+          {
+            ImGui::SetItemDefaultFocus();
+          }
+        }
+        ImGui::EndCombo();
+      }
+      if (graphDrivesPlayback)
+      {
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        {
+          ImGui::SetTooltip("The animator graph picks the clip to play.\n"
+                            "Clear the graph to drive this entity from a single clip.");
+        }
+      }
+
+      ImGui::Checkbox("Play On Start", &animator.playOnStart);
+      ImGui::SameLine();
+      ImGui::Checkbox("Looping", &animator.looping);
+      ImGui::DragFloat("Speed", &animator.speed, 0.01f, 0.01f, 8.0f);
+      ImGui::DragFloat("Default Blend", &animator.defaultBlendSeconds, 0.01f, 0.0f, 2.0f, "%.2f s");
+
+      // DragFloat only clamps while dragging; ctrl+click typing needs this.
+      animator.speed = std::clamp(animator.speed, 0.01f, 8.0f);
+      animator.defaultBlendSeconds = std::clamp(animator.defaultBlendSeconds, 0.0f, 2.0f);
+
+      ImGui::Separator();
+      ImGui::TextDisabled("Parameter Overrides");
+
+      if (animator.parameters.empty())
+      {
+        ImGui::TextDisabled("None. Overrides are applied to the animator when the entity starts playing.");
+      }
+
+      std::optional<std::size_t> removeParameterIndex;
+      if (!animator.parameters.empty() &&
+          ImGui::BeginTable(
+              "##animator_parameters",
+              4,
+              ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
+      {
+        ImGui::TableSetupColumn("Name");
+        ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 80.0f);
+        ImGui::TableSetupColumn("Value");
+        ImGui::TableSetupColumn("##actions", ImGuiTableColumnFlags_WidthFixed, 28.0f);
+        ImGui::TableHeadersRow();
+
+        for (std::size_t index = 0; index < animator.parameters.size(); ++index)
+        {
+          auto &parameter = animator.parameters[index];
+          ImGui::PushID(static_cast<int>(index));
+          ImGui::TableNextRow();
+
+          ImGui::TableSetColumnIndex(0);
+          ImGui::SetNextItemWidth(-FLT_MIN);
+          if (graph != nullptr)
+          {
+            const std::string namePreview = parameter.name.empty() ? "<Select a parameter>" : parameter.name;
+            if (ImGui::BeginCombo("##name", namePreview.c_str()))
+            {
+              for (const auto &graphParameter : graph->parameters)
+              {
+                const bool selected = (parameter.name == graphParameter.name);
+                // The add-picker below refuses to override the same parameter
+                // twice, so this one has to agree: two rows with one name are
+                // both applied and the later silently wins.
+                if (!selected &&
+                    std::any_of(
+                        animator.parameters.begin(), animator.parameters.end(),
+                        [&graphParameter](const AnimatorParamOverride &other)
+                        { return other.name == graphParameter.name; }))
+                {
+                  continue;
+                }
+
+                if (ImGui::Selectable(graphParameter.name.c_str(), selected))
+                {
+                  parameter.name = graphParameter.name;
+                  parameter.type = animator_override_type_for(graphParameter.type);
+                }
+                if (selected)
+                {
+                  ImGui::SetItemDefaultFocus();
+                }
+              }
+              ImGui::EndCombo();
+            }
+          }
+          else
+          {
+            ImGui::InputText("##name", &parameter.name);
+          }
+
+          ImGui::TableSetColumnIndex(1);
+          ImGui::SetNextItemWidth(-FLT_MIN);
+          int parameterType = animator_param_type_index(parameter.type);
+          if (ImGui::Combo("##type", &parameterType, ANIMATOR_PARAM_TYPE_LABELS, IM_ARRAYSIZE(ANIMATOR_PARAM_TYPE_LABELS)))
+          {
+            parameter.type = ANIMATOR_PARAM_TYPE_LABELS[parameterType];
+          }
+
+          ImGui::TableSetColumnIndex(2);
+          ImGui::SetNextItemWidth(-FLT_MIN);
+          if (parameter.type == "int")
+          {
+            ImGui::DragInt("##value", &parameter.intValue);
+          }
+          else if (parameter.type == "bool")
+          {
+            ImGui::Checkbox("##value", &parameter.boolValue);
+          }
+          else
+          {
+            ImGui::DragFloat("##value", &parameter.floatValue, 0.01f);
+          }
+
+          ImGui::TableSetColumnIndex(3);
+          if (ImGui::SmallButton(ICON_FA_TRASH "##remove_parameter"))
+          {
+            removeParameterIndex = index;
+          }
+
+          ImGui::PopID();
+        }
+
+        ImGui::EndTable();
+      }
+
+      if (removeParameterIndex.has_value())
+      {
+        animator.parameters.erase(animator.parameters.begin() + static_cast<std::ptrdiff_t>(*removeParameterIndex));
+      }
+
+      if (graph != nullptr)
+      {
+        // With a graph bound the names are known, so offer them instead of a
+        // free-text box an override could silently misspell.
+        if (ImGui::BeginCombo("##add_parameter", ICON_FA_PLUS "  Add Override", ImGuiComboFlags_HeightLarge))
+        {
+          std::size_t offered = 0;
+          for (const auto &graphParameter : graph->parameters)
+          {
+            const bool alreadyOverridden =
+                std::any_of(
+                    animator.parameters.begin(), animator.parameters.end(),
+                    [&graphParameter](const AnimatorParamOverride &existing)
+                    { return existing.name == graphParameter.name; });
+            if (alreadyOverridden)
+            {
+              continue;
+            }
+
+            ++offered;
+            if (ImGui::Selectable(graphParameter.name.c_str()))
+            {
+              AnimatorParamOverride added;
+              added.name = graphParameter.name;
+              added.type = animator_override_type_for(graphParameter.type);
+              added.floatValue = graphParameter.floatValue;
+              added.intValue = graphParameter.intValue;
+              added.boolValue = graphParameter.boolValue;
+              animator.parameters.push_back(added);
+            }
+          }
+
+          if (offered == 0)
+          {
+            ImGui::TextDisabled("No parameters left to override.");
+          }
+          ImGui::EndCombo();
+        }
+      }
+      else if (ImGui::Button(ICON_FA_PLUS "  Add Override"))
+      {
+        animator.parameters.push_back(AnimatorParamOverride{});
+      }
+
+      ImGui::Separator();
+
+      if (state.isPlaying)
+      {
+        // Playback state lives in AnimationRuntime, not the component, so this
+        // is read-only status rather than an editable field.
+        const AnimatorInstance *player = AnimationRuntime::instance().find(entity);
+        if (player == nullptr)
+        {
+          ImGui::TextDisabled("No animator instance for this entity yet.");
+        }
+        else
+        {
+          const std::string currentState = player->current_state();
+          const std::string currentClip = player->current_clip();
+          ImGui::TextDisabled(
+              "State: %s   Clip: %s   t: %.2f%s",
+              currentState.empty() ? "-" : currentState.c_str(),
+              currentClip.empty() ? "-" : currentClip.c_str(),
+              player->normalized_time(),
+              player->is_transitioning() ? "   (blending)" : "");
+        }
+      }
+      else
+      {
+        ImGui::TextDisabled("Live animator state appears here in play mode.");
+      }
+
+      if (ImGui::Button(ICON_FA_FILM "  Open in Animation editor"))
+      {
+        show_plugin("animation-editor");
+      }
+      ImGui::SameLine();
+      if (ImGui::Button(ICON_FA_DIAGRAM_PROJECT "  Open Animator graph"))
+      {
+        show_plugin("animator-graph");
+      }
+
+      ImGui::PopID();
     }
 
     if (componentManager.hasComponent<RigidBodyComponent>(entity) && ImGui::CollapsingHeader("Rigid Body"))
@@ -520,6 +1081,10 @@ namespace hades
 
     if (componentManager.hasComponent<AudioSourceComponent>(entity) && ImGui::CollapsingHeader("Audio Source"))
     {
+      // "Pitch" here hashes to the same window-root ID as the Text section's
+      // "Pitch"; an entity carrying both would drive both drags at once.
+      ImGui::PushID("audio_source_component");
+
       auto &source = componentManager.getComponent<AudioSourceComponent>(entity);
       std::array<char, 260> assetPathBuffer{};
       std::snprintf(assetPathBuffer.data(), assetPathBuffer.size(), "%s", source.assetPath.c_str());
@@ -568,6 +1133,8 @@ namespace hades
       }
 
       ImGui::TextDisabled("Audio paths resolve relative to the engine process working directory.");
+
+      ImGui::PopID();
     }
 
     if (componentManager.hasComponent<RenderComponent>(entity) && ImGui::CollapsingHeader("Render"))
@@ -861,6 +1428,276 @@ namespace hades
       }
     }
 
+    if (componentManager.hasComponent<BlueprintComponent>(entity))
+    {
+      auto &blueprintComponent = componentManager.getComponent<BlueprintComponent>(entity);
+      std::optional<std::size_t> removeBlueprintIndex;
+
+      if (blueprintComponent.attachments.empty() && ImGui::CollapsingHeader("Blueprints"))
+      {
+        ImGui::TextDisabled("No Blueprints attached.");
+      }
+
+      for (std::size_t index = 0; index < blueprintComponent.attachments.size(); ++index)
+      {
+        auto &attachment = blueprintComponent.attachments[index];
+        ImGui::PushID(static_cast<int>(index) + 9000);
+
+        const std::string suffix = attachment.assetPath.empty()
+                                       ? std::string("<none>")
+                                       : std::filesystem::path(attachment.assetPath).stem().string();
+        const std::string header = "Blueprint: " + suffix + "##blueprint_component_panel";
+
+        if (ImGui::CollapsingHeader(header.c_str()))
+        {
+          ImGui::Checkbox("Enabled", &attachment.enabled);
+
+          std::vector<std::string> options = workspaceBlueprintFiles_;
+          if (!attachment.assetPath.empty() &&
+              std::find(options.begin(), options.end(), attachment.assetPath) == options.end())
+          {
+            options.push_back(attachment.assetPath);
+            std::sort(options.begin(), options.end());
+          }
+
+          const std::string previousPath = attachment.assetPath;
+          const std::string preview =
+              attachment.assetPath.empty() ? "<Select a Blueprint>" : attachment.assetPath;
+
+          if (ImGui::BeginCombo("Blueprint", preview.c_str()))
+          {
+            if (ImGui::Selectable("<None>", attachment.assetPath.empty()))
+            {
+              attachment.assetPath.clear();
+            }
+            for (const auto &option : options)
+            {
+              const bool selected = attachment.assetPath == option;
+              if (ImGui::Selectable(option.c_str(), selected))
+              {
+                attachment.assetPath = option;
+              }
+              if (selected)
+              {
+                ImGui::SetItemDefaultFocus();
+              }
+            }
+            ImGui::EndCombo();
+          }
+
+          // Overrides are keyed by variable name, so a different asset starts
+          // from a clean slate.
+          if (previousPath != attachment.assetPath)
+          {
+            attachment.variableOverrides.clear();
+          }
+
+          if (options.empty())
+          {
+            ImGui::TextDisabled("No .hbp assets in this workspace yet.");
+          }
+
+          if (!attachment.assetPath.empty())
+          {
+            if (ImGui::Button("Open in Blueprint Editor"))
+            {
+              request_blueprint_editor_open(attachment.assetPath);
+              show_plugin(kBlueprintEditorPluginId);
+            }
+
+            if (const Blueprint *blueprint = inspector_blueprint(attachment.assetPath))
+            {
+              std::vector<const BlueprintVariable *> exposed;
+              for (const auto &variable : blueprint->variables)
+              {
+                if (variable.exposed)
+                {
+                  exposed.push_back(&variable);
+                }
+              }
+
+              // Drop overrides for variables that no longer exist.
+              for (auto it = attachment.variableOverrides.begin(); it != attachment.variableOverrides.end();)
+              {
+                const bool stillExists = std::any_of(
+                    exposed.begin(),
+                    exposed.end(),
+                    [&it](const BlueprintVariable *variable)
+                    { return variable->name == it->first; });
+                it = stillExists ? std::next(it) : attachment.variableOverrides.erase(it);
+              }
+
+              if (exposed.empty())
+              {
+                ImGui::TextDisabled("This Blueprint exposes no variables.");
+              }
+              else
+              {
+                ImGui::Separator();
+                ImGui::TextDisabled("Instance Variables:");
+
+                for (const BlueprintVariable *variable : exposed)
+                {
+                  const auto existing = attachment.variableOverrides.find(variable->name);
+                  const bool overridden = existing != attachment.variableOverrides.end();
+
+                  BlueprintValue value =
+                      overridden
+                          ? BlueprintValue::parse(existing->second, variable->type)
+                          : variable->defaultValue.coerced_to(variable->type);
+
+                  ImGui::PushID(variable->name.c_str());
+                  bool changed = false;
+
+                  switch (variable->type)
+                  {
+                  case ValueType::Bool:
+                  {
+                    bool raw = value.as_bool();
+                    changed = ImGui::Checkbox(variable->name.c_str(), &raw);
+                    if (changed)
+                    {
+                      value = BlueprintValue::from_bool(raw);
+                    }
+                    break;
+                  }
+                  case ValueType::Int:
+                  {
+                    int raw = value.as_int();
+                    changed = ImGui::DragInt(variable->name.c_str(), &raw);
+                    if (changed)
+                    {
+                      value = BlueprintValue::from_int(raw);
+                    }
+                    break;
+                  }
+                  case ValueType::Vector:
+                  {
+                    math::Vec3 raw = value.as_vector();
+                    float components[3] = {raw.x, raw.y, raw.z};
+                    changed = ImGui::DragFloat3(variable->name.c_str(), components, 0.05f);
+                    if (changed)
+                    {
+                      value = BlueprintValue::from_vector(
+                          math::Vec3(components[0], components[1], components[2]));
+                    }
+                    break;
+                  }
+                  case ValueType::String:
+                  {
+                    std::array<char, 256> buffer{};
+                    std::snprintf(buffer.data(), buffer.size(), "%s", value.as_string().c_str());
+                    changed = ImGui::InputText(variable->name.c_str(), buffer.data(), buffer.size());
+                    if (changed)
+                    {
+                      value = BlueprintValue::from_string(buffer.data());
+                    }
+                    break;
+                  }
+                  case ValueType::Entity:
+                  {
+                    // Entity handles are runtime ids; there is nothing stable to
+                    // pin down here, and routing them through the float editor
+                    // below would turn None into entity 0.
+                    ImGui::TextDisabled("%s (entity, set at runtime)", variable->name.c_str());
+                    break;
+                  }
+                  case ValueType::Float:
+                  default:
+                  {
+                    float raw = value.as_float();
+                    changed = ImGui::DragFloat(variable->name.c_str(), &raw, 0.05f);
+                    if (changed)
+                    {
+                      value = BlueprintValue::from_float(raw);
+                    }
+                    break;
+                  }
+                  }
+
+                  if (changed)
+                  {
+                    attachment.variableOverrides[variable->name] = value.to_storage_string();
+                  }
+
+                  if (overridden)
+                  {
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("Reset"))
+                    {
+                      attachment.variableOverrides.erase(variable->name);
+                    }
+                  }
+
+                  ImGui::PopID();
+                }
+              }
+            }
+            else
+            {
+              ImGui::TextColored(
+                  ImVec4(0.88f, 0.42f, 0.42f, 1.0f),
+                  "Could not read %s",
+                  attachment.assetPath.c_str());
+            }
+          }
+
+          if (ImGui::Button("Remove Blueprint"))
+          {
+            removeBlueprintIndex = index;
+          }
+        }
+
+        ImGui::PopID();
+      }
+
+      if (removeBlueprintIndex.has_value())
+      {
+        blueprintComponent.attachments.erase(
+            blueprintComponent.attachments.begin() + static_cast<std::ptrdiff_t>(*removeBlueprintIndex));
+      }
+    }
+
     ImGui::End();
+  }
+
+  const Blueprint *Editor::inspector_blueprint(const std::string &relativePath)
+  {
+    if (relativePath.empty() || activeWorkspacePath_.empty())
+    {
+      return nullptr;
+    }
+
+    const auto resolved = activeWorkspacePath_ / relativePath;
+
+    std::error_code errorCode;
+    const auto modTime = std::filesystem::last_write_time(resolved, errorCode);
+    if (errorCode)
+    {
+      blueprintCache_.erase(relativePath);
+      blueprintModTimes_.erase(relativePath);
+      return nullptr;
+    }
+
+    const auto cachedTime = blueprintModTimes_.find(relativePath);
+    const auto cached = blueprintCache_.find(relativePath);
+    if (cached != blueprintCache_.end() && cachedTime != blueprintModTimes_.end() &&
+        cachedTime->second == modTime)
+    {
+      return &cached->second;
+    }
+
+    Blueprint blueprint;
+    if (!load_blueprint(resolved, blueprint, nullptr))
+    {
+      blueprintCache_.erase(relativePath);
+      blueprintModTimes_.erase(relativePath);
+      return nullptr;
+    }
+
+    blueprintModTimes_[relativePath] = modTime;
+    auto &stored = blueprintCache_[relativePath];
+    stored = std::move(blueprint);
+    return &stored;
   }
 }

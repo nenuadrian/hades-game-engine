@@ -404,7 +404,7 @@ namespace hades
     ImGui::End();
   }
 
-  void Editor::debug(float deltaTime, EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime)
+  void Editor::debug(float deltaTime, EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime, BlueprintRuntime &blueprintRuntime)
   {
     if (!state.showDebugInfo)
     {

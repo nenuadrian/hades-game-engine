@@ -1,5 +1,8 @@
 #include "editor.hpp"
 
+#include "blueprint/blueprint_editor_panel.hpp"
+#include "../engine/blueprint/blueprint_asset.hpp"
+
 #include "workspace_file_operations.hpp"
 
 #include <algorithm>
@@ -12,6 +15,8 @@
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
 #include "../engine/assets/model_asset_cache.hpp"
+#include "../engine/animation/animation_clip_cache.hpp"
+#include "../engine/animation/animation_runtime.hpp"
 #include "../engine/core/ecs/component_manager.hpp"
 #include "../engine/core/ecs/entity_manager.hpp"
 #include "../engine/core/ecs/scene_serializer.hpp"
@@ -147,6 +152,8 @@ namespace hades
 
       if (ext == ".cpp" || ext == ".hpp" || ext == ".h")
         return {ICON_FA_FILE_CODE, IM_COL32(130, 150, 210, 255)};
+      if (ext == kBlueprintFileExtension)
+        return {ICON_FA_DIAGRAM_PROJECT, IM_COL32(150, 200, 140, 255)};
       if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".tga")
         return {ICON_FA_IMAGE, IM_COL32(130, 190, 130, 255)};
       if (ext == ".obj" || ext == ".fbx" || ext == ".gltf" || ext == ".glb")
@@ -263,15 +270,18 @@ namespace hades
       workspaceTreeRoot_.reset();
       workspaceScriptFiles_.clear();
       workspaceModelFiles_.clear();
+      workspaceBlueprintFiles_.clear();
       workspaceScanError_.clear();
       workspaceScriptListDirty_ = false;
       parsedScriptCache_.clear();
       parsedScriptModTimes_.clear();
       cachedDiskWorlds_.clear();
 
-      // Model asset paths resolve relative to the workspace.
+      // Model and animation asset paths resolve relative to the workspace.
       ModelAssetCache::instance().setAssetRoot(activeWorkspacePath_);
       ModelAssetCache::instance().clear();
+      AnimationClipCache::instance().setAssetRoot(activeWorkspacePath_);
+      AnimationRuntime::instance().clear();
     }
 
     if (activeWorkspacePath_.empty() || workspaceTreeRoot_.has_value())
@@ -288,6 +298,7 @@ namespace hades
     std::sort(modelFiles.begin(), modelFiles.end());
     workspaceScriptFiles_ = std::move(scriptFiles);
     workspaceModelFiles_ = std::move(modelFiles);
+    workspaceBlueprintFiles_ = list_blueprint_assets(activeWorkspacePath_);
     workspaceTreeRoot_ = std::move(rootNode);
     workspaceScanError_ = std::move(scanError);
     cachedDiskWorlds_ = list_saved_worlds(activeWorkspacePath_);
@@ -333,6 +344,10 @@ namespace hades
     {
       request_workspace_item_creation(WorkspaceCreateKind::Script, destination);
     }
+    if (ImGui::MenuItem(ICON_FA_DIAGRAM_PROJECT "  New Blueprint"))
+    {
+      request_workspace_item_creation(WorkspaceCreateKind::Blueprint, destination);
+    }
     if (ImGui::MenuItem(ICON_FA_FILE_IMPORT "  Import"))
     {
       request_workspace_item_import(destination);
@@ -370,6 +385,12 @@ namespace hades
         else if (node.path.extension() == ".cpp")
         {
           open_in_external_editor(externalEditor_, activeWorkspacePath_, node.path);
+        }
+        else if (node.path.extension() == kBlueprintFileExtension)
+        {
+          const auto relative = std::filesystem::relative(node.path, activeWorkspacePath_);
+          request_blueprint_editor_open(relative.generic_string());
+          show_plugin(kBlueprintEditorPluginId);
         }
       }
     }

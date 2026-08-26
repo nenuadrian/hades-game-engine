@@ -30,6 +30,7 @@ namespace hades
     float sceneCameraDistance = 1.0f;
     float sceneCameraYawDegrees = 0.0f;
     float sceneCameraPitchDegrees = 0.0f;
+    bool sceneGameView = false;
     std::unordered_map<std::string, bool> pluginVisibility;
     int selectedExportPlatform = 0;
     WorkspaceExportSettings exportMacOS;

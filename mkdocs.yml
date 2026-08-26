@@ -35,7 +35,10 @@ nav:
     - Linux: building/linux.md
     - Windows: building/windows.md
   - Scripting: scripting.md
+  - Blueprints: blueprints.md
+  - Game UI: ui.md
   - Models & Animation: models.md
+  - Animation: animation.md
   - HadesAPI: api.md
   - Architecture:
     - Overview: architecture.md

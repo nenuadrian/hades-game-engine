@@ -130,7 +130,8 @@ namespace hades
       const float aspect = (h > 0) ? (static_cast<float>(w) / static_cast<float>(h)) : 1.0f;
       const RenderCamera camera = sceneRenderer_.buildCamera(*activeCamera, aspect, componentManager);
       const RenderList list = sceneRenderer_.buildRenderList(
-          camera, componentManager, entityManager, world);
+          camera, componentManager, entityManager, world,
+          static_cast<float>(w), static_cast<float>(h));
       renderer_->render_scene_to_main(list);
     }
 

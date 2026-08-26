@@ -37,33 +37,8 @@ namespace
     buffer[copyLength] = '\0';
   }
 
-  bool is_current_platform(hades::Editor::ExportPlatform platform)
-  {
-#ifdef __APPLE__
-    return platform == hades::Editor::ExportPlatform::macOS;
-#elif defined(__linux__)
-    return platform == hades::Editor::ExportPlatform::Linux;
-#elif defined(_WIN32)
-    return platform == hades::Editor::ExportPlatform::Windows;
-#else
-    (void)platform;
-    return false;
-#endif
-  }
-
-  const char *platform_label(hades::Editor::ExportPlatform platform)
-  {
-    switch (platform)
-    {
-    case hades::Editor::ExportPlatform::macOS:
-      return "macOS";
-    case hades::Editor::ExportPlatform::Linux:
-      return "Linux";
-    case hades::Editor::ExportPlatform::Windows:
-      return "Windows";
-    }
-    return "Unknown";
-  }
+  // platform_label / is_current_platform live in export_packaging.hpp
+  // (hades::exporting) and resolve here through the ExportPlatform argument.
 
   // File handle for the on-disk build log. Writes happen under state.mutex so
   // all appenders see a consistent ordering.

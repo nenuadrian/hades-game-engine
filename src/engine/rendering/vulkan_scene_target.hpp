@@ -10,6 +10,7 @@ namespace hades
 {
   struct RenderList;
   class VulkanMeshPipeline;
+  class VulkanUiPipeline;
 
   // Owns offscreen color+depth attachments + framebuffer + render pass +
   // sampler + ImGui-bound descriptor set for a scene texture that the
@@ -45,6 +46,7 @@ namespace hades
     // Records scene render into `cmd` for the target. Transitions layouts
     // so ImGui can sample the color attachment as SHADER_READ_ONLY_OPTIMAL
     // after. Caller must NOT be inside another render pass.
+    // `uiPipeline` may be null, which skips the list's UI geometry.
     // Returns the ImTextureID-compatible descriptor set for ImGui::Image,
     // or nullptr if handle is invalid.
     void *recordRender(
@@ -52,6 +54,7 @@ namespace hades
         uint64_t handle,
         const RenderList &list,
         VulkanMeshPipeline &pipeline,
+        VulkanUiPipeline *uiPipeline,
         uint32_t frameIndex);
 
     VkFormat colorFormat() const { return colorFormat_; }

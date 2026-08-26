@@ -146,6 +146,7 @@ namespace hades
           read_optional_number(sceneCamera, "distance", settings.sceneCameraDistance);
           read_optional_number(sceneCamera, "yawDegrees", settings.sceneCameraYawDegrees);
           read_optional_number(sceneCamera, "pitchDegrees", settings.sceneCameraPitchDegrees);
+          read_optional_bool(sceneCamera, "gameView", settings.sceneGameView);
         }
       }
 
@@ -242,6 +243,7 @@ namespace hades
              {"distance", settings.sceneCameraDistance},
              {"yawDegrees", settings.sceneCameraYawDegrees},
              {"pitchDegrees", settings.sceneCameraPitchDegrees},
+             {"gameView", settings.sceneGameView},
          }}};
     document["plugins"] = json::object();
     for (const auto &[pluginId, visible] : settings.pluginVisibility)

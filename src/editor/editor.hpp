@@ -19,9 +19,11 @@
 #include "types.h"
 #include "debug_console_panel.hpp"
 #include "editor_settings.hpp"
+#include "export_packaging.hpp"
 #include "external_editor.hpp"
 #include "script_analysis.hpp"
 #include "plugins/editor_plugin.hpp"
+#include "../engine/blueprint/blueprint_graph.hpp"
 #include "../engine/core/ecs/entity.hpp"
 #include "../engine/rendering/render_types.hpp"
 #include "../engine/rendering/renderer.hpp"
@@ -29,6 +31,7 @@
 
 namespace hades
 {
+  class BlueprintRuntime;
   class ComponentManager;
   class EntityManager;
   class GUI;
@@ -43,6 +46,7 @@ namespace hades
       None,
       Folder,
       Script,
+      Blueprint,
     };
 
     enum class SettingsCategory
@@ -59,12 +63,10 @@ namespace hades
       std::vector<WorkspaceTreeNode> children;
     };
 
-    enum class ExportPlatform
-    {
-      macOS,
-      Linux,
-      Windows,
-    };
+    // Defined in export_packaging.hpp alongside the packaging helpers that
+    // take it; aliased here so existing Editor::ExportPlatform uses still read
+    // the same.
+    using ExportPlatform = exporting::ExportPlatform;
 
     struct ExportPlatformSettings
     {
@@ -95,6 +97,9 @@ namespace hades
       std::filesystem::path buildLogPath;
       bool succeeded = false;
       bool finished = false;
+      // Scroll extent of the log view as of the previous frame, used to tell
+      // whether the user is still parked at the bottom before new output grows it.
+      float lastLogScrollMax = 0.0f;
     };
 
     EditorState state;
@@ -117,7 +122,8 @@ namespace hades
         const std::filesystem::path &workspacePath,
         EntityManager &entityManager,
         ComponentManager &componentManager,
-        ScriptRuntime &scriptRuntime);
+        ScriptRuntime &scriptRuntime,
+        BlueprintRuntime &blueprintRuntime);
 
     void show_plugin(std::string_view pluginId);
     bool is_plugin_visible(std::string_view pluginId) const;
@@ -128,7 +134,7 @@ namespace hades
     bool game_preview_hades_api_enabled() const;
     bool load_workspace_settings(const std::filesystem::path &workspacePath, std::string *errorMessage = nullptr);
     bool save_workspace_settings(const std::filesystem::path &workspacePath, std::string *errorMessage = nullptr) const;
-    void stop_play_mode(EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime);
+    void stop_play_mode(EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime, BlueprintRuntime &blueprintRuntime);
 
     /// Drop the cached workspace file tree so the next frame rescans it.
     /// Called after in-editor file operations and when the editor window
@@ -141,6 +147,7 @@ namespace hades
     std::optional<WorkspaceTreeNode> workspaceTreeRoot_;
     std::vector<std::string> workspaceScriptFiles_;
     std::vector<std::string> workspaceModelFiles_;
+    std::vector<std::string> workspaceBlueprintFiles_;
     std::string workspaceScanError_;
     std::vector<std::string> cachedDiskWorlds_;
     bool workspaceScriptListDirty_ = false;
@@ -211,6 +218,9 @@ namespace hades
 
     std::optional<Entity::EntityId> pendingEntityDeletion_;
     std::optional<PendingEntityReparent> pendingEntityReparent_;
+    // Set when a selection wants the inspector raised. Applied once the mouse
+    // button is up, so focusing never cancels an in-progress drag.
+    bool pendingPropertiesReveal_ = false;
     bool openAddEntityDialog_ = false;
     bool focusAddEntitySearch_ = false;
     std::optional<Entity::EntityId> pendingAddEntityParent_;
@@ -222,6 +232,9 @@ namespace hades
     float sceneCameraYawDegrees_ = 0.0f;
     float sceneCameraPitchDegrees_ = 0.0f;
     SceneGizmoMode sceneGizmoMode_ = SceneGizmoMode::Translate;
+    // Game View: draw the viewport the way play mode will -- through the
+    // world's main camera, GPU-shaded, with no editor overlays on top.
+    bool sceneGameView_ = false;
     SceneGizmoAxis activeSceneGizmoAxis_ = SceneGizmoAxis::None;
     Entity::EntityId activeSceneGizmoEntity_ = Entity::INVALID;
     float sceneGizmoDragStartMouseX_ = 0.0f;
@@ -239,6 +252,11 @@ namespace hades
     float sceneGizmoDragStartScaleX_ = 1.0f;
     float sceneGizmoDragStartScaleY_ = 1.0f;
     float sceneGizmoDragStartScaleZ_ = 1.0f;
+    // Set while the scene gizmo drives an animation joint instead of the
+    // selected entity's transform, so the entity path stands down for the
+    // whole drag rather than fighting it for the mouse.
+    bool sceneGizmoDrivesJoint_ = false;
+    int sceneGizmoJointIndex_ = -1;
     bool sceneCanvasKeyboardCapture_ = false;
     bool pendingSavedWorldRestore_ = false;
 
@@ -256,6 +274,15 @@ namespace hades
     // Parsed script class cache (keyed by resolved script path).
     std::unordered_map<std::string, std::vector<ParsedScriptClass>> parsedScriptCache_;
     std::unordered_map<std::string, std::filesystem::file_time_type> parsedScriptModTimes_;
+
+    // Blueprint assets parsed for the inspector, so the exposed-variable list
+    // on a BlueprintComponent does not re-read the file every frame.
+    std::unordered_map<std::string, Blueprint> blueprintCache_;
+    std::unordered_map<std::string, std::filesystem::file_time_type> blueprintModTimes_;
+
+    /// Load (and cache) a Blueprint asset for inspector display. Returns
+    /// nullptr when the path is empty or the file cannot be read.
+    const Blueprint *inspector_blueprint(const std::string &relativePath);
     std::vector<std::unique_ptr<EditorPlugin>> plugins_;
     std::deque<float> debugFrameTimeHistory_;
     double debugFrameTimeHistoryTotal_ = 0.0;
@@ -297,11 +324,12 @@ namespace hades
     void select_entity(Entity::EntityId entity);
     void workspace(EntityManager &entityManager, ComponentManager &componentManager);
     void handle_entity_creation_requests(EntityManager &entityManager, ComponentManager &componentManager);
-    void handle_entity_deletion_requests(EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime);
+    void handle_entity_deletion_requests(EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime, BlueprintRuntime &blueprintRuntime);
     void handle_entity_reparent_requests(EntityManager &entityManager, ComponentManager &componentManager);
+    void handle_pending_properties_reveal();
     void render_add_entity_dialog(EntityManager &entityManager, ComponentManager &componentManager);
-    void handle_play_mode_requests(EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime);
-    void start_play_mode(EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime);
+    void handle_play_mode_requests(EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime, BlueprintRuntime &blueprintRuntime);
+    void start_play_mode(EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime, BlueprintRuntime &blueprintRuntime);
     void set_main_camera(Entity::EntityId entity, EntityManager &entityManager, ComponentManager &componentManager);
     std::optional<Entity::EntityId> get_selected_parent(EntityManager &entityManager, ComponentManager &componentManager) const;
     std::string entity_label(Entity::EntityId entity, ComponentManager &componentManager) const;
@@ -313,7 +341,7 @@ namespace hades
     void render_hierarchy_drag_source(Entity::EntityId entity, ComponentManager &componentManager);
     void render_hierarchy_drop_target(Entity::EntityId entity, ComponentManager &componentManager);
     void render_hierarchy_root_drop_zone(ComponentManager &componentManager);
-    void debug(float deltaTime, EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime);
+    void debug(float deltaTime, EntityManager &entityManager, ComponentManager &componentManager, ScriptRuntime &scriptRuntime, BlueprintRuntime &blueprintRuntime);
     void save_worlds(EntityManager &entityManager, ComponentManager &componentManager);
     void open_world_from_disk(const std::string &worldName, EntityManager &entityManager, ComponentManager &componentManager);
   };

@@ -1,5 +1,7 @@
 #include "editor.hpp"
 
+#include "blueprint/blueprint_editor_panel.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <memory>
@@ -105,6 +107,7 @@ namespace hades
     pendingAddEntityParent_.reset();
     addEntitySearchBuffer_[0] = '\0';
     reset_scene_camera();
+    sceneGameView_ = false;
     activeSceneGizmoAxis_ = SceneGizmoAxis::None;
     activeSceneGizmoEntity_ = Entity::INVALID;
     sceneGizmoDragStartMouseX_ = 0.0f;
@@ -219,7 +222,8 @@ namespace hades
       const std::filesystem::path &workspacePath,
       EntityManager &entityManager,
       ComponentManager &componentManager,
-      ScriptRuntime &scriptRuntime)
+      ScriptRuntime &scriptRuntime,
+      BlueprintRuntime &blueprintRuntime)
   {
     {
       HADES_FRAME_METRIC_SCOPE("workspace_cache");
@@ -236,7 +240,7 @@ namespace hades
 
     render_add_entity_dialog(entityManager, componentManager);
     handle_entity_creation_requests(entityManager, componentManager);
-    handle_play_mode_requests(entityManager, componentManager, scriptRuntime);
+    handle_play_mode_requests(entityManager, componentManager, scriptRuntime, blueprintRuntime);
 
     EditorPluginContext pluginContext{
         *this,
@@ -245,13 +249,15 @@ namespace hades
         entityManager,
         componentManager,
         scriptRuntime,
+        blueprintRuntime,
     };
     {
       HADES_FRAME_METRIC_SCOPE("plugins_pre");
       render_plugins(EditorPluginPhase::PreEntityDeletion, pluginContext);
     }
+    handle_pending_properties_reveal();
     handle_entity_reparent_requests(entityManager, componentManager);
-    handle_entity_deletion_requests(entityManager, componentManager, scriptRuntime);
+    handle_entity_deletion_requests(entityManager, componentManager, scriptRuntime, blueprintRuntime);
     {
       HADES_FRAME_METRIC_SCOPE("plugins_post");
       render_plugins(EditorPluginPhase::PostEntityDeletion, pluginContext);
@@ -478,6 +484,9 @@ namespace hades
     add_plugin_toggle_item(windows, ICON_FA_LAYER_GROUP "  Entities", "entities");
     add_plugin_toggle_item(windows, ICON_FA_GEAR "  Properties", "properties");
     add_plugin_toggle_item(windows, ICON_FA_FILE "  World", "world");
+    add_plugin_toggle_item(windows, ICON_FA_DIAGRAM_PROJECT "  Blueprint Editor", kBlueprintEditorPluginId);
+    add_plugin_toggle_item(windows, ICON_FA_FILM "  Animation", "animation-editor");
+    add_plugin_toggle_item(windows, ICON_FA_PERSON_RUNNING "  Animator", "animator-graph");
     add_plugin_toggle_item(windows, ICON_FA_CHART_LINE "  Debug Console", "debug-console");
 #ifdef HADES_HAS_HNE_TRAINING
     add_plugin_toggle_item(windows, ICON_FA_BRAIN "  Neural Training", "neural-training");
@@ -511,6 +520,27 @@ namespace hades
   void Editor::select_entity(Entity::EntityId entity)
   {
     state.selectedEntity = entity;
+
+    // Raising the inspector focuses it, and ImGui's FocusWindow() clears
+    // ActiveId whenever the newly focused window differs from the one holding
+    // it -- which cancels the press this selection came from. Selection happens
+    // on mouse-down, so focusing here killed scene-tree drags before they could
+    // start. Skip it when the panel is already on screen, and defer the rest
+    // until the button is released.
+    if (!is_plugin_visible("properties"))
+    {
+      pendingPropertiesReveal_ = true;
+    }
+  }
+
+  void Editor::handle_pending_properties_reveal()
+  {
+    if (!pendingPropertiesReveal_ || ImGui::IsMouseDown(ImGuiMouseButton_Left))
+    {
+      return;
+    }
+
+    pendingPropertiesReveal_ = false;
     show_plugin("properties");
   }
 
@@ -537,6 +567,8 @@ namespace hades
     ImGui::DockBuilderDockWindow(PROPERTIES_WINDOW_TITLE, inspectorDockId);
     ImGui::DockBuilderDockWindow(SCENE_WINDOW_TITLE, mainDockId);
     ImGui::DockBuilderDockWindow("Debug Console", consoleDockId);
+    ImGui::DockBuilderDockWindow(ICON_FA_FILM "  Animation", consoleDockId);
+    ImGui::DockBuilderDockWindow(ICON_FA_PERSON_RUNNING "  Animator", mainDockId);
     ImGui::DockBuilderFinish(dockspaceId);
   }
 
@@ -687,6 +719,7 @@ namespace hades
     settings.sceneCameraDistance = sceneCameraDistance_;
     settings.sceneCameraYawDegrees = sceneCameraYawDegrees_;
     settings.sceneCameraPitchDegrees = sceneCameraPitchDegrees_;
+    settings.sceneGameView = sceneGameView_;
     settings.selectedExportPlatform = export_platform_index(selectedExportPlatform_);
     settings.exportMacOS = to_workspace_export(exportPlatformSettings_[export_platform_index(ExportPlatform::macOS)]);
     settings.exportLinux = to_workspace_export(exportPlatformSettings_[export_platform_index(ExportPlatform::Linux)]);
@@ -733,6 +766,7 @@ namespace hades
     sceneCameraDistance_ = settings.sceneCameraDistance;
     sceneCameraYawDegrees_ = settings.sceneCameraYawDegrees;
     sceneCameraPitchDegrees_ = settings.sceneCameraPitchDegrees;
+    sceneGameView_ = settings.sceneGameView;
     selectedExportPlatform_ = export_platform_from_index(settings.selectedExportPlatform);
     from_workspace_export(settings.exportMacOS, exportPlatformSettings_[export_platform_index(ExportPlatform::macOS)]);
     from_workspace_export(settings.exportLinux, exportPlatformSettings_[export_platform_index(ExportPlatform::Linux)]);

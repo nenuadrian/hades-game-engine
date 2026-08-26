@@ -31,6 +31,9 @@ Scripts must derive from `hades::HadesScript` and register themselves with the
 - `onMouseDown(ScriptContext& ctx, int button, float screenX, float screenY)` -- called on mouse button press
 - `onMouseUp(ScriptContext& ctx, int button, float screenX, float screenY)` -- called on mouse button release
 - `onMouseMove(ScriptContext& ctx, float screenX, float screenY)` -- called on mouse movement
+- `onMessage(ScriptContext& ctx, const std::string& name, const ScriptValue& value)` -- called
+  by the Blueprint nodes `Send Script Message` and `Call Script Function`; the returned
+  `ScriptValue` is what the Blueprint reads back
 
 `ScriptContext` provides direct access to the engine's ECS:
 
@@ -43,6 +46,15 @@ Scripts must derive from `hades::HadesScript` and register themselves with the
 | `viewportHeight`    | `float`             | Current viewport height in pixels  |
 
 Scripts can read and write any component through `ctx.componentManager`.
+
+Skeletal animation has its own facade, `hades::Animation`, rather than being driven through
+components -- see [Animation](animation.md) for the clip, parameter and event API.
+
+Blueprints have one too, `hades::Blueprints` -- see [Blueprints](#blueprints) below.
+
+Game UI (HUDs, menus, world-space health bars) is driven through `hades::UI` --
+see [Game UI](ui.md). Clicks on screen-space widgets arrive as
+`onMessage("ui.clicked", widgetId)`.
 
 ### Convenience Header
 
@@ -86,6 +98,122 @@ public:
 
 HADES_REGISTER_SCRIPT(MoveAlongX)
 ```
+
+## Blueprints
+
+Scripts and [Blueprints](blueprints.md) run side by side on the same entities, and reach each
+other in both directions.
+
+### Calling a Blueprint from a script
+
+`hades::Blueprints` (`src/engine/blueprint/script_blueprint.hpp`, already included by
+`engine/hades.hpp`) is the whole surface. Every call is a no-op, or returns a default, when no
+Blueprint runtime is playing or the entity has no Blueprint, so scripts do not have to guard.
+
+```cpp
+#include "engine/hades.hpp"
+
+class Player : public hades::HadesScript
+{
+public:
+  void onStart(hades::ScriptContext& ctx) override
+  {
+    // Raise a Custom Event named "Spawned" on this entity's graphs.
+    hades::Blueprints::sendEvent(ctx.entityId, "Spawned");
+  }
+
+  void onUpdate(hades::ScriptContext& ctx, float deltaTime) override
+  {
+    // Push state the graph can branch on.
+    hades::Blueprints::setFloat(ctx.entityId, "Health", health_);
+
+    // ...and read back whatever the graph decided.
+    if (hades::Blueprints::getBool(ctx.entityId, "Stunned"))
+    {
+      return;
+    }
+  }
+
+  void takeDamage(hades::ScriptContext& ctx, float amount, hades::Entity::EntityId source)
+  {
+    health_ -= amount;
+    // Payload values fill the Custom Event's parameter pins, positionally.
+    hades::Blueprints::sendEvent(
+        ctx.entityId, "Damaged", {amount, hades::ScriptValue::fromEntity(source)});
+  }
+
+private:
+  float health_ = 100.0f;
+};
+
+HADES_REGISTER_SCRIPT(Player)
+```
+
+| Call | What it does |
+|------|--------------|
+| `sendEvent(entity, name, payload)` | Raises the Custom Event `name` on every Blueprint attached to `entity` |
+| `broadcastEvent(name, payload)` | Same, for every Blueprint instance in the world |
+| `getFloat` / `getInt` / `getBool` / `getString` / `getVector` | Reads a graph variable |
+| `setFloat` / `setInt` / `setBool` / `setString` / `setVector` | Writes one, coerced to its declared type; false when no graph declares it |
+| `getVariable` / `setVariable` | The same, untyped, through `ScriptValue` |
+| `hasVariable(entity, name)` | Whether any Blueprint on the entity declares it |
+| `isRunning()` / `has(entity)` / `count(entity)` | Whether there is anything to talk to |
+
+Give a Custom Event parameters in the Blueprint editor's details panel and they arrive as the
+event's data output pins; extra payload values are dropped, missing ones keep their previous
+value. The event name is the one typed on the node, without the `custom:` prefix the runtime
+uses internally.
+
+### Calling a script from a Blueprint
+
+The Blueprint palette's **Scripts** category holds three nodes -- `Send Script Message`,
+`Call Script Function` and `Broadcast Script Message` -- and all three land on `onMessage`:
+
+```cpp
+hades::ScriptValue onMessage(
+    hades::ScriptContext& ctx, const std::string& name, const hades::ScriptValue& value) override
+{
+  if (name == "GetHealth")
+  {
+    return hades::ScriptValue(health_);  // Call Script Function reads this back
+  }
+  if (name == "Heal")
+  {
+    health_ = std::min(100.0f, health_ + value.asFloat());
+    return hades::ScriptValue(true);     // any non-empty value means "handled"
+  }
+  return hades::ScriptValue();           // not handled
+}
+```
+
+Returning the default `ScriptValue()` means the script did not handle the message: the node's
+`Handled` pin goes false, and when an entity carries several scripts the first non-empty answer
+wins.
+
+### ScriptValue
+
+Payloads and replies cross as `hades::ScriptValue`, a small tagged value carrying a bool, int,
+float, string, `math::Vec3` or entity id. It converts implicitly from the plain C++ types, which
+is what lets a payload be written as a braced list, and reads back leniently through `asFloat()`,
+`asInt()`, `asString()` and friends -- the same coercion rules Blueprint pins use. Entity ids need
+the named factory, `ScriptValue::fromEntity(id)`, so unsigned integers do not silently become
+entities.
+
+### Ordering
+
+Scripts update before Blueprints in both the editor and the standalone runtime, which sets the
+timing in each direction:
+
+- **Blueprint to script** is synchronous. A `Send Script Message` executed during a graph's Tick
+  calls `onMessage` before the node's `then` pin fires.
+- **Script to Blueprint** is queued, and drained at the top of the Blueprint runtime's update. A
+  `sendEvent` from `onUpdate` is therefore handled later in the same frame, ahead of `Event Tick`.
+  A `sendEvent` from `onStart` is handled on the first frame, after `Event BeginPlay`.
+
+Queueing is what makes the round trip safe: a graph that calls a script that sends an event back
+never re-enters the VM mid-execution. Events queued from inside `onMessage` are picked up by the
+same drain, up to eight rounds per frame, after which the remainder waits for the next frame.
+Anything still queued when play stops is discarded.
 
 ## Observations API
 
@@ -193,6 +321,9 @@ All script-related errors are routed to the **Debug Console** panel
 |------|---------|
 | `src/engine/hades.hpp` | Convenience header including all script-facing types |
 | `src/engine/runtime/hades_script.hpp` | `HadesScript` base class, `ScriptContext`, `HadesAPI` |
+| `src/engine/runtime/hades_value.hpp` | `ScriptValue`, the script/Blueprint boundary type |
+| `src/engine/blueprint/script_blueprint.hpp` | The `hades::Blueprints` facade |
+| `src/engine/runtime/script_blueprint_nodes.cpp` | The `script.*` Blueprint node category |
 | `src/engine/runtime/hades_script_registration.hpp` | `HADES_REGISTER_SCRIPT` macro and factory types |
 | `src/engine/runtime/hades_keycodes.hpp` | Key and mouse button constants |
 | `src/engine/runtime/script_runtime.cpp` | Script compilation, loading, and lifecycle |

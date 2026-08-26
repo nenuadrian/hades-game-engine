@@ -1,0 +1,468 @@
+{
+  "version": 1,
+  "name": "PlayerController",
+  "description": "Demo graph: tick-driven movement, a jump with a latent landing, and a user function.",
+  "nextNodeId": 21,
+  "variables": [
+    {
+      "name": "Speed",
+      "type": "float",
+      "default": 6.0,
+      "exposed": true,
+      "tooltip": "Units travelled per second."
+    },
+    {
+      "name": "Jumping",
+      "type": "bool",
+      "default": false,
+      "exposed": false
+    }
+  ],
+  "functions": [
+    {
+      "name": "SpeedThisFrame",
+      "allowRecursion": false,
+      "inputs": [
+        {
+          "name": "Speed",
+          "type": "float",
+          "default": 0.0,
+          "exposed": true
+        },
+        {
+          "name": "DeltaSeconds",
+          "type": "float",
+          "default": 0.0,
+          "exposed": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "Distance",
+          "type": "float",
+          "default": 0.0,
+          "exposed": true
+        }
+      ],
+      "graph": {
+        "nodes": [
+          {
+            "id": 18,
+            "type": "function.entry",
+            "x": -300.0,
+            "y": 0.0
+          },
+          {
+            "id": 19,
+            "type": "math.multiply",
+            "x": -40.0,
+            "y": 60.0
+          },
+          {
+            "id": 20,
+            "type": "function.result",
+            "x": 200.0,
+            "y": 0.0
+          }
+        ],
+        "links": [
+          {
+            "kind": "exec",
+            "from": {
+              "node": 18,
+              "pin": "exec"
+            },
+            "to": {
+              "node": 20,
+              "pin": "exec"
+            }
+          },
+          {
+            "kind": "data",
+            "from": {
+              "node": 18,
+              "pin": "Speed"
+            },
+            "to": {
+              "node": 19,
+              "pin": "a"
+            }
+          },
+          {
+            "kind": "data",
+            "from": {
+              "node": 18,
+              "pin": "DeltaSeconds"
+            },
+            "to": {
+              "node": 19,
+              "pin": "b"
+            }
+          },
+          {
+            "kind": "data",
+            "from": {
+              "node": 19,
+              "pin": "result"
+            },
+            "to": {
+              "node": 20,
+              "pin": "Distance"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "graph": {
+    "nodes": [
+      {
+        "id": 1,
+        "type": "event.tick",
+        "x": -520.0,
+        "y": -120.0,
+        "comment": "Drive the entity sideways"
+      },
+      {
+        "id": 2,
+        "type": "variable.get",
+        "x": -520.0,
+        "y": 40.0,
+        "config": {
+          "variable": "Speed"
+        }
+      },
+      {
+        "id": 3,
+        "type": "function.call",
+        "x": -300.0,
+        "y": 20.0,
+        "config": {
+          "function": "SpeedThisFrame"
+        }
+      },
+      {
+        "id": 4,
+        "type": "vector.make",
+        "x": -60.0,
+        "y": 20.0
+      },
+      {
+        "id": 5,
+        "type": "transform.add_offset",
+        "x": 190.0,
+        "y": -120.0
+      },
+      {
+        "id": 6,
+        "type": "event.key_down",
+        "x": -520.0,
+        "y": 260.0,
+        "comment": "Space = jump"
+      },
+      {
+        "id": 7,
+        "type": "logic.equal_int",
+        "x": -520.0,
+        "y": 400.0,
+        "defaults": {
+          "b": {
+            "type": "int",
+            "value": 32
+          }
+        }
+      },
+      {
+        "id": 8,
+        "type": "flow.branch",
+        "x": -260.0,
+        "y": 260.0
+      },
+      {
+        "id": 9,
+        "type": "variable.set",
+        "x": -60.0,
+        "y": 260.0,
+        "config": {
+          "variable": "Jumping"
+        },
+        "defaults": {
+          "value": {
+            "type": "bool",
+            "value": true
+          }
+        }
+      },
+      {
+        "id": 10,
+        "type": "debug.print",
+        "x": 170.0,
+        "y": 260.0,
+        "defaults": {
+          "text": {
+            "type": "string",
+            "value": "Jump!"
+          }
+        }
+      },
+      {
+        "id": 11,
+        "type": "flow.delay",
+        "x": 400.0,
+        "y": 260.0,
+        "defaults": {
+          "duration": {
+            "type": "float",
+            "value": 0.5
+          }
+        }
+      },
+      {
+        "id": 12,
+        "type": "variable.set",
+        "x": 600.0,
+        "y": 260.0,
+        "config": {
+          "variable": "Jumping"
+        },
+        "defaults": {
+          "value": {
+            "type": "bool",
+            "value": false
+          }
+        }
+      },
+      {
+        "id": 13,
+        "type": "debug.print",
+        "x": 820.0,
+        "y": 260.0,
+        "defaults": {
+          "text": {
+            "type": "string",
+            "value": "Landed."
+          }
+        }
+      },
+      {
+        "id": 14,
+        "type": "event.begin_play",
+        "x": -520.0,
+        "y": -300.0
+      },
+      {
+        "id": 15,
+        "type": "entity.get_name",
+        "x": -520.0,
+        "y": -210.0
+      },
+      {
+        "id": 16,
+        "type": "string.concat",
+        "x": -260.0,
+        "y": -230.0,
+        "defaults": {
+          "a": {
+            "type": "string",
+            "value": "Blueprint ready on "
+          }
+        }
+      },
+      {
+        "id": 17,
+        "type": "debug.print",
+        "x": 0.0,
+        "y": -300.0
+      }
+    ],
+    "links": [
+      {
+        "kind": "data",
+        "from": {
+          "node": 2,
+          "pin": "value"
+        },
+        "to": {
+          "node": 3,
+          "pin": "Speed"
+        }
+      },
+      {
+        "kind": "data",
+        "from": {
+          "node": 1,
+          "pin": "deltaSeconds"
+        },
+        "to": {
+          "node": 3,
+          "pin": "DeltaSeconds"
+        }
+      },
+      {
+        "kind": "data",
+        "from": {
+          "node": 3,
+          "pin": "Distance"
+        },
+        "to": {
+          "node": 4,
+          "pin": "x"
+        }
+      },
+      {
+        "kind": "data",
+        "from": {
+          "node": 4,
+          "pin": "vector"
+        },
+        "to": {
+          "node": 5,
+          "pin": "delta"
+        }
+      },
+      {
+        "kind": "exec",
+        "from": {
+          "node": 3,
+          "pin": "then"
+        },
+        "to": {
+          "node": 5,
+          "pin": "exec"
+        }
+      },
+      {
+        "kind": "exec",
+        "from": {
+          "node": 1,
+          "pin": "exec"
+        },
+        "to": {
+          "node": 3,
+          "pin": "exec"
+        }
+      },
+      {
+        "kind": "data",
+        "from": {
+          "node": 6,
+          "pin": "keyCode"
+        },
+        "to": {
+          "node": 7,
+          "pin": "a"
+        }
+      },
+      {
+        "kind": "data",
+        "from": {
+          "node": 7,
+          "pin": "result"
+        },
+        "to": {
+          "node": 8,
+          "pin": "condition"
+        }
+      },
+      {
+        "kind": "exec",
+        "from": {
+          "node": 6,
+          "pin": "exec"
+        },
+        "to": {
+          "node": 8,
+          "pin": "exec"
+        }
+      },
+      {
+        "kind": "exec",
+        "from": {
+          "node": 8,
+          "pin": "true"
+        },
+        "to": {
+          "node": 9,
+          "pin": "exec"
+        }
+      },
+      {
+        "kind": "exec",
+        "from": {
+          "node": 9,
+          "pin": "then"
+        },
+        "to": {
+          "node": 10,
+          "pin": "exec"
+        }
+      },
+      {
+        "kind": "exec",
+        "from": {
+          "node": 10,
+          "pin": "then"
+        },
+        "to": {
+          "node": 11,
+          "pin": "exec"
+        }
+      },
+      {
+        "kind": "exec",
+        "from": {
+          "node": 11,
+          "pin": "completed"
+        },
+        "to": {
+          "node": 12,
+          "pin": "exec"
+        }
+      },
+      {
+        "kind": "exec",
+        "from": {
+          "node": 12,
+          "pin": "then"
+        },
+        "to": {
+          "node": 13,
+          "pin": "exec"
+        }
+      },
+      {
+        "kind": "exec",
+        "from": {
+          "node": 14,
+          "pin": "exec"
+        },
+        "to": {
+          "node": 17,
+          "pin": "exec"
+        }
+      },
+      {
+        "kind": "data",
+        "from": {
+          "node": 15,
+          "pin": "name"
+        },
+        "to": {
+          "node": 16,
+          "pin": "b"
+        }
+      },
+      {
+        "kind": "data",
+        "from": {
+          "node": 16,
+          "pin": "result"
+        },
+        "to": {
+          "node": 17,
+          "pin": "text"
+        }
+      }
+    ]
+  }
+}

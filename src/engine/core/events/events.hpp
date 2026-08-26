@@ -2,6 +2,7 @@
 #define HADES_ENGINE_CORE_EVENTS_EVENTS_HPP
 
 #include <cstdint>
+#include <string>
 
 #include "../ecs/entity.hpp"
 
@@ -29,6 +30,19 @@ namespace hades
   {
     Entity::EntityId entityA;
     Entity::EntityId entityB;
+  };
+
+  /// An animation event marker crossed by the play head this frame, raised by
+  /// AnimatorSystem. Gameplay code can either subscribe to these or poll
+  /// hades::Animation::eventFired().
+  struct AnimationEvent
+  {
+    Entity::EntityId entity;
+    std::string name;
+    std::string stringValue;
+    float floatValue;
+    std::string clip;
+    float time;
   };
 }
 

@@ -9,6 +9,7 @@
 
 namespace hades
 {
+  class BlueprintRuntime;
   class ComponentManager;
   class Editor;
   class EntityManager;
@@ -28,6 +29,7 @@ namespace hades
     EntityManager &entityManager;
     ComponentManager &componentManager;
     ScriptRuntime &scriptRuntime;
+    BlueprintRuntime &blueprintRuntime;
   };
 
   class EditorPlugin

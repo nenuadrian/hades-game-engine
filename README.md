@@ -31,7 +31,11 @@ Educational and experimental. Also designed for ML/RL training through a headles
 
 **Scripting** — In-process C++ scripts compiled to shared libraries at play start, direct ECS access, input callbacks, screen-to-world raycasts. See [scripting](docs/scripting.md).
 
+**Blueprints** — Unreal-style visual scripting: a node graph editor with execution and data wires, typed variables, user functions, latent `Delay` nodes, a validating compiler and a VM that runs graphs beside the C++ scripts. See [blueprints](docs/blueprints.md).
+
 **Models & Animation** — assimp-powered model import (FBX / OBJ / glTF / COLLADA) with per-mesh materials, GPU skinning, and an animation clip player. See [models](docs/models.md).
+
+**Rigging & Animation authoring** — Animation panel with a skeleton tree, keyframe dope sheet, curve editor with step/linear/eased/bezier interpolation, animation events, and live viewport preview with a bone gizmo; rigging tools to build a skeleton for an unrigged mesh and bind it with automatic skin weights; an Animator panel for state machines with parameters, conditional transitions, crossfades, blend trees, layers and bone masks. Drivable from C++ scripts (`hades::Animation`) and from Blueprints. See [animation](docs/animation.md).
 
 **Audio** — SoLoud engine with 3D spatial audio and 4 buses (Master / Music / Sfx / Voice).
 

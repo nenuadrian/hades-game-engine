@@ -23,7 +23,9 @@ Educational and experimental. Also designed for ML/RL training through a headles
 
 **Audio** — SoLoud engine with 3D spatial audio and 4 buses (Master / Music / Sfx / Voice).
 
-**Editor** — Workspace file tree, entity hierarchy with drag-reparenting, 3D viewport with orbit camera and transform gizmos, inspector, integrated script editor, debug console, play mode, plugin system.
+**Game UI** — canvas + widget system for HUDs, menus, and world-space widgets (billboarded health bars with distance fade), driven from C++ scripts (`hades::UI`) and Blueprint `UI` nodes, with variable binding and click events. See [Game UI](ui.md).
+
+**Editor** — Workspace file tree, entity hierarchy with drag-reparenting, 3D viewport with orbit camera and transform gizmos, Game View (renders the world through its main camera exactly as play mode does, with the editor overlays off), inspector, integrated script editor, debug console, play mode, plugin system.
 
 **Neural / RL** — `hades-neural-engine` integration: PPO training panel, TorchScript policy export, in-engine inference.
 

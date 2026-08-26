@@ -6,7 +6,9 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <vector>
 
+#include "animation_edit_state.hpp"
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -35,6 +37,7 @@
 #include "../engine/rendering/renderer.hpp"
 #include "../engine/rendering/scene_renderer.hpp"
 #include "../engine/rendering/vector_text.hpp"
+#include "../engine/runtime/main_camera_selection.hpp"
 #include "../engine/runtime/script_runtime.hpp"
 
 namespace hades
@@ -1430,6 +1433,286 @@ namespace hades
       return bestAxis;
     }
 
+    constexpr float SKELETON_JOINT_PICK_THRESHOLD_PIXELS = 10.0f;
+    constexpr float SKELETON_JOINT_RADIUS = 3.5f;
+    constexpr float SKELETON_UNSKINNED_JOINT_RADIUS = 5.0f;
+    constexpr float SKELETON_BONE_THICKNESS = 2.0f;
+    constexpr ImU32 SKELETON_BONE_COLOR = IM_COL32(255, 190, 60, 200);
+    constexpr ImU32 SKELETON_JOINT_COLOR = IM_COL32(255, 213, 128, 235);
+    constexpr ImU32 SKELETON_HOVERED_JOINT_COLOR = IM_COL32(255, 247, 214, 255);
+    constexpr ImU32 SKELETON_SELECTED_JOINT_COLOR = IM_COL32(122, 205, 255, 255);
+    constexpr ImU32 SKELETON_JOINT_LABEL_COLOR = IM_COL32(224, 231, 240, 230);
+
+    /// One joint of the animation overlay in both spaces at once. Bone
+    /// segments are drawn from the world positions so they clip against the
+    /// near plane properly; the screen point only serves the dots, the labels
+    /// and joint picking, all of which are off-screen-or-nothing anyway.
+    struct SkeletonJointProjection
+    {
+      Vec3 world{0.0f, 0.0f, 0.0f};
+      ImVec2 screen{};
+      bool visible = false;
+    };
+
+    /// World matrix of an entity, matching what SceneRenderer builds for it so
+    /// the overlay lands on the mesh rather than beside it.
+    math::Mat4 entity_world_matrix(Entity::EntityId entity, ComponentManager &componentManager)
+    {
+      math::Vec3 translation;
+      if (componentManager.hasComponent<PositionComponent3D>(entity))
+      {
+        const auto &position = componentManager.getComponent<PositionComponent3D>(entity);
+        translation = math::Vec3{position.x, position.y, position.z};
+      }
+
+      math::Quat rotation;
+      if (componentManager.hasComponent<RotationComponent3D>(entity))
+      {
+        const auto &rot = componentManager.getComponent<RotationComponent3D>(entity);
+        rotation = math::Quat{rot.qx, rot.qy, rot.qz, rot.qw};
+      }
+
+      math::Vec3 scale{1.0f, 1.0f, 1.0f};
+      if (componentManager.hasComponent<ScaleComponent3D>(entity))
+      {
+        const auto &sc = componentManager.getComponent<ScaleComponent3D>(entity);
+        scale = math::Vec3{sc.x, sc.y, sc.z};
+      }
+
+      return math::buildModelMatrix(translation, rotation, scale);
+    }
+
+    /// Hierarchy-only nodes are hidden unless the panel asked for them, so
+    /// picking and drawing have to agree on which joints exist at all.
+    bool skeleton_joint_shown(const AnimationEditState &editState, int jointIndex)
+    {
+      if (editState.showUnskinnedJoints)
+      {
+        return true;
+      }
+
+      return jointIndex >= 0 &&
+             jointIndex < static_cast<int>(editState.jointSkinned.size()) &&
+             editState.jointSkinned[jointIndex];
+    }
+
+    bool skeleton_joint_skins(const AnimationEditState &editState, int jointIndex)
+    {
+      return jointIndex >= 0 &&
+             jointIndex < static_cast<int>(editState.jointSkinned.size()) &&
+             editState.jointSkinned[jointIndex];
+    }
+
+    std::vector<SkeletonJointProjection> build_skeleton_joint_projections(
+        const AnimationEditState &editState,
+        const math::Mat4 &entityWorldTransform,
+        const EditorSceneViewCamera &sceneCamera,
+        const CameraComponent &camera,
+        const ImVec2 &canvasOrigin,
+        const ImVec2 &canvasSize)
+    {
+      std::vector<SkeletonJointProjection> projections(editState.jointGlobals.size());
+      for (std::size_t i = 0; i < editState.jointGlobals.size(); ++i)
+      {
+        // The panel publishes joints already premultiplied by the model's
+        // globalInverseTransform, i.e. the same space the bone palette bakes
+        // and the skinned mesh is drawn in, so the entity transform is all
+        // that is left to apply. Applying globalInverseTransform again here
+        // would push the overlay off the mesh by exactly that transform.
+        const math::Mat4 worldJoint = entityWorldTransform * editState.jointGlobals[i];
+        SkeletonJointProjection &projection = projections[i];
+        projection.world = make_vec3(worldJoint.m[3][0], worldJoint.m[3][1], worldJoint.m[3][2]);
+        projection.visible = project_point(
+            projection.world,
+            sceneCamera,
+            camera,
+            canvasOrigin,
+            canvasSize,
+            projection.screen);
+      }
+
+      return projections;
+    }
+
+    /// Joint nearest the mouse within the pick threshold, or -1.
+    int pick_skeleton_joint(
+        const std::vector<SkeletonJointProjection> &projections,
+        const AnimationEditState &editState,
+        const ImVec2 &mousePosition)
+    {
+      int bestJoint = -1;
+      float bestDistanceSquared =
+          SKELETON_JOINT_PICK_THRESHOLD_PIXELS * SKELETON_JOINT_PICK_THRESHOLD_PIXELS;
+
+      for (std::size_t i = 0; i < projections.size(); ++i)
+      {
+        const int jointIndex = static_cast<int>(i);
+        if (!projections[i].visible || !skeleton_joint_shown(editState, jointIndex))
+        {
+          continue;
+        }
+
+        const float distanceSquared = squared_distance(mousePosition, projections[i].screen);
+        if (distanceSquared <= bestDistanceSquared)
+        {
+          bestDistanceSquared = distanceSquared;
+          bestJoint = jointIndex;
+        }
+      }
+
+      return bestJoint;
+    }
+
+    /// Space the selected joint's local TRS is expressed in, which is what a
+    /// world-space gizmo drag has to be carried into before it can be written
+    /// back as a local offset. Never fails: a joint with no resolvable parent
+    /// hangs off the model root, whose frame is `modelGlobalInverse`: the
+    /// same transform already baked into every entry of `jointGlobals`, so
+    /// both branches stay in one space. Returning a bare entity transform here
+    /// would convert a root joint's drag through a frame off by exactly that
+    /// transform, moving it perpendicular to the drag on any model whose root
+    /// node carries one.
+    math::Mat4 skeleton_joint_parent_world(
+        const AnimationEditState &editState,
+        const math::Mat4 &entityWorldTransform,
+        int jointIndex)
+    {
+      if (jointIndex < 0 || jointIndex >= static_cast<int>(editState.jointParents.size()))
+      {
+        return entityWorldTransform * editState.modelGlobalInverse;
+      }
+
+      const int parentIndex = editState.jointParents[jointIndex];
+      if (parentIndex < 0 || parentIndex >= static_cast<int>(editState.jointGlobals.size()))
+      {
+        return entityWorldTransform * editState.modelGlobalInverse;
+      }
+
+      return entityWorldTransform * editState.jointGlobals[parentIndex];
+    }
+
+    void draw_skeleton_overlay(
+        ImDrawList *drawList,
+        const std::vector<SkeletonJointProjection> &projections,
+        const AnimationEditState &editState,
+        const EditorSceneViewCamera &sceneCamera,
+        const CameraComponent &camera,
+        const ImVec2 &canvasOrigin,
+        const ImVec2 &canvasSize)
+    {
+      const int jointCount = static_cast<int>(projections.size());
+
+      // Bones first so the joint dots always sit on top of the lines.
+      for (int jointIndex = 0; jointIndex < jointCount; ++jointIndex)
+      {
+        if (!skeleton_joint_shown(editState, jointIndex) ||
+            jointIndex >= static_cast<int>(editState.jointParents.size()))
+        {
+          continue;
+        }
+
+        // Bridge across hidden ancestors instead of dropping the bone. With
+        // unskinned joints turned off the armature, the pivot nodes and any
+        // unweighted helper bone vanish, and stopping at one of them would
+        // leave the skinned chain drawn as a scatter of loose dots. The step
+        // cap is the cycle guard: SkeletonJoint::parent is copied straight
+        // from the asset and Skeleton::from_model only sanitises the child
+        // lists it builds, not the parent index itself.
+        int parentIndex = editState.jointParents[jointIndex];
+        for (int step = 0; step < jointCount; ++step)
+        {
+          if (parentIndex < 0 || parentIndex >= jointCount ||
+              skeleton_joint_shown(editState, parentIndex))
+          {
+            break;
+          }
+
+          parentIndex = (parentIndex < static_cast<int>(editState.jointParents.size()))
+                            ? editState.jointParents[parentIndex]
+                            : -1;
+        }
+
+        if (parentIndex < 0 || parentIndex >= jointCount ||
+            !skeleton_joint_shown(editState, parentIndex))
+        {
+          continue;
+        }
+
+        ImVec2 boneStart;
+        ImVec2 boneEnd;
+        if (!project_line_segment(
+                projections[parentIndex].world,
+                projections[jointIndex].world,
+                sceneCamera,
+                camera,
+                canvasOrigin,
+                canvasSize,
+                boneStart,
+                boneEnd))
+        {
+          continue;
+        }
+
+        drawList->AddLine(boneStart, boneEnd, SKELETON_BONE_COLOR, SKELETON_BONE_THICKNESS);
+      }
+
+      for (int jointIndex = 0; jointIndex < jointCount; ++jointIndex)
+      {
+        const SkeletonJointProjection &projection = projections[jointIndex];
+        if (!projection.visible || !skeleton_joint_shown(editState, jointIndex))
+        {
+          continue;
+        }
+
+        const bool selected = jointIndex == editState.selectedJoint;
+        const bool hovered = !selected && jointIndex == editState.hoveredJoint;
+        const ImU32 color = selected
+                                ? SKELETON_SELECTED_JOINT_COLOR
+                                : (hovered ? SKELETON_HOVERED_JOINT_COLOR : SKELETON_JOINT_COLOR);
+
+        if (skeleton_joint_skins(editState, jointIndex))
+        {
+          drawList->AddCircleFilled(
+              projection.screen,
+              selected ? SKELETON_JOINT_RADIUS + 1.5f : SKELETON_JOINT_RADIUS,
+              color,
+              14);
+        }
+        else
+        {
+          // A ring, not a dot: a node that skins nothing is hierarchy, and
+          // reading it as a bone end would be misleading.
+          drawList->AddCircle(
+              projection.screen,
+              SKELETON_UNSKINNED_JOINT_RADIUS,
+              color,
+              14,
+              selected ? 2.2f : 1.5f);
+        }
+
+        if (selected)
+        {
+          drawList->AddCircle(
+              projection.screen,
+              SKELETON_UNSKINNED_JOINT_RADIUS + 2.5f,
+              SKELETON_SELECTED_JOINT_COLOR,
+              20,
+              1.5f);
+        }
+
+        if (editState.showJointNames &&
+            jointIndex < static_cast<int>(editState.jointNames.size()) &&
+            !editState.jointNames[jointIndex].empty())
+        {
+          drawList->AddText(
+              ImVec2(projection.screen.x + SKELETON_UNSKINNED_JOINT_RADIUS + 4.0f,
+                     projection.screen.y - SKELETON_UNSKINNED_JOINT_RADIUS - 8.0f),
+              SKELETON_JOINT_LABEL_COLOR,
+              editState.jointNames[jointIndex].c_str());
+        }
+      }
+    }
+
     SceneHitCandidate pick_entity_in_scene(
         const EditorSceneViewCamera &sceneCamera,
         const CameraComponent &camera,
@@ -1458,8 +1741,45 @@ namespace hades
         const RotationComponent3D *pickRotation = componentManager.hasComponent<RotationComponent3D>(entity)
                                                       ? &componentManager.getComponent<RotationComponent3D>(entity)
                                                       : nullptr;
+        const ScaleComponent3D *pickScale = componentManager.hasComponent<ScaleComponent3D>(entity)
+                                                ? &componentManager.getComponent<ScaleComponent3D>(entity)
+                                                : nullptr;
         const float entityDepth = projected_entity_depth(position, sceneCamera);
         bool hasPreviewGeometry = false;
+
+        // Imported models are picked against the same bind-pose bounds the
+        // viewport draws their wire box from, so the clickable area matches
+        // what the user sees instead of collapsing to the origin marker.
+        if (componentManager.hasComponent<ModelComponent>(entity))
+        {
+          const auto &model = componentManager.getComponent<ModelComponent>(entity);
+          if (const ModelAsset *asset = ModelAssetCache::instance().get(model.assetPath); asset != nullptr)
+          {
+            hasPreviewGeometry = true;
+            const auto &boundsMin = asset->boundsMin();
+            const auto &boundsMax = asset->boundsMax();
+            if (const auto rect = project_box_screen_rect(
+                    box_corners(
+                        make_vec3(boundsMin.x, boundsMin.y, boundsMin.z),
+                        make_vec3(boundsMax.x, boundsMax.y, boundsMax.z),
+                        position,
+                        pickRotation,
+                        pickScale),
+                    sceneCamera,
+                    camera,
+                    canvasOrigin,
+                    canvasSize);
+                rect.has_value())
+            {
+              register_scene_hit(
+                  hitCandidate,
+                  entity,
+                  point_to_rect_distance_squared(mousePosition, *rect),
+                  entityDepth,
+                  SCENE_PICK_THRESHOLD_PIXELS * SCENE_PICK_THRESHOLD_PIXELS);
+            }
+          }
+        }
 
         if (componentManager.hasComponent<PrimitiveComponent>(entity))
         {
@@ -1485,7 +1805,8 @@ namespace hades
                         make_vec3(-halfXZ, -halfY, -halfXZ),
                         make_vec3(halfXZ, halfY, halfXZ),
                         position,
-                        pickRotation),
+                        pickRotation,
+                        pickScale),
                     sceneCamera,
                     camera,
                     canvasOrigin,
@@ -1701,6 +2022,148 @@ namespace hades
       }
     }
 
+    // Shades `renderList` into the viewport's offscreen target and blits the
+    // result across the canvas. False means the backend could not produce an
+    // image this frame, so the caller still owes the user something to look at.
+    bool draw_scene_render_target(
+        ImDrawList *drawList,
+        const ImVec2 &canvasOrigin,
+        const ImVec2 &canvasSize,
+        const RenderList &renderList,
+        Renderer *renderer,
+        SceneTargetHandle *sceneTarget,
+        int *sceneTargetWidth,
+        int *sceneTargetHeight)
+    {
+      if (renderer == nullptr || sceneTarget == nullptr ||
+          sceneTargetWidth == nullptr || sceneTargetHeight == nullptr)
+      {
+        return false;
+      }
+
+      const int targetW = std::max(1, static_cast<int>(canvasSize.x));
+      const int targetH = std::max(1, static_cast<int>(canvasSize.y));
+      if (*sceneTarget == kInvalidSceneTarget)
+      {
+        *sceneTarget = renderer->acquire_scene_target(targetW, targetH);
+        *sceneTargetWidth = targetW;
+        *sceneTargetHeight = targetH;
+      }
+      else if (targetW != *sceneTargetWidth || targetH != *sceneTargetHeight)
+      {
+        if (renderer->resize_scene_target(*sceneTarget, targetW, targetH))
+        {
+          *sceneTargetWidth = targetW;
+          *sceneTargetHeight = targetH;
+        }
+      }
+
+      if (*sceneTarget == kInvalidSceneTarget)
+      {
+        return false;
+      }
+
+      void *texture = renderer->render_scene_to_target(*sceneTarget, renderList);
+      if (texture == nullptr)
+      {
+        return false;
+      }
+
+      const ImVec2 canvasMax(canvasOrigin.x + canvasSize.x,
+                             canvasOrigin.y + canvasSize.y);
+      drawList->AddImage(reinterpret_cast<ImTextureID>(texture), canvasOrigin, canvasMax);
+      return true;
+    }
+
+    void draw_centered_canvas_message(
+        ImDrawList *drawList,
+        const ImVec2 &canvasOrigin,
+        const ImVec2 &canvasSize,
+        const char *message,
+        ImU32 color)
+    {
+      const ImVec2 textSize = ImGui::CalcTextSize(message);
+      drawList->AddText(
+          ImVec2(canvasOrigin.x + ((canvasSize.x - textSize.x) * 0.5f),
+                 canvasOrigin.y + ((canvasSize.y - textSize.y) * 0.5f)),
+          color,
+          message);
+    }
+
+    // Draws the viewport the way play mode will: the world seen through its
+    // main camera, GPU-shaded, with no editor chrome painted on top (the
+    // game's own UI canvases DO render -- the HUD is part of what Play
+    // shows). Deliberately routed through the same SceneRenderer entry
+    // points DetachedPlayWindow uses, so what shows here is what Play shows
+    // -- including the refusal when the world has no single main camera to
+    // render through.
+    void draw_game_view(
+        ImDrawList *drawList,
+        const ImVec2 &canvasOrigin,
+        const ImVec2 &canvasSize,
+        EntityManager &entityManager,
+        ComponentManager &componentManager,
+        SceneRenderer &sceneRenderer,
+        RenderList &renderList,
+        std::optional<Entity::EntityId> world,
+        std::optional<Entity::EntityId> activeCamera,
+        Renderer *renderer,
+        SceneTargetHandle *sceneTarget,
+        int *sceneTargetWidth,
+        int *sceneTargetHeight)
+    {
+      // While playing, the runtime already picked the camera (scripts can
+      // load a different world mid-run); outside play mode, resolve it the
+      // same way start_play_mode is about to.
+      std::optional<Entity::EntityId> cameraEntity;
+      if (activeCamera.has_value() &&
+          componentManager.hasComponent<CameraComponent>(*activeCamera))
+      {
+        cameraEntity = activeCamera;
+      }
+      else
+      {
+        const MainCameraSelection selection =
+            select_main_camera(entityManager, componentManager, world);
+        if (selection.status != MainCameraSelectionStatus::Ready)
+        {
+          draw_centered_canvas_message(
+              drawList,
+              canvasOrigin,
+              canvasSize,
+              main_camera_selection_message(selection.status),
+              IM_COL32(200, 170, 120, 230));
+          return;
+        }
+        cameraEntity = selection.entity;
+      }
+
+      const float aspectRatio = (canvasSize.y > 0.0f) ? (canvasSize.x / canvasSize.y) : 1.0f;
+      const RenderCamera renderCamera =
+          sceneRenderer.buildCamera(*cameraEntity, aspectRatio, componentManager);
+      renderList = sceneRenderer.buildRenderList(
+          renderCamera, componentManager, entityManager, world,
+          canvasSize.x, canvasSize.y);
+
+      if (!draw_scene_render_target(
+              drawList,
+              canvasOrigin,
+              canvasSize,
+              renderList,
+              renderer,
+              sceneTarget,
+              sceneTargetWidth,
+              sceneTargetHeight))
+      {
+        draw_centered_canvas_message(
+            drawList,
+            canvasOrigin,
+            canvasSize,
+            "Game View needs the GPU renderer, which is unavailable.",
+            IM_COL32(200, 170, 120, 230));
+      }
+    }
+
     int draw_world_preview(
         ImDrawList *drawList,
         const EditorSceneViewCamera &sceneCamera,
@@ -1718,38 +2181,15 @@ namespace hades
         int *sceneTargetWidth,
         int *sceneTargetHeight)
     {
-      bool gpuBackgroundActive = false;
-      if (renderer != nullptr && sceneTarget != nullptr &&
-          sceneTargetWidth != nullptr && sceneTargetHeight != nullptr)
-      {
-        const int targetW = std::max(1, static_cast<int>(canvasSize.x));
-        const int targetH = std::max(1, static_cast<int>(canvasSize.y));
-        if (*sceneTarget == kInvalidSceneTarget)
-        {
-          *sceneTarget = renderer->acquire_scene_target(targetW, targetH);
-          *sceneTargetWidth = targetW;
-          *sceneTargetHeight = targetH;
-        }
-        else if (targetW != *sceneTargetWidth || targetH != *sceneTargetHeight)
-        {
-          if (renderer->resize_scene_target(*sceneTarget, targetW, targetH))
-          {
-            *sceneTargetWidth = targetW;
-            *sceneTargetHeight = targetH;
-          }
-        }
-        if (*sceneTarget != kInvalidSceneTarget)
-        {
-          if (void *texture = renderer->render_scene_to_target(*sceneTarget, renderList))
-          {
-            const ImVec2 canvasMax(canvasOrigin.x + canvasSize.x,
-                                   canvasOrigin.y + canvasSize.y);
-            drawList->AddImage(reinterpret_cast<ImTextureID>(texture),
-                               canvasOrigin, canvasMax);
-            gpuBackgroundActive = true;
-          }
-        }
-      }
+      const bool gpuBackgroundActive = draw_scene_render_target(
+          drawList,
+          canvasOrigin,
+          canvasSize,
+          renderList,
+          renderer,
+          sceneTarget,
+          sceneTargetWidth,
+          sceneTargetHeight);
 
       int visibleRenderableCount = 0;
       const auto render_render_item = [&](const RenderItem &item)
@@ -2045,6 +2485,10 @@ namespace hades
       ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
       ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
 
+      // Nothing in game view responds to a gizmo mode, so the modes read as
+      // unavailable rather than silently doing nothing.
+      ImGui::BeginDisabled(sceneGameView_);
+
       if (translateActive)
       {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.26f, 0.59f, 0.98f, 1.00f));
@@ -2101,6 +2545,8 @@ namespace hades
         ImGui::PopStyleColor();
       }
 
+      ImGui::EndDisabled();
+
       ImGui::SameLine();
       if (!state.isPlaying)
       {
@@ -2124,6 +2570,31 @@ namespace hades
         {
           ImGui::SetTooltip("Stop");
         }
+        ImGui::PopStyleColor();
+      }
+
+      ImGui::SameLine();
+
+      // Read once: the button below flips `sceneGameView_`, and testing the
+      // member again after it would unbalance the style stack.
+      const bool gameViewActive = sceneGameView_;
+      if (gameViewActive)
+      {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.26f, 0.59f, 0.98f, 1.00f));
+      }
+      if (ImGui::SmallButton(ICON_FA_GAMEPAD "##SceneGameView"))
+      {
+        sceneGameView_ = !gameViewActive;
+      }
+      if (ImGui::IsItemHovered())
+      {
+        ImGui::SetTooltip(
+            gameViewActive
+                ? "Game View: on\nRendering through the main camera, exactly as Play does."
+                : "Game View: off\nShow the world as Play will render it: main camera, no grid or gizmos.");
+      }
+      if (gameViewActive)
+      {
         ImGui::PopStyleColor();
       }
 
@@ -2166,8 +2637,62 @@ namespace hades
       sceneCanvasKeyboardCapture_ = false;
     }
 
+    if (sceneGameView_)
+    {
+      // Game view draws none of the handles a drag steers, so a drag in
+      // flight when the mode flips has nothing left to grab: end it here
+      // rather than let it resume, invisibly, on the way back.
+      activeSceneGizmoAxis_ = SceneGizmoAxis::None;
+      activeSceneGizmoEntity_ = Entity::INVALID;
+      sceneGizmoDrivesJoint_ = false;
+      sceneGizmoJointIndex_ = -1;
+
+      ImDrawList *gameViewDrawList = ImGui::GetWindowDrawList();
+      gameViewDrawList->AddRectFilled(canvasOrigin, canvasMax, IM_COL32(17, 20, 24, 255));
+      gameViewDrawList->AddRect(canvasOrigin, canvasMax, IM_COL32(70, 76, 86, 255));
+      gameViewDrawList->PushClipRect(canvasOrigin, canvasMax, true);
+      draw_game_view(
+          gameViewDrawList,
+          canvasOrigin,
+          canvasSize,
+          entityManager,
+          componentManager,
+          sceneRenderer_,
+          sceneRenderList_,
+          sceneWorld,
+          state.activeCamera,
+          renderer_,
+          &sceneViewportTarget_,
+          &sceneViewportTargetWidth_,
+          &sceneViewportTargetHeight_);
+      gameViewDrawList->PopClipRect();
+
+      ImGui::End();
+      return;
+    }
+
+    AnimationEditState &animEditState = animation_edit_state();
+    // `sceneGizmoDrivesJoint_` only qualifies a grabbed axis; on its own it is
+    // meaningless. Editor::reset_workspace_session() drops the axis without
+    // knowing this flag exists, and a leftover `true` would make the next
+    // ENTITY drag take the bone path below -- which either cancels it on its
+    // second frame or, worse, drives the remembered joint with it. Re-establish
+    // the invariant here rather than relying on every future caller to know.
+    if (activeSceneGizmoAxis_ == SceneGizmoAxis::None)
+    {
+      sceneGizmoDrivesJoint_ = false;
+      sceneGizmoJointIndex_ = -1;
+    }
+
+    // A bone drag owns the left mouse button for its whole life. The camera
+    // and the entity gizmo have to stand down for the duration or the view
+    // would swing while the user is posing.
+    const bool boneGizmoDragActive =
+        sceneGizmoDrivesJoint_ && activeSceneGizmoAxis_ != SceneGizmoAxis::None;
+
     const bool rightMouseFlyMode =
         sceneCanvasHovered &&
+        !boneGizmoDragActive &&
         (ImGui::IsMouseDown(ImGuiMouseButton_Right) || state.threeFingerDragActive) &&
         !io.WantTextInput;
 
@@ -2189,7 +2714,8 @@ namespace hades
           EDITOR_SCENE_CAMERA_MAX_DISTANCE);
     }
 
-    if (sceneCanvasHovered && (ImGui::IsMouseDragging(ImGuiMouseButton_Right) ||
+    if (sceneCanvasHovered && !boneGizmoDragActive &&
+        (ImGui::IsMouseDragging(ImGuiMouseButton_Right) ||
         (state.threeFingerDragActive && ImGui::IsMouseDragging(ImGuiMouseButton_Left))))
     {
       sceneCameraYawDegrees_ = std::remainder(
@@ -2263,14 +2789,175 @@ namespace hades
           renderCamera, componentManager, entityManager, sceneWorld);
     }
 
+    // The Animation panel draws at plugin order 20 and this window at 40, so
+    // everything it published this frame is already current here.
+    const bool skeletonOverlayActive =
+        animEditState.active &&
+        animEditState.showSkeleton &&
+        !state.isPlaying &&
+        animEditState.entity != Entity::INVALID &&
+        !animEditState.jointGlobals.empty();
+
+    math::Mat4 animEntityWorldTransform = math::Mat4::identity();
+    std::vector<SkeletonJointProjection> skeletonJoints;
+    if (skeletonOverlayActive)
+    {
+      animEntityWorldTransform = entity_world_matrix(animEditState.entity, componentManager);
+      skeletonJoints = build_skeleton_joint_projections(
+          animEditState,
+          animEntityWorldTransform,
+          sceneCamera,
+          camera,
+          canvasOrigin,
+          canvasSize);
+    }
+
+    const bool boneGizmoEnabled =
+        skeletonOverlayActive &&
+        animEditState.poseEditing &&
+        animEditState.selectedJoint >= 0 &&
+        animEditState.selectedJoint < static_cast<int>(skeletonJoints.size());
+
+    PositionComponent3D boneGizmoPosition;
+    std::array<SceneGizmoAxisProjection, 3> boneGizmoAxes{};
+    if (boneGizmoEnabled)
+    {
+      const Vec3 &jointWorld =
+          skeletonJoints[static_cast<std::size_t>(animEditState.selectedJoint)].world;
+      boneGizmoPosition = PositionComponent3D(jointWorld.x, jointWorld.y, jointWorld.z);
+      boneGizmoAxes = build_gizmo_axis_projections(
+          boneGizmoPosition,
+          sceneCamera,
+          camera,
+          canvasOrigin,
+          canvasSize);
+    }
+
     const bool selectedEntityIsEditableInScene =
+        !boneGizmoEnabled &&
         !state.isPlaying &&
         state.selectedEntity.has_value() &&
         sceneWorld.has_value() &&
         entity_belongs_to_world(*state.selectedEntity, *sceneWorld, componentManager) &&
         componentManager.hasComponent<PositionComponent3D>(*state.selectedEntity);
 
-    if (activeSceneGizmoAxis_ != SceneGizmoAxis::None)
+    // Bone gizmo drag. It runs before the entity gizmo and owns
+    // `activeSceneGizmoAxis_` for the whole drag; `sceneGizmoDrivesJoint_` is
+    // what tells the two paths apart.
+    if (sceneGizmoDrivesJoint_ && activeSceneGizmoAxis_ != SceneGizmoAxis::None)
+    {
+      const bool boneDragStillValid =
+          boneGizmoEnabled && animEditState.selectedJoint == sceneGizmoJointIndex_;
+
+      if (!boneDragStillValid)
+      {
+        activeSceneGizmoAxis_ = SceneGizmoAxis::None;
+        activeSceneGizmoEntity_ = Entity::INVALID;
+        sceneGizmoDrivesJoint_ = false;
+        sceneGizmoJointIndex_ = -1;
+      }
+      else
+      {
+        const math::Mat4 parentWorldInverse =
+            skeleton_joint_parent_world(
+                animEditState, animEntityWorldTransform, animEditState.selectedJoint)
+                .inverse();
+        const Vec3 axisDirection = gizmo_axis_direction(activeSceneGizmoAxis_);
+        const float mouseDeltaAlongAxis =
+            ((io.MousePos.x - sceneGizmoDragStartMouseX_) * sceneGizmoAxisScreenDirectionX_) +
+            ((io.MousePos.y - sceneGizmoDragStartMouseY_) * sceneGizmoAxisScreenDirectionY_);
+        const float axisDelta = sceneGizmoPixelsPerWorldUnit_ > 1e-5f
+                                    ? (mouseDeltaAlongAxis / sceneGizmoPixelsPerWorldUnit_)
+                                    : 0.0f;
+
+        // The panel publishes a local TRS, so every channel is republished
+        // together and only the dragged one actually moves.
+        animEditState.editedTranslation = animEditState.selectedLocalTranslation;
+        animEditState.editedRotation = animEditState.selectedLocalRotation;
+        animEditState.editedScale = animEditState.selectedLocalScale;
+
+        if (sceneGizmoMode_ == SceneGizmoMode::Translate)
+        {
+          // The drag is world space but the value being edited is parent
+          // space, so the offset has to be carried across before it is added.
+          const math::Vec3 worldOffset{
+              axisDirection.x * axisDelta,
+              axisDirection.y * axisDelta,
+              axisDirection.z * axisDelta};
+          const math::Vec3 localOffset = parentWorldInverse.transformDirection(worldOffset);
+          animEditState.editedTranslation = math::Vec3{
+              sceneGizmoDragStartPositionX_ + localOffset.x,
+              sceneGizmoDragStartPositionY_ + localOffset.y,
+              sceneGizmoDragStartPositionZ_ + localOffset.z};
+        }
+        else if (sceneGizmoMode_ == SceneGizmoMode::Rotate)
+        {
+          const float dragPixels =
+              (io.MousePos.x - sceneGizmoDragStartMouseX_) +
+              (io.MousePos.y - sceneGizmoDragStartMouseY_);
+          const math::Vec3 localAxis = parentWorldInverse.transformDirection(
+              math::Vec3{axisDirection.x, axisDirection.y, axisDirection.z});
+          const float localAxisLength = std::sqrt(
+              (localAxis.x * localAxis.x) +
+              (localAxis.y * localAxis.y) +
+              (localAxis.z * localAxis.z));
+
+          math::Quat editedRotation{
+              sceneGizmoDragStartRotationQx_,
+              sceneGizmoDragStartRotationQy_,
+              sceneGizmoDragStartRotationQz_,
+              sceneGizmoDragStartRotationQw_};
+          if (localAxisLength > 1e-5f)
+          {
+            // Delta on the left: the joint turns about its own pivot instead
+            // of being swung around its parent.
+            const math::Quat delta = math::Quat::fromAxisAngle(localAxis, dragPixels * 0.01f);
+            editedRotation = (delta * editedRotation).normalized();
+          }
+
+          animEditState.editedRotation = editedRotation;
+        }
+        else if (sceneGizmoMode_ == SceneGizmoMode::Scale)
+        {
+          const float scaleFactor = std::max(0.01f, 1.0f + axisDelta);
+          math::Vec3 editedScale{
+              sceneGizmoDragStartScaleX_,
+              sceneGizmoDragStartScaleY_,
+              sceneGizmoDragStartScaleZ_};
+
+          switch (activeSceneGizmoAxis_)
+          {
+          case SceneGizmoAxis::X:
+            editedScale.x = std::max(0.01f, sceneGizmoDragStartScaleX_ * scaleFactor);
+            break;
+          case SceneGizmoAxis::Y:
+            editedScale.y = std::max(0.01f, sceneGizmoDragStartScaleY_ * scaleFactor);
+            break;
+          case SceneGizmoAxis::Z:
+            editedScale.z = std::max(0.01f, sceneGizmoDragStartScaleZ_ * scaleFactor);
+            break;
+          case SceneGizmoAxis::None:
+            break;
+          }
+
+          animEditState.editedScale = editedScale;
+        }
+
+        animEditState.jointEdited = true;
+
+        if (!ImGui::IsMouseDown(ImGuiMouseButton_Left))
+        {
+          // One undo entry per drag, not per mouse-move.
+          animEditState.jointEditFinished = true;
+          activeSceneGizmoAxis_ = SceneGizmoAxis::None;
+          activeSceneGizmoEntity_ = Entity::INVALID;
+          sceneGizmoDrivesJoint_ = false;
+          sceneGizmoJointIndex_ = -1;
+        }
+      }
+    }
+
+    if (activeSceneGizmoAxis_ != SceneGizmoAxis::None && !sceneGizmoDrivesJoint_)
     {
       const bool activeGizmoStillValid =
           !state.isPlaying &&
@@ -2288,7 +2975,7 @@ namespace hades
       }
     }
 
-    if (activeSceneGizmoAxis_ != SceneGizmoAxis::None)
+    if (activeSceneGizmoAxis_ != SceneGizmoAxis::None && !sceneGizmoDrivesJoint_)
     {
       if (!ImGui::IsMouseDown(ImGuiMouseButton_Left))
       {
@@ -2465,9 +3152,76 @@ namespace hades
       }
     }
 
+    SceneGizmoAxis hoveredBoneGizmoAxis = SceneGizmoAxis::None;
+    if (boneGizmoEnabled && sceneCanvasHovered && !rotateModifierDown && !state.threeFingerDragActive)
+    {
+      hoveredBoneGizmoAxis =
+          sceneGizmoMode_ == SceneGizmoMode::Rotate
+              ? hit_test_rotation_gizmo(
+                    boneGizmoPosition, sceneCamera, camera, canvasOrigin, canvasSize, io.MousePos)
+              : hit_test_gizmo_axes(boneGizmoAxes, io.MousePos);
+    }
+
+    // Republished every frame: the panel reads it to highlight its joint tree.
+    animEditState.hoveredJoint =
+        (skeletonOverlayActive && sceneCanvasHovered && !rotateModifierDown &&
+         !state.threeFingerDragActive && !boneGizmoDragActive &&
+         hoveredBoneGizmoAxis == SceneGizmoAxis::None)
+            ? pick_skeleton_joint(skeletonJoints, animEditState, io.MousePos)
+            : -1;
+
     if (sceneCanvasHovered && !rotateModifierDown && !state.threeFingerDragActive && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
     {
       bool handledClick = false;
+
+      if (boneGizmoEnabled && hoveredBoneGizmoAxis != SceneGizmoAxis::None)
+      {
+        bool boneDragStarted = false;
+        if (sceneGizmoMode_ == SceneGizmoMode::Rotate)
+        {
+          boneDragStarted = true;
+        }
+        else
+        {
+          const SceneGizmoAxisProjection *projection =
+              find_gizmo_axis_projection(boneGizmoAxes, hoveredBoneGizmoAxis);
+          if (projection != nullptr && projection->visible)
+          {
+            const float axisScreenLength =
+                std::sqrt(squared_distance(projection->originScreen, projection->endScreen));
+            if (axisScreenLength > 1e-5f)
+            {
+              sceneGizmoAxisScreenDirectionX_ =
+                  (projection->endScreen.x - projection->originScreen.x) / axisScreenLength;
+              sceneGizmoAxisScreenDirectionY_ =
+                  (projection->endScreen.y - projection->originScreen.y) / axisScreenLength;
+              sceneGizmoPixelsPerWorldUnit_ = projection->pixelsPerWorldUnit;
+              boneDragStarted = true;
+            }
+          }
+        }
+
+        if (boneDragStarted)
+        {
+          activeSceneGizmoAxis_ = hoveredBoneGizmoAxis;
+          activeSceneGizmoEntity_ = Entity::INVALID;
+          sceneGizmoDrivesJoint_ = true;
+          sceneGizmoJointIndex_ = animEditState.selectedJoint;
+          sceneGizmoDragStartMouseX_ = io.MousePos.x;
+          sceneGizmoDragStartMouseY_ = io.MousePos.y;
+          sceneGizmoDragStartPositionX_ = animEditState.selectedLocalTranslation.x;
+          sceneGizmoDragStartPositionY_ = animEditState.selectedLocalTranslation.y;
+          sceneGizmoDragStartPositionZ_ = animEditState.selectedLocalTranslation.z;
+          sceneGizmoDragStartRotationQx_ = animEditState.selectedLocalRotation.x;
+          sceneGizmoDragStartRotationQy_ = animEditState.selectedLocalRotation.y;
+          sceneGizmoDragStartRotationQz_ = animEditState.selectedLocalRotation.z;
+          sceneGizmoDragStartRotationQw_ = animEditState.selectedLocalRotation.w;
+          sceneGizmoDragStartScaleX_ = animEditState.selectedLocalScale.x;
+          sceneGizmoDragStartScaleY_ = animEditState.selectedLocalScale.y;
+          sceneGizmoDragStartScaleZ_ = animEditState.selectedLocalScale.z;
+          handledClick = true;
+        }
+      }
 
       if (selectedEntityIsEditableInScene && hoveredGizmoAxis != SceneGizmoAxis::None &&
           state.selectedEntity.has_value())
@@ -2552,6 +3306,14 @@ namespace hades
         }
       }
 
+      if (!handledClick && skeletonOverlayActive && animEditState.hoveredJoint >= 0)
+      {
+        // Consume the click: clicking a joint must not re-select whatever
+        // entity happens to sit behind it.
+        animEditState.pickedJoint = animEditState.hoveredJoint;
+        handledClick = true;
+      }
+
       if (!handledClick)
       {
         const SceneHitCandidate hitCandidate = pick_entity_in_scene(
@@ -2580,13 +3342,13 @@ namespace hades
     if (state.isPlaying)
     {
       // During play mode, skip all 3D editor rendering and show a message.
-      const char *playingMsg = "Game is playing...";
-      const ImVec2 textSize = ImGui::CalcTextSize(playingMsg);
-      drawList->AddText(
-          ImVec2(canvasOrigin.x + (canvasSize.x - textSize.x) * 0.5f,
-                 canvasOrigin.y + (canvasSize.y - textSize.y) * 0.5f),
-          IM_COL32(139, 143, 163, 200),
-          playingMsg);
+      // Game View is the way to watch the running game in here instead.
+      draw_centered_canvas_message(
+          drawList,
+          canvasOrigin,
+          canvasSize,
+          "Game is playing...",
+          IM_COL32(139, 143, 163, 200));
     }
     else
     {
@@ -2608,6 +3370,18 @@ namespace hades
           &sceneViewportTargetHeight_);
 
       draw_editor_grid(drawList, sceneCamera, camera, canvasOrigin, canvasSize, sceneCameraDistance_);
+
+      if (skeletonOverlayActive)
+      {
+        draw_skeleton_overlay(
+            drawList,
+            skeletonJoints,
+            animEditState,
+            sceneCamera,
+            camera,
+            canvasOrigin,
+            canvasSize);
+      }
 
       if (selectedEntityIsEditableInScene)
       {
@@ -2637,6 +3411,39 @@ namespace hades
         }
 
         if (highlightedAxis != SceneGizmoAxis::None)
+        {
+          ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+        }
+      }
+
+      if (boneGizmoEnabled)
+      {
+        const SceneGizmoAxis highlightedBoneAxis =
+            (sceneGizmoDrivesJoint_ && activeSceneGizmoAxis_ != SceneGizmoAxis::None)
+                ? activeSceneGizmoAxis_
+                : hoveredBoneGizmoAxis;
+
+        if (sceneGizmoMode_ == SceneGizmoMode::Translate)
+        {
+          draw_translation_gizmo(drawList, boneGizmoAxes, highlightedBoneAxis);
+        }
+        else if (sceneGizmoMode_ == SceneGizmoMode::Rotate)
+        {
+          draw_rotation_gizmo(
+              drawList,
+              boneGizmoPosition,
+              sceneCamera,
+              camera,
+              canvasOrigin,
+              canvasSize,
+              highlightedBoneAxis);
+        }
+        else if (sceneGizmoMode_ == SceneGizmoMode::Scale)
+        {
+          draw_scale_gizmo(drawList, boneGizmoAxes, highlightedBoneAxis);
+        }
+
+        if (highlightedBoneAxis != SceneGizmoAxis::None)
         {
           ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
         }

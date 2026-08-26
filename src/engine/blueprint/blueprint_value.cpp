@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 
 namespace hades
@@ -237,7 +238,21 @@ namespace hades
     case 2:
       return std::get<std::int32_t>(storage_);
     case 3:
-      return static_cast<std::int32_t>(std::get<float>(storage_));
+    {
+      // Casting a float outside int32's range is undefined, so saturate.
+      const float value = std::get<float>(storage_);
+      constexpr float kMin = -2147483648.0f;
+      constexpr float kMax = 2147483520.0f; // largest float below INT32_MAX
+      if (!(value > kMin))
+      {
+        return (std::numeric_limits<std::int32_t>::min)();
+      }
+      if (value > kMax)
+      {
+        return (std::numeric_limits<std::int32_t>::max)();
+      }
+      return static_cast<std::int32_t>(value);
+    }
     case 4:
     {
       // Strings parse leniently: "12abc" is 12, anything unparsable is 0.
@@ -267,6 +282,19 @@ namespace hades
       return static_cast<float>(std::get<std::int32_t>(storage_));
     case 3:
       return std::get<float>(storage_);
+    case 4:
+    {
+      // Parse leniently, the same way as_int does, so a string flowing through
+      // a wildcard pin behaves consistently whichever numeric accessor reads it.
+      try
+      {
+        return std::stof(std::get<std::string>(storage_));
+      }
+      catch (const std::exception &)
+      {
+        return 0.0f;
+      }
+    }
     case 6:
       return static_cast<float>(std::get<Entity::EntityId>(storage_));
     default:
@@ -452,5 +480,112 @@ namespace hades
     }
 
     return as_string();
+  }
+
+  std::string BlueprintValue::to_storage_string() const
+  {
+    // Deliberately NOT format_float: that one rounds to three decimals for
+    // display, which would silently destroy an inspector override like 0.0001.
+    const auto exact = [](float value)
+    {
+      char buffer[64];
+      std::snprintf(buffer, sizeof(buffer), "%.9g", static_cast<double>(value));
+      return std::string(buffer);
+    };
+
+    switch (storage_.index())
+    {
+    case 3:
+      return exact(std::get<float>(storage_));
+    case 5:
+    {
+      const auto &v = std::get<math::Vec3>(storage_);
+      return exact(v.x) + "," + exact(v.y) + "," + exact(v.z);
+    }
+    default:
+      return as_string();
+    }
+  }
+
+  BlueprintValue BlueprintValue::parse(const std::string &text, ValueType type)
+  {
+    const auto to_float = [](const std::string &token, float fallback)
+    {
+      try
+      {
+        return std::stof(token);
+      }
+      catch (const std::exception &)
+      {
+        return fallback;
+      }
+    };
+
+    switch (type)
+    {
+    case ValueType::Bool:
+      return from_bool(text == "true" || text == "1" || text == "True");
+    case ValueType::Int:
+    {
+      try
+      {
+        return from_int(static_cast<std::int32_t>(std::stol(text)));
+      }
+      catch (const std::exception &)
+      {
+        return from_int(0);
+      }
+    }
+    case ValueType::Float:
+      return from_float(to_float(text, 0.0f));
+    case ValueType::String:
+      return from_string(text);
+    case ValueType::Vector:
+    {
+      // Accept "1,2,3" and the display form "(1, 2, 3)".
+      std::string cleaned;
+      cleaned.reserve(text.size());
+      for (char character : text)
+      {
+        if (character != '(' && character != ')' && character != ' ')
+        {
+          cleaned.push_back(character);
+        }
+      }
+
+      float components[3] = {0.0f, 0.0f, 0.0f};
+      std::size_t start = 0;
+      for (int i = 0; i < 3 && start <= cleaned.size(); ++i)
+      {
+        const std::size_t separator = cleaned.find(',', start);
+        const std::string token = cleaned.substr(
+            start, separator == std::string::npos ? std::string::npos : separator - start);
+        components[i] = to_float(token, 0.0f);
+
+        if (separator == std::string::npos)
+        {
+          break;
+        }
+        start = separator + 1;
+      }
+
+      return from_vector(math::Vec3(components[0], components[1], components[2]));
+    }
+    case ValueType::Entity:
+    {
+      try
+      {
+        return from_entity(static_cast<Entity::EntityId>(std::stoul(text)));
+      }
+      catch (const std::exception &)
+      {
+        return from_entity(Entity::INVALID);
+      }
+    }
+    case ValueType::Exec:
+    case ValueType::Wildcard:
+    default:
+      return BlueprintValue();
+    }
   }
 }

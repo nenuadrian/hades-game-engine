@@ -72,11 +72,65 @@ namespace hades
       uint32_t indexCount = 0;
     };
 
+    /// Identity of the CPU asset a GpuModel was uploaded from.
+    ///
+    /// RenderItem::modelKey is the resolved asset path, and that path does not
+    /// change when the asset behind it does: ModelAssetCache::invalidate()
+    /// (rig save, hot reload) destroys the ModelAsset and the next get()
+    /// imports a fresh one under the same key, with new bone indices and
+    /// weights baked into the vertices. Keying the GPU buffers on the path
+    /// alone would keep drawing the pre-save skin for the rest of the session.
+    ///
+    /// Neither the asset's address nor the addresses of its vectors are enough
+    /// on their own. invalidate() frees the old asset *before* the re-import
+    /// allocates, so the allocator replays the same allocation sequence and
+    /// hands the new asset the same blocks: measured over repeated real
+    /// re-imports, address-and-count identity missed a weights-only rig rebind
+    /// in 189/199, 198/199 and 5/99 cycles (9-, 441- and 3721-vertex meshes) —
+    /// exactly the case this check exists to catch. So the identity also folds
+    /// in a bounded sample of the payload that is uploaded, which is what
+    /// actually changed.
+    struct ModelSourceId
+    {
+      const ModelAsset *asset = nullptr;
+      std::size_t meshCount = 0;
+      std::size_t nodeCount = 0;
+      std::size_t boneCount = 0;
+      /// Storage addresses and sizes of the vectors the upload reads.
+      uint64_t meshDigest = 0;
+      /// Sampled vertex payload (position, normal, bone indices, bone weights)
+      /// plus per-mesh material. Bounded so this stays cheap; see sourceIdFor.
+      uint64_t contentDigest = 0;
+
+      bool operator==(const ModelSourceId &o) const
+      {
+        return asset == o.asset && meshCount == o.meshCount && nodeCount == o.nodeCount &&
+               boneCount == o.boneCount && meshDigest == o.meshDigest &&
+               contentDigest == o.contentDigest;
+      }
+      bool operator!=(const ModelSourceId &o) const { return !(*this == o); }
+    };
+
     struct GpuModel
     {
       std::vector<GpuMesh> meshes;
       std::vector<Material> materials;
+      ModelSourceId source;
+      /// Frame serial this entry's identity was last checked against the CPU
+      /// asset. The check is O(sampled vertices), so it runs once per model per
+      /// frame rather than once per render item — a scene with 500 entities
+      /// sharing one model pays for one.
+      uint64_t validatedFrame = 0;
       bool valid = false;
+    };
+
+    /// A GpuMesh dropped by a re-upload. Its buffers may still be read by
+    /// frames the GPU has not finished, so destruction waits until the frame
+    /// slot it was recorded into comes round again.
+    struct RetiredMesh
+    {
+      GpuMesh mesh;
+      uint32_t framesRemaining = 0;
     };
 
     struct FrameUniforms
@@ -115,6 +169,13 @@ namespace hades
 
     GpuMesh &ensureMesh(PrimitiveType type);
     GpuModel *ensureModel(const RenderItem &item);
+    static ModelSourceId sourceIdFor(const ModelAsset &asset);
+    /// Hand a superseded model's buffers to the retirement queue. Safe to call
+    /// mid-recording, unlike destroyMesh().
+    void retireModel(GpuModel &model);
+    /// Advance the retirement queue by one frame slot and destroy whatever has
+    /// outlived every frame that could still reference it.
+    void collectRetiredMeshes();
     bool createMesh(const MeshCpuData &src, GpuMesh &out);
     bool createModelMesh(const ModelMeshData &src, GpuMesh &out);
     bool createMeshBuffers(
@@ -154,6 +215,15 @@ namespace hades
     std::array<GpuMesh, 3> meshes_{}; // indexed by PrimitiveType
     std::array<bool, 3> meshReady_{false, false, false};
     std::unordered_map<std::string, GpuModel> models_; // keyed by RenderItem::modelKey
+    std::vector<RetiredMesh> retiredMeshes_;
+    // Frame slot the retirement queue was last advanced for; every
+    // drawRenderList call within one presented frame shares a slot, so the
+    // queue advances exactly once per frame.
+    uint32_t retireFrame_ = UINT32_MAX;
+    // Monotonic count of frames the queue has been advanced for. Starts at 0
+    // and is bumped before any ensureModel call, so GpuModel::validatedFrame's
+    // default of 0 can never be mistaken for "validated this frame".
+    uint64_t frameSerial_ = 0;
 
     bool supportsFillNonSolid_ = true;
     bool initialized_ = false;

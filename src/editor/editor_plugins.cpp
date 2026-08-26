@@ -260,7 +260,12 @@ namespace hades
         80,
         [this](EditorPluginContext &context)
         {
-          debug(context.deltaTime, context.entityManager, context.componentManager, context.scriptRuntime);
+          debug(
+              context.deltaTime,
+              context.entityManager,
+              context.componentManager,
+              context.scriptRuntime,
+              context.blueprintRuntime);
         },
         false,
         [](const Editor &editor)
