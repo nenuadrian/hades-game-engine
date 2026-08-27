@@ -1,10 +1,19 @@
 # Animation
 
-Hades has two skeletal animation paths. The first is the imported one described in
-[Models & Animation](models.md): an `AnimationComponent` plays a clip that came in the model file,
-by index. The second — everything on this page — is the authored one: clips you key in the editor,
-an animator state machine that decides which of them plays, and a runtime that turns the result into
-a bone palette for the same skinned mesh pipeline.
+Skeletal animation in Hades is one system: `AnimatorComponent`, clips it plays by **name**, an
+animator state machine that decides which of them plays, and a runtime that turns the result into a
+bone palette for the skinned mesh pipeline.
+
+A clip is either **authored** — keyed in the editor, stored under `.hades/animations/` — or
+**imported**, meaning animation that came inside the model file and is named directly as
+`model.fbx#Walk`. Both are the same thing to the animator, so imported animation crossfades, blends,
+layers and fires events with no bake step.
+
+`AnimationComponent` is the superseded predecessor: it plays one imported clip by **index**, with no
+blending, events or layers. It still loads and still runs, so existing scenes are unaffected, but
+**Add Component** no longer offers it and its inspector section carries a one-click
+**Convert to Animator**. Index addressing is why: re-export a model with its clips reordered and an
+`AnimationComponent` silently plays a different animation, where a named reference cannot.
 
 ## Overview
 
@@ -22,11 +31,17 @@ Three pieces, all of them plain JSON on disk:
   playback state is deliberately *not* in the component: `AnimationRuntime` owns one
   `AnimatorInstance` per entity, and `AnimatorSystem` advances them every frame.
 
-Imported animation is not thrown away. `ModelAsset::clips` still holds the assimp import (channels
-indexed by node, no easing, no events), and the **Clips** tab of the Animation panel bakes one into
-an editable clip with `AnimationClipAsset::bake_from_model`, which rebinds every channel by node
-name. An entity may carry both `AnimationComponent` and `AnimatorComponent`; when both are present
-the animator wins.
+`ModelAsset::clips` holds the assimp import (channels indexed by node, no easing, no events).
+`AnimationClipCache` bakes one of those into an `AnimationClipAsset` on demand whenever a reference
+names it — `AnimationClipAsset::bake_from_model` rebinds every channel by node name, and the result
+is memoised until the model is re-imported. So playing imported animation costs nothing to set up.
+
+Baking to *disk* is a separate, deliberate act: the **Clips** tab's **Bake to editable clip** writes
+an authored copy, which is what you want when you intend to **edit** the animation — add easing,
+events, or extra keys. Playing it does not need that.
+
+An entity may carry both `AnimationComponent` and `AnimatorComponent`; when both are present the
+animator wins.
 
 `Skeleton` (`skeleton.hpp`) is a 1:1 view over `ModelAsset::nodes`, so a joint index is also a node
 index. That identity is what lets an authored pose become a GPU bone palette without any lookup
@@ -142,8 +157,12 @@ and Blueprints react to them by name. An instance queues at most 64 events per f
 ### Where clips live
 
 Clips are written by `AnimationClipCache::saveClip` to
-`<workspace>/.hades/animations/<name>.json`, formatted with an indent of 2. A clip reference is
-either a bare name (`"run"`), a workspace-relative path, or an absolute path. `.hades/` is what the
+`<workspace>/.hades/animations/<name>.json`, formatted with an indent of 2. A clip reference is a
+bare name (`"run"`), a workspace-relative path, an absolute path, or an **imported reference**
+(`"character.fbx#Walk"`) naming an animation inside a model file — model reference, `#`, clip name,
+both halves required. Names inside one model are matched first-wins, the same rule the importer uses
+when it binds two identically named nodes. An imported reference is read-only: `saveClip` and
+`deleteClip` refuse it and say to bake an editable copy instead. `.hades/` is what the
 exporter ships, which is why the assets live there — and an exported game resolves the same
 references against its project directory, because `GameRuntime` points `AnimationClipCache` at that
 directory exactly the way it points `ModelAssetCache` at it. The clip properties block edits `name`,
@@ -163,20 +182,50 @@ channel count, and **Bake to editable clip** turns one into an authored clip you
 | `Delete` | Delete the selected keys |
 | Shift-click | Extend the key selection |
 | Ctrl/Cmd-click | Toggle one key in the selection |
-| Ctrl/Cmd + `Z` | Undo |
-| Ctrl/Cmd + Shift + `Z` | Redo |
+| Ctrl/Cmd + `Z` | Undo — the clip on **Animate** and **Clips**, the rig on **Rig** |
+| Ctrl/Cmd + Shift + `Z` | Redo, on the same document |
 | Ctrl/Cmd + wheel | Zoom the timeline around the cursor |
 | Shift + wheel, or middle-drag | Pan the timeline sideways |
 | Wheel | Scroll the row list |
 
-Undo and redo apply while the panel is focused, and work on snapshots of the clip JSON — one entry
-per user action, capped at 64.
+Undo and redo apply while the panel is focused, and work on snapshots of the document's JSON — one
+entry per user action, capped at 64. The clip and the rig keep separate stacks, and the tab in front
+decides which one the shortcut reaches: a rig edit can never roll back a clip.
 
 ## Rigging
 
 The **Rig** tab authors a `RigAsset`: a skeleton that overlays an imported model, for a mesh that
 arrived without one (a sculpt exported with no armature) or one whose imported skeleton you want to
 extend.
+
+### Placing bones in the viewport
+
+The tab draws the rig **as it is being authored** over the mesh, not the one on disk: authored joints
+are filled dots, the imported nodes the rig has not claimed are rings, and every unsaved edit moves
+the overlay on the frame it happens. Selecting a joint hands it the transform gizmo, exactly the way
+the **Animate** tab hands the gizmo to a posed joint — so a bone is dragged into place rather than
+typed into three float fields. The gizmo writes the joint's **rest** transform, which is the bind
+pose every clip is later keyed against.
+
+- Click a filled dot to select that rig joint; the list on the left follows.
+- Click a ring — an imported node — to make it the parent the next **Add joint** attaches to. Nothing
+  about an imported node is editable; it is there to attach to.
+- **Add joint** parents onto whatever is selected and lands a short way above it, so the new bone has
+  visible length and a handle to grab. Then drag it.
+- Ctrl/Cmd + `Z` on this tab undoes the **rig**, on its own history, one entry per gizmo drag. The
+  clip's history is untouched — each tab undoes its own document.
+- **Viewport Overlay** controls what is drawn: **Draw rig**, **Joint names**, and **Imported nodes**
+  (the rings).
+
+The overlay needs a real **entity** to draw on, the same as the pose preview does, because the
+renderer draws entities and not asset files. With a workspace-model target the tab says so and points
+at **Add to world**.
+
+While this tab is in front the mesh holds its **bind pose**: the play head belongs to the clip being
+animated and has nothing to say about where a bone goes, and a posed character would have you aiming
+joints at vertices that have moved out from under them.
+
+### Joints and hierarchy
 
 A rig joint stores its parent **by name**, so inserting or re-parenting a joint never corrupts the
 hierarchy, and a joint may parent onto a node that came from the source file. Each joint carries a
@@ -204,6 +253,11 @@ radius set too small for the mesh's units — falls back to the nearest joint at
 wrong-looking vertex is something you can see and fix, while an unweighted one silently stays at the
 origin. So an `Envelope` bind that comes out looking rigid in patches is telling you to raise
 **Falloff**, not that the bind failed.
+
+Binding reports what it reached rather than leaving you to find out when the mesh deforms: each joint
+in the list carries the number of vertices weighted to it, a joint that reached none is flagged, and
+the tab counts single-influence vertices in the two distance modes — a majority of them is that same
+falloff-too-small symptom, stated before the character moves.
 
 The hard limit is **128 bones** (`kMaxModelBones`), which is the size of the palette the mesh
 pipeline uploads. The tab warns as the joint count approaches it, and `apply_rig` refuses a rig that
@@ -264,6 +318,32 @@ extends the mask down the hierarchy from each named joint). An `additive` layer 
 rather than a blend: translations and scales add and rotations compose, measured against the clip's
 own `additiveReferenceTime` pose for an additive clip, or the rest pose for a normal one. That is how
 an aim offset, a recoil or a lean stacks on top of a full-body run.
+
+### Previewing without play mode
+
+**Preview** runs the open graph on a character in the viewport while the editor is stopped. It drives
+an animator the panel owns — never one of `AnimationRuntime`'s, which belong to play mode — and
+publishes its palette through the same preview channel the Animation panel uses, so the character
+blends, transitions and loops in the viewport with nothing running.
+
+The preview reads the graph **as edited**, not as saved: the panel stages its working copy into
+`AnimationClipCache` under a reference of its own each frame, so retiming a transition or moving a
+blend threshold shows up on the next frame. Nothing else in the editor, and no game started without
+saving, ever sees that copy.
+
+While it runs, the parameter rail drives the preview instead of the authored defaults — the same rail
+that pokes a live animator in play mode — and the canvas highlights the state it is in and the
+transition it is taking. That makes "why does it never leave Idle" answerable by dragging a float,
+without entering play mode at all.
+
+The bar carries the target (an entity with a **Model** component, following the scene selection
+unless you pick one), play/pause, restart, and a speed slider. Play mode takes the preview down: the
+game's own animator owns the character then, and the panel goes back to mirroring it.
+
+**Assign to \<entity\>** points the selected entity's **Animator** component at the open graph,
+adding the component if it has none — the other half of the job, which used to mean leaving for the
+Properties panel and typing the graph's name. Next to a state's **Clip** field, the film button opens
+that clip in the Animation editor's **Animate** tab.
 
 **Validate** runs `AnimatorGraph::validate` and lists the structural problems it finds inline:
 duplicate parameter or state names, a default state index out of range, transitions pointing at a
@@ -347,7 +427,7 @@ base layer, everywhere except `stop`, which defaults to stopping all of them.
 
 | Method | Arguments | Returns |
 |--------|-----------|---------|
-| `Animation::play` | `entity, clip, blendSeconds = -1, looping = true, layer = 0` | `void` — crossfades to a clip by name or path; 0 seconds snaps, negative uses the component's **Default Blend** |
+| `Animation::play` | `entity, clip, blendSeconds = -1, looping = true, layer = 0` | `void` — crossfades to a clip by name, path, or imported reference (`"character.fbx#Walk"`); 0 seconds snaps, negative uses the component's **Default Blend** |
 | `Animation::playOnce` | `entity, clip, blendSeconds = -1, layer = 0` | `void` — plays once and holds the last frame; blend as for `play` |
 | `Animation::stop` | `entity, layer = -1` | `void` — stops one layer, or all of them, holding the current pose |
 | `Animation::restart` | `entity, layer = 0` | `void` — restarts the active source from its first frame |

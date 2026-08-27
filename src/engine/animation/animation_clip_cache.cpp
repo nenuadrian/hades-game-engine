@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <fstream>
 #include <memory>
+
+#include "../assets/model_asset.hpp"
+#include "../assets/model_asset_cache.hpp"
 #include <system_error>
 #include <utility>
 
@@ -252,8 +255,34 @@ namespace hades
     return assetRoot / ".hades" / "animators";
   }
 
+  bool AnimationClipCache::split_imported_reference(
+      const std::string &reference, std::string &outModel, std::string &outClip)
+  {
+    const std::size_t separator = reference.find(kImportedClipSeparator);
+    // Both halves have to be non-empty: "#Walk" names no model and "model#"
+    // names no clip, and either would otherwise resolve to a path with a '#'
+    // in it and fail much further away from the mistake.
+    if (separator == std::string::npos || separator == 0 || separator + 1 >= reference.size())
+    {
+      return false;
+    }
+
+    outModel = reference.substr(0, separator);
+    outClip = reference.substr(separator + 1);
+    return true;
+  }
+
   std::filesystem::path AnimationClipCache::resolveClipPath(const std::string &reference) const
   {
+    std::string modelReference;
+    std::string clipName;
+    if (split_imported_reference(reference, modelReference, clipName))
+    {
+      // An imported clip has no file of its own; the model that carries it is
+      // the honest answer to "where does this live".
+      return ModelAssetCache::instance().resolvePath(modelReference);
+    }
+
     std::lock_guard<std::mutex> lock(mutex_);
     return resolve_reference(root_, clips_directory(root_), reference);
   }
@@ -264,11 +293,81 @@ namespace hades
     return resolve_reference(root_, graphs_directory(root_), reference);
   }
 
+  const AnimationClipAsset *AnimationClipCache::imported_clip(
+      const std::string &reference, const std::string &modelReference, const std::string &clipName)
+  {
+    // Resolved before this cache's lock is taken. Holding two asset-cache
+    // mutexes at once is how a lock order gets established by accident, and
+    // ModelAssetCache::get() does real work (an assimp import, on a miss).
+    const ModelAsset *asset = ModelAssetCache::instance().get(modelReference);
+
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    ClipEntry &entry = clips_[reference];
+    const std::size_t nodeCount = asset != nullptr ? asset->nodes.size() : 0;
+    if (entry.sourceAsset == asset && entry.sourceNodeCount == nodeCount &&
+        (entry.asset != nullptr || !entry.error.empty()))
+    {
+      return entry.asset.get();
+    }
+
+    entry.asset.reset();
+    entry.error.clear();
+    entry.sourceAsset = asset;
+    entry.sourceNodeCount = nodeCount;
+
+    if (asset == nullptr)
+    {
+      entry.error = "could not load model '" + modelReference + "'";
+      return nullptr;
+    }
+
+    // First name wins, the same rule the importer applies when it binds two
+    // identically named nodes.
+    int clipIndex = -1;
+    for (std::size_t i = 0; i < asset->clips.size(); ++i)
+    {
+      if (asset->clips[i].name == clipName)
+      {
+        clipIndex = static_cast<int>(i);
+        break;
+      }
+    }
+
+    if (clipIndex < 0)
+    {
+      entry.error = "'" + modelReference + "' has no animation named '" + clipName + "'";
+      return nullptr;
+    }
+
+    auto baked = std::make_unique<AnimationClipAsset>();
+    if (!AnimationClipAsset::bake_from_model(*asset, clipIndex, *baked))
+    {
+      entry.error = "could not bake '" + clipName + "' from '" + modelReference + "'";
+      return nullptr;
+    }
+
+    // bake_from_model leaves these to the caller: only this layer knows the
+    // reference the clip was asked for by.
+    baked->sourceModel = modelReference;
+    baked->looping = true;
+
+    entry.asset = std::move(baked);
+    return entry.asset.get();
+  }
+
   const AnimationClipAsset *AnimationClipCache::clip(const std::string &reference)
   {
     if (reference.empty())
     {
       return nullptr;
+    }
+
+    std::string modelReference;
+    std::string clipName;
+    if (split_imported_reference(reference, modelReference, clipName))
+    {
+      return imported_clip(reference, modelReference, clipName);
     }
 
     std::lock_guard<std::mutex> lock(mutex_);
@@ -363,6 +462,18 @@ namespace hades
       return {};
     }
 
+    // An imported bake is keyed by the reference itself: resolveClipPath
+    // answers with the model file that carries it, which is a different
+    // entry — and the one place a failed bake would never be found.
+    std::string importedModel;
+    std::string importedClip;
+    if (split_imported_reference(reference, importedModel, importedClip))
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      const auto it = clips_.find(reference);
+      return it != clips_.end() ? it->second.error : std::string();
+    }
+
     // A reference does not say which kind of asset it names, so both maps
     // are consulted; only one of the two keys can ever be populated.
     const std::string clipKey = resolveClipPath(reference).string();
@@ -392,6 +503,23 @@ namespace hades
       if (errorMessage != nullptr)
       {
         *errorMessage = "no clip name given";
+      }
+      return false;
+    }
+
+    std::string importedModel;
+    std::string importedClip;
+    if (split_imported_reference(reference, importedModel, importedClip))
+    {
+      // An imported clip is a view onto the model file. Writing one would
+      // have to either edit the model — which nothing in the engine does —
+      // or silently write a JSON clip under a name that still reads back as
+      // the model's own. Bake it to an authored clip and save that.
+      if (errorMessage != nullptr)
+      {
+        *errorMessage = "'" + reference +
+                        "' is animation inside a model file and cannot be written; bake it to an "
+                        "editable clip first";
       }
       return false;
     }
@@ -452,6 +580,17 @@ namespace hades
 
   bool AnimationClipCache::deleteClip(const std::string &reference, std::string *errorMessage)
   {
+    std::string importedModel;
+    std::string importedClip;
+    if (split_imported_reference(reference, importedModel, importedClip))
+    {
+      if (errorMessage != nullptr)
+      {
+        *errorMessage = "'" + reference + "' lives inside a model file and cannot be deleted here";
+      }
+      return false;
+    }
+
     if (reference.empty())
     {
       if (errorMessage != nullptr)
@@ -531,6 +670,35 @@ namespace hades
     return list_json_stems(directory);
   }
 
+  std::vector<std::string> AnimationClipCache::listImportedClips(const std::string &modelReference)
+  {
+    std::vector<std::string> references;
+    if (modelReference.empty())
+    {
+      return references;
+    }
+
+    const ModelAsset *asset = ModelAssetCache::instance().get(modelReference);
+    if (asset == nullptr)
+    {
+      return references;
+    }
+
+    references.reserve(asset->clips.size());
+    for (const auto &clip : asset->clips)
+    {
+      // An unnamed clip cannot be addressed by reference at all, so listing
+      // one would offer a pick that resolves to nothing.
+      if (clip.name.empty())
+      {
+        continue;
+      }
+      references.push_back(modelReference + kImportedClipSeparator + clip.name);
+    }
+
+    return references;
+  }
+
   std::vector<std::string> AnimationClipCache::listGraphs() const
   {
     std::filesystem::path directory;
@@ -540,6 +708,24 @@ namespace hades
     }
 
     return list_json_stems(directory);
+  }
+
+  void AnimationClipCache::stageGraph(const std::string &reference, const AnimatorGraph &graph)
+  {
+    if (reference.empty())
+    {
+      return;
+    }
+
+    const std::string key = resolveGraphPath(reference).string();
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    GraphEntry &entry = graphs_[key];
+    entry.asset = std::make_unique<AnimatorGraph>(graph);
+    // A staged graph is by definition loadable, so any error recorded from an
+    // earlier read of the same key has to go with it — otherwise errorFor()
+    // keeps reporting a parse failure for a graph that is now in hand.
+    entry.error.clear();
   }
 
   void AnimationClipCache::invalidate(const std::string &reference)
@@ -555,6 +741,9 @@ namespace hades
     std::lock_guard<std::mutex> lock(mutex_);
     clips_.erase(clipKey);
     graphs_.erase(graphKey);
+    // An imported bake is keyed by the reference itself, not by a path: it
+    // has no file of its own for resolveClipPath to have produced.
+    clips_.erase(reference);
   }
 
   void AnimationClipCache::clear()

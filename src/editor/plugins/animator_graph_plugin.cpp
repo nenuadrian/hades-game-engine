@@ -14,9 +14,16 @@
 #include "../../engine/animation/animation_clip_cache.hpp"
 #include "../../engine/animation/animation_runtime.hpp"
 #include "../../engine/animation/animator_instance.hpp"
+#include "../../engine/assets/model_asset.hpp"
+#include "../../engine/assets/model_asset_cache.hpp"
 #include "../../engine/components/animator_component.hpp"
+#include "../../engine/components/model_component.hpp"
+#include "../../engine/components/name_component.hpp"
+#include "../../engine/core/ecs/entity_manager.hpp"
+#include "../../engine/core/ecs/world_utils.hpp"
 #include "../../engine/core/ecs/component_manager.hpp"
 #include "../IconsFontAwesome6.h"
+#include "animation_editor_plugin.hpp"
 #include "../editor.hpp"
 
 namespace hades
@@ -35,6 +42,14 @@ namespace hades
     constexpr int kTransitionSamples = 24;
     constexpr std::size_t kMaxUndo = 64;
     constexpr float kListPollInterval = 1.0f;
+
+    /// Reference the edit-mode preview stages its working graph under.
+    ///
+    /// Deliberately not the graph's own name: AnimatorInstance resolves its
+    /// graph through the shared clip cache, so staging under the real name
+    /// would hand every other animator in the editor — and a game started
+    /// without saving — the unsaved working copy.
+    constexpr const char *kPreviewGraphReference = "__hades_animator_preview";
 
     constexpr ImU32 kCanvasBackground = IM_COL32(24, 26, 31, 255);
     constexpr ImU32 kGridLine = IM_COL32(36, 40, 48, 255);
@@ -101,6 +116,19 @@ namespace hades
     bool param_is_numeric(AnimParamType type)
     {
       return type == AnimParamType::Float || type == AnimParamType::Int;
+    }
+
+    std::string entity_label(Entity::EntityId entity, ComponentManager &componentManager)
+    {
+      if (componentManager.hasComponent<NameComponent>(entity))
+      {
+        const std::string &name = componentManager.getComponent<NameComponent>(entity).value;
+        if (!name.empty())
+        {
+          return name + " (#" + std::to_string(entity) + ")";
+        }
+      }
+      return "Entity #" + std::to_string(entity);
     }
 
     std::string unique_state_name(const AnimLayer &layer, const std::string &base)
@@ -237,7 +265,13 @@ namespace hades
 
     // ---- Small reusable widgets --------------------------------------------
 
-    bool clip_combo(const char *label, std::string &value, const std::vector<std::string> &clips)
+    /// `imported` holds "model.fbx#Walk" references — animation that came
+    /// inside the character's model file, which the animator can now play
+    /// without it first being baked into `.hades/animations`. Listed above
+    /// the authored clips because it is what a freshly imported character
+    /// already has.
+    bool clip_combo(const char *label, std::string &value, const std::vector<std::string> &clips,
+                    const std::vector<std::string> &imported = {})
     {
       bool changed = false;
       const char *preview = value.empty() ? "(none)" : value.c_str();
@@ -247,6 +281,28 @@ namespace hades
         {
           value.clear();
           changed = true;
+        }
+
+        if (!imported.empty())
+        {
+          ImGui::TextDisabled("In the model");
+          for (const auto &clip : imported)
+          {
+            ImGui::PushID(clip.c_str());
+            const bool selected = (clip == value);
+            if (ImGui::Selectable(clip.c_str(), selected))
+            {
+              value = clip;
+              changed = true;
+            }
+            if (selected)
+            {
+              ImGui::SetItemDefaultFocus();
+            }
+            ImGui::PopID();
+          }
+          ImGui::Separator();
+          ImGui::TextDisabled("Authored clips");
         }
 
         for (const auto &clip : clips)
@@ -429,6 +485,9 @@ namespace hades
   {
     if (!visible_)
     {
+      // render() runs every frame regardless of visibility, which is what
+      // makes it the right place to notice the preview should stop.
+      release_preview();
       return;
     }
 
@@ -444,12 +503,345 @@ namespace hades
     {
       ImGui::End();
       visible_ = open;
+      // Collapsed counts as "not rendering": the preview would otherwise hold
+      // the character in whatever state it reached and never advance again.
+      release_preview();
       return;
     }
     visible_ = open;
 
     draw_panel(context);
     ImGui::End();
+
+    if (!visible_)
+    {
+      release_preview();
+    }
+  }
+
+  AnimatorGraphPlugin::~AnimatorGraphPlugin()
+  {
+    // AnimationRuntime outlives the editor's plugin list on shutdown, so a
+    // palette left published here would keep a dead entity's pose alive.
+    release_preview();
+  }
+
+  // ---- Edit-mode preview ----------------------------------------------------
+
+  void AnimatorGraphPlugin::release_preview()
+  {
+    if (publishedPreviewEntity_ != Entity::INVALID)
+    {
+      AnimationRuntime::instance().clear_preview(publishedPreviewEntity_);
+      publishedPreviewEntity_ = Entity::INVALID;
+    }
+
+    if (previewInstanceBound_)
+    {
+      previewInstance_.reset();
+      previewInstance_.set_graph_reference(std::string());
+      previewInstanceBound_ = false;
+      // The staged copy is the panel's, not the workspace's; leaving it in
+      // the cache would let a later lookup of the same reference answer with
+      // a graph that has no file behind it.
+      AnimationClipCache::instance().invalidate(kPreviewGraphReference);
+    }
+  }
+
+  void AnimatorGraphPlugin::refresh_imported_clip_list(EditorPluginContext &context)
+  {
+    // Whichever character this graph is about: the preview target if one is
+    // bound, otherwise the selected entity. Either way it is the model whose
+    // own animation the states are most likely to want.
+    Entity::EntityId source = previewEntity_;
+    if (source == Entity::INVALID && context.editor.state.selectedEntity.has_value())
+    {
+      source = *context.editor.state.selectedEntity;
+    }
+
+    std::string modelPath;
+    if (source != Entity::INVALID && context.componentManager.hasComponent<ModelComponent>(source))
+    {
+      modelPath = context.componentManager.getComponent<ModelComponent>(source).assetPath;
+    }
+
+    if (modelPath == importedClipModel_)
+    {
+      return;
+    }
+
+    importedClipModel_ = modelPath;
+    importedClipList_ = AnimationClipCache::instance().listImportedClips(modelPath);
+  }
+
+  void AnimatorGraphPlugin::resolve_preview_target(EditorPluginContext &context)
+  {
+    previewCandidates_.clear();
+
+    const auto activeWorld = context.editor.state.activeWorld;
+    for (const Entity::EntityId entity : context.entityManager.getActiveEntities())
+    {
+      if (!context.componentManager.hasComponent<ModelComponent>(entity))
+      {
+        continue;
+      }
+      if (activeWorld.has_value() &&
+          !entity_belongs_to_world(entity, *activeWorld, context.componentManager))
+      {
+        continue;
+      }
+      previewCandidates_.push_back(entity);
+    }
+
+    const auto known = [this](Entity::EntityId entity)
+    {
+      return std::find(previewCandidates_.begin(), previewCandidates_.end(), entity) !=
+             previewCandidates_.end();
+    };
+
+    if (previewFollowSelection_ && context.editor.state.selectedEntity.has_value() &&
+        known(*context.editor.state.selectedEntity))
+    {
+      previewEntity_ = *context.editor.state.selectedEntity;
+    }
+
+    if (previewEntity_ != Entity::INVALID && !known(previewEntity_))
+    {
+      // Deleted, or the world changed underneath the panel.
+      previewEntity_ = Entity::INVALID;
+    }
+
+    if (previewEntity_ == Entity::INVALID && previewFollowSelection_ && !previewCandidates_.empty())
+    {
+      // Turning the preview on with nothing selected should show something
+      // rather than an empty target and an explanation.
+      previewEntity_ = previewCandidates_.front();
+    }
+  }
+
+  void AnimatorGraphPlugin::update_preview(EditorPluginContext &context)
+  {
+    previewError_.clear();
+
+    if (!previewEnabled_ || !graphLoaded_ || context.editor.state.isPlaying)
+    {
+      // Play mode owns the character: the game's own animator is running, and
+      // a preview palette published over it would freeze exactly what the
+      // user opened this panel to watch.
+      release_preview();
+      return;
+    }
+
+    resolve_preview_target(context);
+    if (previewEntity_ == Entity::INVALID)
+    {
+      release_preview();
+      previewError_ = "No entity with a Model component in this world to preview on.";
+      return;
+    }
+
+    const std::string modelPath =
+        context.componentManager.getComponent<ModelComponent>(previewEntity_).assetPath;
+    const ModelAsset *asset =
+        modelPath.empty() ? nullptr : ModelAssetCache::instance().get(modelPath);
+    if (asset == nullptr)
+    {
+      release_preview();
+      previewError_ = modelPath.empty() ? "The target entity has no model."
+                                        : "Could not load " + modelPath + ".";
+      return;
+    }
+
+    AnimationClipCache &clips = AnimationClipCache::instance();
+    // Re-staged every frame. The panel edits `graph_` in place through a
+    // dozen widgets and carries no revision counter, so re-staging is what
+    // makes a retimed transition or a moved blend threshold show up on the
+    // very next frame instead of on the next save.
+    clips.stageGraph(kPreviewGraphReference, graph_);
+
+    if (!previewInstanceBound_)
+    {
+      previewInstance_.set_graph_reference(kPreviewGraphReference);
+      previewInstanceBound_ = true;
+    }
+
+    previewInstance_.set_playing(previewPlaying_);
+    previewInstance_.set_speed(previewSpeed_);
+    previewInstance_.update(context.deltaTime, *asset, clips);
+
+    if (publishedPreviewEntity_ != Entity::INVALID && publishedPreviewEntity_ != previewEntity_)
+    {
+      AnimationRuntime::instance().clear_preview(publishedPreviewEntity_);
+    }
+
+    AnimationRuntime::instance().set_preview_palette(previewEntity_, previewInstance_.palette());
+    publishedPreviewEntity_ = previewEntity_;
+  }
+
+  AnimatorInstance *AnimatorGraphPlugin::active_instance(EditorPluginContext &context)
+  {
+    if (context.editor.state.isPlaying)
+    {
+      const Entity::EntityId entity = debug_entity(context);
+      return entity == Entity::INVALID ? nullptr : AnimationRuntime::instance().find(entity);
+    }
+
+    return publishedPreviewEntity_ != Entity::INVALID ? &previewInstance_ : nullptr;
+  }
+
+  void AnimatorGraphPlugin::assign_graph_to_entity(
+      EditorPluginContext &context, Entity::EntityId entity)
+  {
+    if (entity == Entity::INVALID || !graphLoaded_ || graphName_.empty())
+    {
+      return;
+    }
+
+    if (!context.componentManager.hasComponent<AnimatorComponent>(entity))
+    {
+      context.componentManager.addComponent(entity, AnimatorComponent{});
+    }
+
+    auto &animator = context.componentManager.getComponent<AnimatorComponent>(entity);
+    animator.graphPath = graphName_;
+    statusMessage_ = "'" + graphName_ + "' assigned to the selected entity.";
+    errorMessage_.clear();
+  }
+
+  void AnimatorGraphPlugin::draw_preview_bar(EditorPluginContext &context)
+  {
+    if (!graphLoaded_)
+    {
+      return;
+    }
+
+    ImGui::Separator();
+
+    if (context.editor.state.isPlaying)
+    {
+      ImGui::TextColored(
+          ImVec4(0.47f, 0.78f, 0.55f, 1.0f),
+          ICON_FA_PLAY "  Play mode — mirroring the running animator on the selected entity.");
+      return;
+    }
+
+    if (ImGui::Checkbox(ICON_FA_EYE "  Preview", &previewEnabled_) && !previewEnabled_)
+    {
+      release_preview();
+    }
+    if (ImGui::IsItemHovered())
+    {
+      ImGui::SetTooltip(
+          "Run this graph on an entity in the viewport without entering play mode.\n"
+          "Unsaved edits are previewed exactly as they stand.");
+    }
+
+    ImGui::BeginDisabled(!previewEnabled_);
+
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(200.0f);
+    const std::string targetPreview =
+        previewEntity_ == Entity::INVALID
+            ? std::string("<no target>")
+            : entity_label(previewEntity_, context.componentManager);
+    if (ImGui::BeginCombo("##animator_preview_target", targetPreview.c_str()))
+    {
+      for (const Entity::EntityId entity : previewCandidates_)
+      {
+        ImGui::PushID(static_cast<int>(entity));
+        const bool selected = entity == previewEntity_;
+        if (ImGui::Selectable(entity_label(entity, context.componentManager).c_str(), selected))
+        {
+          previewEntity_ = entity;
+          // Picking a target by hand is the user overriding the follow, and
+          // leaving it on would snap straight back to the selection.
+          previewFollowSelection_ = false;
+        }
+        ImGui::PopID();
+      }
+      if (previewCandidates_.empty())
+      {
+        ImGui::TextDisabled("no entities with a model in this world");
+      }
+      ImGui::EndCombo();
+    }
+
+    ImGui::SameLine();
+    ImGui::Checkbox("Follow selection", &previewFollowSelection_);
+
+    ImGui::SameLine();
+    if (ImGui::Button(previewPlaying_ ? ICON_FA_PAUSE "##animator_preview_play"
+                                      : ICON_FA_PLAY "##animator_preview_play"))
+    {
+      previewPlaying_ = !previewPlaying_;
+    }
+    if (ImGui::IsItemHovered())
+    {
+      ImGui::SetTooltip(previewPlaying_ ? "Pause the preview" : "Resume the preview");
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button(ICON_FA_ROTATE_LEFT "##animator_preview_restart"))
+    {
+      previewInstance_.reset();
+    }
+    if (ImGui::IsItemHovered())
+    {
+      ImGui::SetTooltip("Restart from the default state");
+    }
+
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(140.0f);
+    ImGui::SliderFloat("##animator_preview_speed", &previewSpeed_, 0.0f, 4.0f, "speed %.2fx");
+
+    ImGui::EndDisabled();
+
+    if (!previewEnabled_)
+    {
+      ImGui::TextDisabled(
+          "Turn on Preview to run this graph on a character now — the parameter rail then drives "
+          "it live, and the canvas highlights the state it is in.");
+    }
+    else if (!previewError_.empty())
+    {
+      ImGui::TextColored(
+          ImVec4(0.95f, 0.78f, 0.35f, 1.0f), ICON_FA_TRIANGLE_EXCLAMATION "  %s",
+          previewError_.c_str());
+    }
+    else if (publishedPreviewEntity_ != Entity::INVALID)
+    {
+      const std::string state = previewInstance_.current_state(activeLayer_);
+      const std::string clip = previewInstance_.current_clip(activeLayer_);
+      ImGui::TextColored(
+          ImVec4(0.63f, 0.67f, 0.72f, 1.0f), "State: %s   Clip: %s   t: %.2f%s",
+          state.empty() ? "-" : state.c_str(), clip.empty() ? "-" : clip.c_str(),
+          static_cast<double>(previewInstance_.normalized_time(activeLayer_)),
+          previewInstance_.is_transitioning(activeLayer_) ? "   (blending)" : "");
+    }
+
+    // Authoring a graph and pointing an entity at it are two halves of one
+    // job, and the second half used to live in another panel entirely.
+    if (context.editor.state.selectedEntity.has_value())
+    {
+      const Entity::EntityId selected = *context.editor.state.selectedEntity;
+      const bool alreadyAssigned =
+          context.componentManager.hasComponent<AnimatorComponent>(selected) &&
+          context.componentManager.getComponent<AnimatorComponent>(selected).graphPath == graphName_;
+
+      ImGui::BeginDisabled(alreadyAssigned);
+      const std::string label =
+          std::string(ICON_FA_LINK "  Assign to ") + entity_label(selected, context.componentManager);
+      if (ImGui::Button(label.c_str()))
+      {
+        assign_graph_to_entity(context, selected);
+      }
+      ImGui::EndDisabled();
+      if (alreadyAssigned)
+      {
+        ImGui::SameLine();
+        ImGui::TextDisabled("already runs this animator");
+      }
+    }
   }
 
   void AnimatorGraphPlugin::draw_panel(EditorPluginContext &context)
@@ -463,6 +855,10 @@ namespace hades
     sync_asset_root(context);
     poll_asset_lists(context);
     clamp_selection();
+    // Before capture_debug_state, so the highlight the canvas draws is this
+    // frame's pose rather than the previous one's.
+    update_preview(context);
+    refresh_imported_clip_list(context);
     capture_debug_state(context);
 
     // Undo is window-scoped: the canvas has no keyboard focus of its own, so
@@ -487,6 +883,7 @@ namespace hades
     }
 
     draw_toolbar(context);
+    draw_preview_bar(context);
 
     if (!errorMessage_.empty())
     {
@@ -893,16 +1290,16 @@ namespace hades
 
     ImGui::SeparatorText(ICON_FA_SLIDERS "  Parameters");
 
-    AnimatorInstance *instance = nullptr;
-    const Entity::EntityId entity = debug_entity(context);
-    if (entity != Entity::INVALID)
-    {
-      instance = AnimationRuntime::instance().find(entity);
-    }
+    // The same rail drives a running game's animator in play mode and the
+    // panel's own preview in edit mode: poking a parameter and watching the
+    // character blend is the point either way.
+    AnimatorInstance *instance = active_instance(context);
 
     if (instance != nullptr)
     {
-      ImGui::TextColored(ImVec4(0.47f, 0.78f, 0.55f, 1.0f), ICON_FA_PLAY "  live values");
+      ImGui::TextColored(
+          ImVec4(0.47f, 0.78f, 0.55f, 1.0f), ICON_FA_PLAY "  %s",
+          context.editor.state.isPlaying ? "live values" : "preview values");
     }
 
     int removeParameter = -1;
@@ -1807,12 +2204,29 @@ namespace hades
     {
       // Combos are handed a copy: the undo snapshot has to predate the change.
       std::string clip = state.clip;
-      ImGui::SetNextItemWidth(-1.0f);
-      if (clip_combo("##state_clip", clip, clipList_) && clip != state.clip)
+      ImGui::SetNextItemWidth(-40.0f);
+      if (clip_combo("##state_clip", clip, clipList_, importedClipList_) && clip != state.clip)
       {
         push_undo("Set clip");
         state.clip = std::move(clip);
         graphDirty_ = true;
+      }
+
+      // The clip a state plays is authored in the other panel, and finding it
+      // there used to mean remembering its name and hunting the Clips tab.
+      ImGui::SameLine();
+      ImGui::BeginDisabled(state.clip.empty());
+      if (ImGui::Button(ICON_FA_FILM "##state_open_clip"))
+      {
+        if (auto *panel = context.editor.find_plugin("animation-editor"))
+        {
+          static_cast<AnimationEditorPlugin *>(panel)->reveal_clip(context, state.clip);
+        }
+      }
+      ImGui::EndDisabled();
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+      {
+        ImGui::SetTooltip("Open this clip in the Animation editor");
       }
     }
 
@@ -1884,7 +2298,8 @@ namespace hades
           ImGui::TableNextColumn();
           ImGui::SetNextItemWidth(-1.0f);
           std::string entryClip = entry.clip;
-          if (clip_combo("##entry_clip", entryClip, clipList_) && entryClip != entry.clip)
+          if (clip_combo("##entry_clip", entryClip, clipList_, importedClipList_) &&
+              entryClip != entry.clip)
           {
             push_undo("Blend entry clip");
             entry.clip = std::move(entryClip);
@@ -2664,13 +3079,7 @@ namespace hades
     // disagree in a test before they disagree in front of a user.
     liveParameterRows_ = 0;
 
-    const Entity::EntityId entity = debug_entity(context);
-    if (entity == Entity::INVALID)
-    {
-      return;
-    }
-
-    const AnimatorInstance *instance = AnimationRuntime::instance().find(entity);
+    const AnimatorInstance *instance = active_instance(context);
     if (instance == nullptr)
     {
       return;
@@ -2703,6 +3112,8 @@ namespace hades
       // graphName_ is a bare stem, so Save would resolve it against the newly
       // opened workspace and write the previous project's states over the
       // animator of the same name there.
+      release_preview();
+      previewEntity_ = Entity::INVALID;
       graph_ = AnimatorGraph{};
       graphName_.clear();
       graphLoaded_ = false;

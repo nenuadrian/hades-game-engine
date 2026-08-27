@@ -60,6 +60,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -1129,6 +1130,7 @@ int main()
     AnimateUndoRedo,
     AnimateUndoGated,
     RigTab,
+    RigViewport,
     ClipsTab,
     AnimatorLoaded,
     AnimatorStateSelected,
@@ -1136,6 +1138,7 @@ int main()
     AnimatorDragUndo,
     AnimatorUndoGated,
     AnimatorBrokenGraph,
+    AnimatorPreview,
     PlayModeEnter,
     PlayModeSettled,
     PlayModeAnyState,
@@ -1166,6 +1169,7 @@ int main()
       {Phase::AnimateUndoRedo, "Animate tab, Ctrl+Z then Ctrl+Shift+Z over a real edit", 30},
       {Phase::AnimateUndoGated, "Animate tab, Ctrl+Z ignored while a text field is active", 26},
       {Phase::RigTab, "Rig tab", 32},
+      {Phase::RigViewport, "Rig tab, joint picked and dragged through the viewport", 30},
       {Phase::ClipsTab, "Clips tab", 32},
       {Phase::AnimatorLoaded, "Animator, graph loaded", 24},
       {Phase::AnimatorStateSelected, "Animator, state selected on the canvas", 32},
@@ -1173,6 +1177,7 @@ int main()
       {Phase::AnimatorDragUndo, "Animator, node dragged then Ctrl+Z / Ctrl+Shift+Z", 40},
       {Phase::AnimatorUndoGated, "Animator, Ctrl+Z ignored while a text field is active", 26},
       {Phase::AnimatorBrokenGraph, "Animator, graph that fails validation", 20},
+      {Phase::AnimatorPreview, "Animator, edit-mode preview driving an entity", 40},
       {Phase::PlayModeEnter, "play mode, animator crossfading into its first state", 20},
       {Phase::PlayModeSettled, "play mode, animator settled on one state", 14},
       {Phase::PlayModeAnyState, "play mode, any-state transition and the live state panel", 60},
@@ -1188,6 +1193,18 @@ int main()
   constexpr int kAnimateUndoCheck = 14;
   constexpr int kAnimateRedoTap = 18;
   constexpr int kAnimateRedoCheck = 22;
+
+  // Rig viewport: pick on 2, drag 4..7 (finished on 7), check on 9, Ctrl+Z on
+  // 14, checked on 18.
+  constexpr int kRigPickFrame = 2;
+  constexpr int kRigDragStart = 4;
+  constexpr int kRigDragDone = 7;
+  constexpr int kRigDragCheck = 9;
+  constexpr int kRigUndoTap = 14;
+  constexpr int kRigUndoCheck = 18;
+  /// Far from any rest translation in the fixture rig, so "the joint moved"
+  /// cannot be true by coincidence.
+  constexpr float kRigDragTargetX = 3.75f;
 
   constexpr int kAnimatorDragStart = 4;   // press on 5, drag to 10, release on 11
   constexpr int kAnimatorDragEnd = 10;
@@ -1223,6 +1240,13 @@ int main()
   bool sawCurveHandleDrag = false;
   bool sawAutoKey = false;
   bool sawRigTab = false;
+  bool sawRigOverlay = false;
+  bool sawRigPick = false;
+  bool sawRigDrag = false;
+  bool sawRigUndo = false;
+  bool sawAnimatorPreview = false;
+  std::size_t rigUndoDepthBefore = 0;
+  float rigTranslationBeforeDrag = 0.0f;
   bool sawClipsTab = false;
   bool sawGraphLoaded = false;
   bool sawStateNodes = false;
@@ -1333,6 +1357,12 @@ int main()
       case Phase::AnimatorDragUndo:
         drive_undo_chord(
             io, local, {{kAnimatorUndoTap, false}, {kAnimatorRedoTap, true}});
+        break;
+
+      case Phase::RigViewport:
+        // The Rig tab keeps its own history: undoing here must roll back the
+        // rig, and must not touch the clip.
+        drive_undo_chord(io, local, {{kRigUndoTap, false}});
         break;
 
       case Phase::AnimateUndoGated:
@@ -1565,6 +1595,34 @@ int main()
         timeline.time = 1.7f;
         break;
 
+      case Phase::RigViewport:
+      {
+        // The Rig tab's overlay is the only way a rig joint can be picked or
+        // placed, and it is entirely a conversation through AnimationEditState
+        // -- exactly what the 3D view writes when a bone is clicked or a
+        // gizmo axis is dragged.
+        AnimationEditState &editState = animation_edit_state();
+        if (local == kRigPickFrame && animationPanel.rig_joint_count() > 1)
+        {
+          const int slot = animationPanel.rig_overlay_slot(1);
+          if (slot >= 0)
+          {
+            editState.pickedJoint = slot;
+          }
+        }
+        if (local >= kRigDragStart && local <= kRigDragDone)
+        {
+          // One gesture: a run of moves and a single finished frame, which is
+          // what has to collapse into one undo entry.
+          editState.jointEdited = true;
+          editState.jointEditFinished = (local == kRigDragDone);
+          editState.editedTranslation = {kRigDragTargetX, 0.5f, 0.0f};
+          editState.editedRotation = math::Quat{};
+          editState.editedScale = {1.0f, 1.0f, 1.0f};
+        }
+        break;
+      }
+
       case Phase::AnimatorDragUndo:
         if (local == 0)
         {
@@ -1572,6 +1630,14 @@ int main()
           // entry" is only a statement about the drag if nothing else is on
           // the stack.
           animatorPanel.open_graph(context, "Locomotion");
+        }
+        break;
+
+      case Phase::AnimatorPreview:
+        if (local == 0)
+        {
+          animatorPanel.open_graph(context, "Locomotion");
+          animatorPanel.set_preview_enabled(true);
         }
         break;
 
@@ -1635,7 +1701,8 @@ int main()
 
       // ---- Render ------------------------------------------------------
       if (local == 0 &&
-          (step.phase == Phase::AnimateUndoRedo || step.phase == Phase::AnimateUndoGated))
+          (step.phase == Phase::AnimateUndoRedo || step.phase == Phase::AnimateUndoGated ||
+           step.phase == Phase::RigViewport))
       {
         // Focus the Animation panel: its undo shortcut only fires when its
         // own window tree holds focus.
@@ -1704,6 +1771,43 @@ int main()
       if (animatorPanel.debug_overlay_active())
       {
         sawAnimatorDebug = true;
+      }
+
+      // ---- Rig tab: the viewport overlay, a pick, a drag and an undo -----
+      if (step.phase == Phase::RigViewport)
+      {
+        // Imported nodes AND the rig's own joints: an overlay that published
+        // only one of the two would still be non-empty, so the count is what
+        // separates them.
+        if (animationPanel.rig_overlay_joint_count() > animationPanel.rig_joint_count())
+        {
+          sawRigOverlay = true;
+        }
+        if (local == kRigPickFrame + 1 && animationPanel.selected_rig_joint() == 1)
+        {
+          sawRigPick = true;
+          rigUndoDepthBefore = animationPanel.rig_undo_depth();
+          rigTranslationBeforeDrag = animationPanel.rig_joint_translation(1).x;
+        }
+        if (local == kRigDragCheck && sawRigPick &&
+            std::fabs(animationPanel.rig_joint_translation(1).x - kRigDragTargetX) < 1e-4f &&
+            animationPanel.rig_undo_depth() == rigUndoDepthBefore + 1)
+        {
+          sawRigDrag = true;
+        }
+        if (local == kRigUndoCheck && sawRigDrag &&
+            std::fabs(animationPanel.rig_joint_translation(1).x - rigTranslationBeforeDrag) < 1e-4f)
+        {
+          sawRigUndo = true;
+        }
+      }
+
+      // ---- Animator: the edit-mode preview -------------------------------
+      if (step.phase == Phase::AnimatorPreview && animatorPanel.preview_active() &&
+          !animatorPanel.preview_state_name().empty() &&
+          hades::AnimationRuntime::instance().has_preview(character))
+      {
+        sawAnimatorPreview = true;
       }
 
       // ---- Animation panel: undo, redo, and the gate ---------------------
@@ -1918,7 +2022,7 @@ int main()
       }
 
       // Tab switching: queued on the tab bar so the next frame draws it.
-      if (step.phase == Phase::RigTab && local == 0)
+      if ((step.phase == Phase::RigTab || step.phase == Phase::RigViewport) && local == 0)
       {
         queue_tab(1);
       }
@@ -2049,7 +2153,17 @@ int main()
   hades::AnimationRuntime::instance().clear();
   ModelAssetCache::instance().clear();
   AnimationClipCache::instance().clear();
-  std::filesystem::remove_all(workspace, errorCode);
+  // The fixture is the only rigged model in the tree, so it is also the only
+  // thing to open the editor on when a panel has to be looked at rather than
+  // asserted about. Keeping it is opt-in so CI still leaves nothing behind.
+  if (std::getenv("HADES_SMOKE_KEEP_WORKSPACE") == nullptr)
+  {
+    std::filesystem::remove_all(workspace, errorCode);
+  }
+  else
+  {
+    std::printf("animation smoke: kept workspace at %s\n", workspace.string().c_str());
+  }
 
   // ---- Verdict ------------------------------------------------------------
 
@@ -2089,6 +2203,30 @@ int main()
   if (!sawRigTab)
   {
     fail("the Rig tab never became active, so its draw path never ran");
+  }
+  if (!sawRigOverlay)
+  {
+    fail("the Rig tab published no viewport overlay — bones cannot be seen, picked or "
+         "dragged, so the rig is authored blind");
+  }
+  if (!sawRigPick)
+  {
+    fail("a viewport joint pick on the Rig tab selected no rig joint");
+  }
+  if (!sawRigDrag)
+  {
+    fail("a gizmo drag on the Rig tab did not write the joint's rest translation, or "
+         "opened more than one undo entry for a single gesture");
+  }
+  if (!sawRigUndo)
+  {
+    fail("Ctrl+Z on the Rig tab did not roll the dragged joint back — the rig has no "
+         "history of its own, or the shortcut reached the clip stack instead");
+  }
+  if (!sawAnimatorPreview)
+  {
+    fail("the Animator's edit-mode preview never drove an entity — the graph is still "
+         "inert until play mode");
   }
   if (!sawClipsTab)
   {
@@ -2236,7 +2374,9 @@ int main()
       "%zu-joint rig, %zu dope-sheet rows, %zu clip keys, state %d and transition %d "
       "selected through the canvas, a node dragged and walked back and forward "
       "through Ctrl+Z/Ctrl+Shift+Z on both panels, both shortcuts correctly ignored "
-      "over a live text field, and the play-mode overlay observed active, "
+      "over a live text field, a rig joint picked and dragged into place through the "
+      "viewport overlay and walked back with Ctrl+Z, the Animator's edit-mode preview "
+      "observed driving an entity, and the play-mode overlay observed active, "
       "mid-crossfade, on an any-state stub, feeding the parameter rail, and stood "
       "down for a foreign graph\n",
       totalFrames,

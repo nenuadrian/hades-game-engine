@@ -40,6 +40,17 @@ namespace hades
     /// Rig joints get within this many entries of the shader palette limit
     /// before the panel starts warning: past it, apply_rig refuses the rig
     /// outright, and finding that out at save time is too late.
+    /// Which tab is drawing. The panel branches on this in more places than
+    /// the tab bar itself — the viewport overlay, the undo shortcut and the
+    /// preview all belong to whichever tab is in front.
+    constexpr int kAnimateTab = 0;
+    constexpr int kRigTab = 1;
+    constexpr int kClipsTab = 2;
+
+    /// Where a new rig joint lands relative to its parent, as a fraction of
+    /// the model's bounds radius.
+    constexpr float kNewJointOffset = 0.18f;
+
     constexpr std::size_t kBoneWarningMargin = 16;
     constexpr std::size_t kMaxUndoEntries = 64;
     constexpr float kTimeEpsilon = 1e-4f;
@@ -260,33 +271,42 @@ namespace hades
     advance_playback(context.deltaTime, *asset);
     update_preview_pose();
 
+    const auto tab_flags = [this](int tab)
+    {
+      return pendingTabSelect_ == tab ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
+    };
+
     if (ImGui::BeginTabBar("##animation-tabs", ImGuiTabBarFlags_None))
     {
-      if (ImGui::BeginTabItem(ICON_FA_PERSON_RUNNING "  Animate"))
+      if (ImGui::BeginTabItem(ICON_FA_PERSON_RUNNING "  Animate", nullptr, tab_flags(kAnimateTab)))
       {
-        activeTab_ = 0;
+        activeTab_ = kAnimateTab;
         draw_animate_tab(context, *asset);
         ImGui::EndTabItem();
       }
 
-      if (ImGui::BeginTabItem(ICON_FA_BONE "  Rig"))
+      if (ImGui::BeginTabItem(ICON_FA_BONE "  Rig", nullptr, tab_flags(kRigTab)))
       {
-        activeTab_ = 1;
+        activeTab_ = kRigTab;
         draw_rig_tab(context, *asset);
         ImGui::EndTabItem();
       }
 
       const std::string clipsLabel =
           std::string(ICON_FA_CLAPPERBOARD "  Clips") + (clipDirty_ ? " *" : "") + "###clips-tab";
-      if (ImGui::BeginTabItem(clipsLabel.c_str()))
+      if (ImGui::BeginTabItem(clipsLabel.c_str(), nullptr, tab_flags(kClipsTab)))
       {
-        activeTab_ = 2;
+        activeTab_ = kClipsTab;
         draw_clips_tab(context, *asset);
         ImGui::EndTabItem();
       }
 
       ImGui::EndTabBar();
     }
+
+    // Consumed whether or not the tab bar drew: a request that outlives its
+    // frame would keep yanking the panel back to that tab.
+    pendingTabSelect_ = -1;
 
     // "Save rig" in the Rig tab calls ModelAssetCache::invalidate(), which
     // erases the cache entry and destroys the ModelAsset `asset` points at.
@@ -300,6 +320,7 @@ namespace hades
       release_preview();
       draw_status_lines();
       refresh_undo_baseline();
+      refresh_rig_undo_baseline();
       return;
     }
 
@@ -319,6 +340,29 @@ namespace hades
     // Every mutation for this frame has landed, so a snapshot taken now is
     // the state the next edit should undo back to.
     refresh_undo_baseline();
+    refresh_rig_undo_baseline();
+  }
+
+  void AnimationEditorPlugin::reveal_clip(EditorPluginContext &context, const std::string &name)
+  {
+    set_visible(context.editor, true);
+    pendingTabSelect_ = kAnimateTab;
+
+    if (name.empty() || name == clipName_)
+    {
+      return;
+    }
+
+    if (clipDirty_)
+    {
+      // Refuse to drop unsaved work silently; the modal decides. Same path a
+      // click in the Clips tab takes.
+      pendingClipSwitch_ = name;
+      openSwitchClipPopup_ = true;
+      return;
+    }
+
+    load_clip(context, name);
   }
 
   void AnimationEditorPlugin::sync_asset_roots(EditorPluginContext &context)
@@ -391,6 +435,22 @@ namespace hades
     const bool commandDown = io.KeyCtrl || io.KeySuper;
     if (!commandDown || !ImGui::IsKeyPressed(ImGuiKey_Z, false))
     {
+      return;
+    }
+
+    // Each tab undoes its own document. The Rig tab edits a rig and the
+    // other two edit a clip, and rolling back the wrong one is worse than
+    // not rolling back at all.
+    if (activeTab_ == kRigTab)
+    {
+      if (io.KeyShift)
+      {
+        rig_redo();
+      }
+      else
+      {
+        rig_undo();
+      }
       return;
     }
 
@@ -658,6 +718,16 @@ namespace hades
     selectedRigJoint_ = -1;
     rigLoaded_ = false;
     rig_ = RigAsset{};
+    // The maps are indexed by the old model's node count; a pick arriving
+    // before the next publish would resolve against a rig that is gone.
+    overlayToRigJoint_.clear();
+    overlayToNode_.clear();
+    rigJointToOverlay_.clear();
+    nodeToOverlay_.clear();
+    rigRestGlobals_.clear();
+    rigJointVertices_.clear();
+    rigGizmoDragging_ = false;
+    reset_rig_undo();
     clear_pose_override();
   }
 
@@ -807,6 +877,17 @@ namespace hades
 
   void AnimationEditorPlugin::publish_preview(const ModelAsset &asset)
   {
+    if (activeTab_ == kRigTab)
+    {
+      // The Rig tab publishes the rig being AUTHORED rather than the
+      // imported skeleton, so a joint that has not been saved yet is still
+      // drawn and still draggable. It deliberately runs with an empty
+      // skeleton too: a mesh that arrived with no armature is the case this
+      // tab exists for, and refusing to draw would leave it authored blind.
+      publish_rig_preview(asset);
+      return;
+    }
+
     if (skeleton_.empty())
     {
       release_preview();
@@ -865,7 +946,7 @@ namespace hades
     }
 
     editState.selectedJoint = selectedJoint_;
-    editState.poseEditing = selectedJoint_ >= 0 && activeTab_ == 0;
+    editState.poseEditing = selectedJoint_ >= 0 && activeTab_ == kAnimateTab;
 
     if (selectedJoint_ >= 0 && static_cast<std::size_t>(selectedJoint_) < previewPose_.size())
     {
@@ -922,6 +1003,16 @@ namespace hades
 
   void AnimationEditorPlugin::consume_viewport_input(const ModelAsset &asset)
   {
+    // `activeTab_` still holds the tab that drew LAST frame, which is
+    // exactly the one that published the overlay the viewport just replied
+    // to. Reading it after the tab bar has run would pair this frame's tab
+    // with the previous tab's joint numbering.
+    if (activeTab_ == kRigTab)
+    {
+      consume_viewport_input_rig();
+      return;
+    }
+
     AnimationEditState &editState = animation_edit_state();
 
     if (editState.pickedJoint >= 0)
@@ -1719,6 +1810,30 @@ namespace hades
     }
   }
 
+  void AnimationEditorPlugin::draw_rig_overlay_options()
+  {
+    AnimationEditState &editState = animation_edit_state();
+    ImGui::Checkbox("Draw rig", &editState.showSkeleton);
+    ImGui::SameLine();
+    ImGui::Checkbox("Joint names", &editState.showJointNames);
+    ImGui::SameLine();
+    // The same flag the Animate tab calls "Unskinned joints". On this tab
+    // the rings are the imported nodes the rig has not claimed — hierarchy
+    // you can parent onto but not move — so it is named for what it hides
+    // here rather than for the flag it sets.
+    ImGui::Checkbox("Imported nodes", &editState.showUnskinnedJoints);
+
+    if (editState.hoveredJoint >= 0 &&
+        static_cast<std::size_t>(editState.hoveredJoint) < editState.jointNames.size())
+    {
+      const std::size_t slot = static_cast<std::size_t>(editState.hoveredJoint);
+      const bool authored = slot < overlayToRigJoint_.size() && overlayToRigJoint_[slot] >= 0;
+      ImGui::TextColored(
+          dim_color(), "Hovered: %s%s", editState.jointNames[slot].c_str(),
+          authored ? "" : "  (imported — click to parent the next joint here)");
+    }
+  }
+
   // ---- Clip editing --------------------------------------------------------
 
   void AnimationEditorPlugin::key_selected_joint(float time)
@@ -2009,7 +2124,7 @@ namespace hades
   {
     UndoEntry entry;
     entry.label = label;
-    entry.clip = clip_.to_json();
+    entry.document = clip_.to_json();
 
     undoStack_.push_back(std::move(entry));
     while (undoStack_.size() > kMaxUndoEntries)
@@ -2040,7 +2155,7 @@ namespace hades
 
     UndoEntry entry;
     entry.label = label;
-    entry.clip = undoBaseline_;
+    entry.document = undoBaseline_;
 
     undoStack_.push_back(std::move(entry));
     while (undoStack_.size() > kMaxUndoEntries)
@@ -2082,7 +2197,7 @@ namespace hades
 
     UndoEntry current;
     current.label = entry.label;
-    current.clip = clip_.to_json();
+    current.document = clip_.to_json();
     redoStack_.push_back(std::move(current));
     while (redoStack_.size() > kMaxUndoEntries)
     {
@@ -2091,7 +2206,7 @@ namespace hades
 
     AnimationClipAsset restored;
     std::string error;
-    if (!AnimationClipAsset::from_json(entry.clip, restored, &error))
+    if (!AnimationClipAsset::from_json(entry.document, restored, &error))
     {
       errorMessage_ = error;
       return;
@@ -2119,7 +2234,7 @@ namespace hades
 
     UndoEntry current;
     current.label = entry.label;
-    current.clip = clip_.to_json();
+    current.document = clip_.to_json();
     undoStack_.push_back(std::move(current));
     while (undoStack_.size() > kMaxUndoEntries)
     {
@@ -2128,7 +2243,7 @@ namespace hades
 
     AnimationClipAsset restored;
     std::string error;
-    if (!AnimationClipAsset::from_json(entry.clip, restored, &error))
+    if (!AnimationClipAsset::from_json(entry.document, restored, &error))
     {
       errorMessage_ = error;
       return;
@@ -2192,6 +2307,12 @@ namespace hades
     rigLoaded_ = true;
     rigDirty_ = false;
     selectedRigJoint_ = rig_.joints.empty() ? -1 : 0;
+    set_buffer_text(
+        jointRenameBuffer_,
+        selectedRigJoint_ >= 0 ? rig_.joints.front().name : std::string());
+    rigWeightStatsDirty_ = true;
+    rigGizmoDragging_ = false;
+    reset_rig_undo();
   }
 
   void AnimationEditorPlugin::save_rig(EditorPluginContext &context)
@@ -2277,9 +2398,19 @@ namespace hades
       joint.parent = skeleton_.joint(static_cast<std::size_t>(selectedJoint_)).name;
     }
 
+    // A joint at its parent's origin is invisible: its dot lands exactly on
+    // the parent's, so the new bone has zero length, nothing in the viewport
+    // changes, and there is no handle to drag. Offsetting it up by a slice
+    // of the model gives it a visible bone to the parent and a gizmo sitting
+    // somewhere the user can actually reach, on a model of any scale.
+    joint.translation = math::Vec3{0.0f, asset.boundsRadius() * kNewJointOffset, 0.0f};
+
+    push_rig_undo("Add joint");
     rig_.joints.push_back(joint);
     selectedRigJoint_ = static_cast<int>(rig_.joints.size()) - 1;
-    rigDirty_ = true;
+    set_buffer_text(jointRenameBuffer_, rig_.joints.back().name);
+    mark_rig_dirty();
+    statusMessage_ = "Added '" + rig_.joints.back().name + "'. Drag it into place in the viewport.";
   }
 
   void AnimationEditorPlugin::delete_joint(int rigJoint)
@@ -2292,6 +2423,10 @@ namespace hades
     const std::size_t index = static_cast<std::size_t>(rigJoint);
     const std::string removed = rig_.joints[index].name;
     const std::string newParent = rig_.joints[index].parent;
+
+    push_rig_undo("Delete joint");
+    // Every binding above the removed joint is renumbered below it.
+    rigWeightStatsDirty_ = true;
 
     for (RigJoint &joint : rig_.joints)
     {
@@ -2335,7 +2470,7 @@ namespace hades
     {
       selectedRigJoint_ = std::min(rigJoint, static_cast<int>(rig_.joints.size()) - 1);
     }
-    rigDirty_ = true;
+    mark_rig_dirty();
   }
 
   bool AnimationEditorPlugin::rig_joint_is_descendant(int candidate, int ancestor) const
@@ -2393,9 +2528,10 @@ namespace hades
       return;
     }
 
+    push_rig_undo("Reparent joint");
     joint.parent = newParent;
     rigError_.clear();
-    rigDirty_ = true;
+    mark_rig_dirty();
   }
 
   void AnimationEditorPlugin::rename_rig_joint(int rigJoint, const std::string &newName)
@@ -2424,6 +2560,7 @@ namespace hades
       return;
     }
 
+    push_rig_undo("Rename joint");
     rig_.joints[index].name = sanitized;
     // Parents are stored by name, so children have to follow the rename.
     for (RigJoint &joint : rig_.joints)
@@ -2435,7 +2572,7 @@ namespace hades
     }
 
     rigError_.clear();
-    rigDirty_ = true;
+    mark_rig_dirty();
   }
 
   void AnimationEditorPlugin::auto_weight(EditorPluginContext &context, const ModelAsset &asset)
@@ -2448,8 +2585,10 @@ namespace hades
       return;
     }
 
+    push_rig_undo("Bind meshes");
     compute_auto_weights(asset, rig_, weightMode_, weightFalloff_, weightInfluences_);
-    rigDirty_ = true;
+    rigWeightStatsDirty_ = true;
+    mark_rig_dirty();
     rigError_.clear();
     statusMessage_ = "Bound " + std::to_string(rig_.meshes.size()) + " mesh(es)";
   }
@@ -2589,6 +2728,514 @@ namespace hades
     return importedBones + appended;
   }
 
+  // ---- Rig viewport overlay -------------------------------------------------
+
+  int AnimationEditorPlugin::rig_joint_source_node(
+      const ModelAsset &asset, std::size_t rigJoint, std::vector<bool> &nodeClaimed) const
+  {
+    const RigJoint &joint = rig_.joints[rigJoint];
+
+    int byName = -1;
+    for (std::size_t i = 0; i < asset.nodes.size(); ++i)
+    {
+      if (asset.nodes[i].name == joint.name)
+      {
+        byName = static_cast<int>(i);
+        break;
+      }
+    }
+
+    // apply_rig's own rule, so the overlay draws what saving will produce:
+    // the recorded index wins while it is in range and unclaimed, except
+    // when the joint's exact name still sits on some other node, where a
+    // name that resolves is better evidence than an index into a hierarchy
+    // that has since moved.
+    const int recorded = joint.sourceNode;
+    const bool recordedUsable = recorded >= 0 &&
+                                recorded < static_cast<int>(asset.nodes.size()) &&
+                                !nodeClaimed[static_cast<std::size_t>(recorded)];
+    const int existing = (recordedUsable && (byName < 0 || byName == recorded)) ? recorded : byName;
+
+    // apply_rig lets two joints collide on one node and sorts it out when it
+    // rebuilds the hierarchy. The overlay cannot: two joints in one slot
+    // would give the picker and the gizmo two answers for the same dot, so
+    // the loser is drawn as an appended joint instead.
+    if (existing >= 0 && !nodeClaimed[static_cast<std::size_t>(existing)])
+    {
+      nodeClaimed[static_cast<std::size_t>(existing)] = true;
+      return existing;
+    }
+
+    return -1;
+  }
+
+  void AnimationEditorPlugin::rebuild_rig_overlay(const ModelAsset &asset)
+  {
+    AnimationEditState &editState = animation_edit_state();
+
+    // Recomputed every frame rather than cached: an unsaved edit has to move
+    // the overlay on the frame it happens, or the gizmo visibly lags the
+    // bone it is dragging.
+    rig_.global_rest_transforms(asset, rigRestGlobals_);
+
+    asset.bindPoseNodeGlobals(rigNodeGlobals_);
+
+    const std::size_t nodeCount = asset.nodes.size();
+    const std::size_t rigCount = rig_.joints.size();
+
+    std::vector<bool> nodeClaimed(nodeCount, false);
+    std::vector<int> nodeOwner(nodeCount, -1);
+    std::vector<int> jointNode(rigCount, -1);
+    rigJointToOverlay_.assign(rigCount, -1);
+    nodeToOverlay_.assign(nodeCount, -1);
+
+    std::size_t appendedCount = 0;
+    for (std::size_t i = 0; i < rigCount; ++i)
+    {
+      jointNode[i] = rig_joint_source_node(asset, i, nodeClaimed);
+      if (jointNode[i] >= 0)
+      {
+        nodeOwner[static_cast<std::size_t>(jointNode[i])] = static_cast<int>(i);
+      }
+      else
+      {
+        ++appendedCount;
+      }
+    }
+
+    const std::size_t total = nodeCount + appendedCount;
+    editState.jointGlobals.assign(total, math::Mat4::identity());
+    editState.jointParents.assign(total, -1);
+    editState.jointNames.assign(total, std::string());
+    editState.jointSkinned.assign(total, false);
+    overlayToRigJoint_.assign(total, -1);
+    overlayToNode_.assign(total, -1);
+
+    // Imported nodes keep their own index. `selectedJoint_` is a node index
+    // everywhere else in the panel, so holding that identity here is what
+    // lets a selection survive a tab switch in either direction.
+    //
+    // A node the rig owns is drawn once, at the transform the rig is
+    // authoring rather than the one on disk — that is what makes editing a
+    // seeded joint move its dot before anything is saved. Drawing the
+    // imported copy as well would put two dots on every bone of a seeded
+    // rig, one of them permanently stale.
+    for (std::size_t node = 0; node < nodeCount; ++node)
+    {
+      nodeToOverlay_[node] = static_cast<int>(node);
+      overlayToNode_[node] = static_cast<int>(node);
+
+      const int owner = nodeOwner[node];
+      overlayToRigJoint_[node] = owner;
+      if (owner >= 0)
+      {
+        const std::size_t joint = static_cast<std::size_t>(owner);
+        rigJointToOverlay_[joint] = static_cast<int>(node);
+        editState.jointNames[node] = rig_.joints[joint].name;
+        editState.jointGlobals[node] = asset.globalInverseTransform * rigRestGlobals_[joint];
+        // "Authored", not "skins vertices": on this tab the distinction that
+        // matters is which dots the gizmo can move. The reference hierarchy
+        // is drawn as rings, which is also what the overlay's own
+        // "Unskinned joints" toggle then hides.
+        editState.jointSkinned[node] = true;
+      }
+      else
+      {
+        editState.jointNames[node] = asset.nodes[node].name;
+        editState.jointGlobals[node] = asset.globalInverseTransform * rigNodeGlobals_[node];
+        editState.jointSkinned[node] = false;
+      }
+    }
+
+    std::size_t nextSlot = nodeCount;
+    for (std::size_t i = 0; i < rigCount; ++i)
+    {
+      if (jointNode[i] >= 0)
+      {
+        continue;
+      }
+
+      const std::size_t slot = nextSlot++;
+      rigJointToOverlay_[i] = static_cast<int>(slot);
+      overlayToRigJoint_[slot] = static_cast<int>(i);
+      editState.jointNames[slot] = rig_.joints[i].name;
+      editState.jointGlobals[slot] = asset.globalInverseTransform * rigRestGlobals_[i];
+      editState.jointSkinned[slot] = true;
+    }
+
+    // Parents last: an appended joint only has a slot once every joint has
+    // been given one, and a rig parent may well be appended after its child.
+    const auto parent_slot = [&](int rigJoint) -> int
+    {
+      const std::size_t joint = static_cast<std::size_t>(rigJoint);
+      const int rigParent = rig_.parent_index(joint);
+      if (rigParent >= 0)
+      {
+        return rigJointToOverlay_[static_cast<std::size_t>(rigParent)];
+      }
+
+      const std::string &parentName = rig_.joints[joint].parent;
+      if (parentName.empty())
+      {
+        return -1;
+      }
+
+      for (std::size_t node = 0; node < nodeCount; ++node)
+      {
+        if (asset.nodes[node].name == parentName)
+        {
+          return nodeToOverlay_[node];
+        }
+      }
+
+      // An unknown parent: apply_rig refuses the rig for this, and the Rig
+      // tab reports it on save. Drawing the joint at the root is better than
+      // dropping it, because a joint you cannot see is one you cannot fix.
+      return -1;
+    };
+
+    for (std::size_t slot = 0; slot < total; ++slot)
+    {
+      const int rigJoint = overlayToRigJoint_[slot];
+      if (rigJoint >= 0)
+      {
+        editState.jointParents[slot] = parent_slot(rigJoint);
+      }
+      else
+      {
+        const int node = overlayToNode_[slot];
+        editState.jointParents[slot] =
+            node >= 0 ? asset.nodes[static_cast<std::size_t>(node)].parent : -1;
+      }
+    }
+  }
+
+  void AnimationEditorPlugin::publish_rig_preview(const ModelAsset &asset)
+  {
+    const Entity::EntityId entity =
+        targetEntity_.has_value() ? *targetEntity_ : Entity::INVALID;
+
+    if (previewPublished_ && previewEntity_ != entity && previewEntity_ != Entity::INVALID)
+    {
+      AnimationRuntime::instance().clear_preview(previewEntity_);
+    }
+
+    // The mesh holds its bind pose while bones are being placed. The play
+    // head belongs to the clip being animated and has nothing to say about
+    // where a bone goes; leaving the character posed would have the user
+    // aiming joints at vertices that have moved out from under them.
+    if (entity != Entity::INVALID && !skeleton_.empty())
+    {
+      skeleton_.pose_to_palette(asset, skeleton_.rest_pose(), previewPalette_);
+      AnimationRuntime::instance().set_preview_palette(entity, previewPalette_);
+    }
+
+    previewEntity_ = entity;
+    previewPublished_ = true;
+
+    AnimationEditState &editState = animation_edit_state();
+    editState.active = true;
+    editState.entity = entity;
+    editState.modelPath = targetModelPath_;
+    editState.modelGlobalInverse = asset.globalInverseTransform;
+
+    rebuild_rig_overlay(asset);
+
+    const bool jointSelected =
+        selectedRigJoint_ >= 0 &&
+        static_cast<std::size_t>(selectedRigJoint_) < rig_.joints.size() &&
+        rigJointToOverlay_[static_cast<std::size_t>(selectedRigJoint_)] >= 0;
+
+    if (jointSelected)
+    {
+      const std::size_t joint = static_cast<std::size_t>(selectedRigJoint_);
+      editState.selectedJoint = rigJointToOverlay_[joint];
+      // The gizmo edits the joint's REST transform here, not a pose: a rig
+      // has no play head, and what is being authored is where the bone sits
+      // in the bind pose every clip is then keyed against.
+      editState.selectedLocalTranslation = rig_.joints[joint].translation;
+      editState.selectedLocalRotation = rig_.joints[joint].rotation;
+      editState.selectedLocalScale = rig_.joints[joint].scale;
+    }
+    else
+    {
+      // An imported node the rig does not own is still worth highlighting:
+      // it is what "Add joint" will parent onto.
+      editState.selectedJoint =
+          (selectedJoint_ >= 0 && static_cast<std::size_t>(selectedJoint_) < overlayToNode_.size())
+              ? selectedJoint_
+              : -1;
+    }
+
+    editState.poseEditing = jointSelected;
+  }
+
+  void AnimationEditorPlugin::consume_viewport_input_rig()
+  {
+    AnimationEditState &editState = animation_edit_state();
+
+    if (editState.pickedJoint >= 0)
+    {
+      const std::size_t slot = static_cast<std::size_t>(editState.pickedJoint);
+      if (slot < overlayToRigJoint_.size())
+      {
+        const int rigJoint = overlayToRigJoint_[slot];
+        if (rigJoint >= 0)
+        {
+          selectedRigJoint_ = rigJoint;
+          set_buffer_text(jointRenameBuffer_, rig_.joints[static_cast<std::size_t>(rigJoint)].name);
+        }
+        else
+        {
+          // An imported node the rig does not own. Nothing here is editable,
+          // but it is a legal parent, and picking it in the viewport is how
+          // you say where the next joint attaches without hunting its name
+          // in a combo.
+          selectedRigJoint_ = -1;
+          const int node = overlayToNode_[slot];
+          if (node >= 0 && static_cast<std::size_t>(node) < skeleton_.size())
+          {
+            selectedJoint_ = node;
+          }
+        }
+      }
+      // One-shot: clearing it is what tells the viewport the pick landed.
+      editState.pickedJoint = -1;
+    }
+
+    if (!editState.jointEdited)
+    {
+      return;
+    }
+
+    const bool finished = editState.jointEditFinished;
+    editState.jointEdited = false;
+    editState.jointEditFinished = false;
+
+    if (selectedRigJoint_ < 0 || static_cast<std::size_t>(selectedRigJoint_) >= rig_.joints.size())
+    {
+      return;
+    }
+
+    // The gizmo carried the drag into the joint's parent space and published
+    // a whole local TRS, so every channel is written back together and only
+    // the dragged one has actually moved.
+    //
+    // A joint carrying a restCorrection — the sheared remainder of a COLLADA
+    // <matrix> node — composes as TRS * correction, so a drag is exact only
+    // while that correction has no translation of its own. It never does for
+    // a rig whose nodes really are TRS, which is every rig the editor
+    // authors and all but a handful it imports.
+    RigJoint &joint = rig_.joints[static_cast<std::size_t>(selectedRigJoint_)];
+    joint.translation = editState.editedTranslation;
+    joint.rotation = editState.editedRotation;
+    joint.scale = editState.editedScale;
+    mark_rig_dirty();
+
+    // Opened on the first frame the drag moves, while the baseline still
+    // holds the pre-drag rig, and relabelled on every frame after that: one
+    // entry per drag, not one per mouse-move.
+    push_rig_undo_recorded("Place joint");
+    rigGizmoDragging_ = !finished;
+  }
+
+  void AnimationEditorPlugin::refresh_rig_weight_stats()
+  {
+    rigJointVertices_.assign(rig_.joints.size(), 0);
+    rigBoundVertices_ = 0;
+    rigSingleInfluenceVertices_ = 0;
+
+    for (const RigMeshBinding &binding : rig_.meshes)
+    {
+      const std::size_t vertices = binding.vertexCount();
+      rigBoundVertices_ += vertices;
+
+      for (std::size_t vertex = 0; vertex < vertices; ++vertex)
+      {
+        int influences = 0;
+        for (std::size_t slot = 0; slot < 4; ++slot)
+        {
+          const std::size_t index = (vertex * 4) + slot;
+          if (index >= binding.weights.size() || index >= binding.jointIndices.size())
+          {
+            break;
+          }
+
+          const std::int32_t joint = binding.jointIndices[index];
+          if (joint < 0 || binding.weights[index] <= 0.0f)
+          {
+            continue;
+          }
+
+          ++influences;
+          if (static_cast<std::size_t>(joint) < rigJointVertices_.size())
+          {
+            ++rigJointVertices_[static_cast<std::size_t>(joint)];
+          }
+        }
+
+        if (influences <= 1)
+        {
+          ++rigSingleInfluenceVertices_;
+        }
+      }
+    }
+
+    rigWeightStatsDirty_ = false;
+  }
+
+  // ---- Rig undo -------------------------------------------------------------
+
+  void AnimationEditorPlugin::mark_rig_dirty()
+  {
+    rigDirty_ = true;
+  }
+
+  void AnimationEditorPlugin::push_rig_undo(const std::string &label)
+  {
+    UndoEntry entry;
+    entry.label = label;
+    entry.document = rig_.to_json();
+    rigUndoStack_.push_back(std::move(entry));
+    while (rigUndoStack_.size() > kMaxUndoEntries)
+    {
+      rigUndoStack_.pop_front();
+    }
+    rigRedoStack_.clear();
+    rigUndoBaselineStale_ = true;
+  }
+
+  void AnimationEditorPlugin::push_rig_undo_recorded(const std::string &label)
+  {
+    if (rigUndoBaselineStale_ && !rigUndoStack_.empty())
+    {
+      // An entry for this gesture is already open. A gizmo drag reports a
+      // change on every frame it moves, and one entry per mouse-move would
+      // flush the whole history in about a second; the open entry already
+      // holds the rig from before the drag started, so only the label still
+      // needs saying.
+      rigUndoStack_.back().label = label;
+      return;
+    }
+
+    UndoEntry entry;
+    entry.label = label;
+    entry.document = rigUndoBaseline_;
+    rigUndoStack_.push_back(std::move(entry));
+    while (rigUndoStack_.size() > kMaxUndoEntries)
+    {
+      rigUndoStack_.pop_front();
+    }
+    rigRedoStack_.clear();
+    rigUndoBaselineStale_ = true;
+  }
+
+  void AnimationEditorPlugin::refresh_rig_undo_baseline()
+  {
+    if (!rigUndoBaselineStale_)
+    {
+      return;
+    }
+
+    // A drag is still running: the entry it opened has to keep pointing at
+    // the rig from before it started, so the baseline stays frozen until the
+    // gesture ends.
+    if (ImGui::IsAnyItemActive() || rigGizmoDragging_)
+    {
+      return;
+    }
+
+    rigUndoBaseline_ = rig_.to_json();
+    rigUndoBaselineStale_ = false;
+  }
+
+  void AnimationEditorPlugin::reset_rig_undo()
+  {
+    rigUndoStack_.clear();
+    rigRedoStack_.clear();
+    rigUndoBaseline_ = rig_.to_json();
+    rigUndoBaselineStale_ = false;
+  }
+
+  void AnimationEditorPlugin::rig_undo()
+  {
+    if (rigUndoStack_.empty())
+    {
+      return;
+    }
+
+    UndoEntry entry = std::move(rigUndoStack_.back());
+    rigUndoStack_.pop_back();
+
+    UndoEntry current;
+    current.label = entry.label;
+    current.document = rig_.to_json();
+
+    RigAsset restored;
+    std::string error;
+    if (!RigAsset::from_json(entry.document, restored, &error))
+    {
+      errorMessage_ = "Undo failed: " + error;
+      return;
+    }
+
+    rig_ = std::move(restored);
+    // A restored snapshot brings its own bindings with it.
+    rigWeightStatsDirty_ = true;
+    rigRedoStack_.push_back(std::move(current));
+    while (rigRedoStack_.size() > kMaxUndoEntries)
+    {
+      rigRedoStack_.pop_front();
+    }
+    selectedRigJoint_ =
+        rig_.joints.empty()
+            ? -1
+            : std::min(selectedRigJoint_, static_cast<int>(rig_.joints.size()) - 1);
+    mark_rig_dirty();
+    rigUndoBaseline_ = rig_.to_json();
+    rigUndoBaselineStale_ = false;
+    statusMessage_ = "Undo: " + entry.label;
+  }
+
+  void AnimationEditorPlugin::rig_redo()
+  {
+    if (rigRedoStack_.empty())
+    {
+      return;
+    }
+
+    UndoEntry entry = std::move(rigRedoStack_.back());
+    rigRedoStack_.pop_back();
+
+    UndoEntry current;
+    current.label = entry.label;
+    current.document = rig_.to_json();
+
+    RigAsset restored;
+    std::string error;
+    if (!RigAsset::from_json(entry.document, restored, &error))
+    {
+      errorMessage_ = "Redo failed: " + error;
+      return;
+    }
+
+    rig_ = std::move(restored);
+    rigWeightStatsDirty_ = true;
+    rigUndoStack_.push_back(std::move(current));
+    while (rigUndoStack_.size() > kMaxUndoEntries)
+    {
+      rigUndoStack_.pop_front();
+    }
+    selectedRigJoint_ =
+        rig_.joints.empty()
+            ? -1
+            : std::min(selectedRigJoint_, static_cast<int>(rig_.joints.size()) - 1);
+    mark_rig_dirty();
+    rigUndoBaseline_ = rig_.to_json();
+    rigUndoBaselineStale_ = false;
+    statusMessage_ = "Redo: " + entry.label;
+  }
+
   void AnimationEditorPlugin::draw_rig_tab(EditorPluginContext &context, const ModelAsset &asset)
   {
     if (!rigLoaded_)
@@ -2622,16 +3269,34 @@ namespace hades
     {
       delete_joint(selectedRigJoint_);
     }
+    ImGui::SameLine();
+    if (tool_button(ICON_FA_ARROW_ROTATE_LEFT, "Undo (Ctrl/Cmd+Z)", !rigUndoStack_.empty()))
+    {
+      rig_undo();
+    }
+    ImGui::SameLine();
+    if (tool_button(ICON_FA_ARROW_ROTATE_RIGHT, "Redo (Ctrl/Cmd+Shift+Z)", !rigRedoStack_.empty()))
+    {
+      rig_redo();
+    }
 
     ImGui::SetNextItemWidth(-1.0f);
     ImGui::InputTextWithHint(
         "##new-joint-name", "New joint name", newJointNameBuffer_.data(), newJointNameBuffer_.size());
 
     ImGui::Separator();
+
+    if (rigWeightStatsDirty_)
+    {
+      refresh_rig_weight_stats();
+    }
+
     ImGui::BeginChild("##rig-joints", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders);
     if (rig_.joints.empty())
     {
       ImGui::TextDisabled("No authored joints yet.");
+      ImGui::TextDisabled(
+          "Click a node in the viewport to pick a parent,\nthen Add joint and drag it into place.");
     }
     for (std::size_t i = 0; i < rig_.joints.size(); ++i)
     {
@@ -2647,10 +3312,37 @@ namespace hades
         selectedRigJoint_ = static_cast<int>(i);
         set_buffer_text(jointRenameBuffer_, joint.name);
       }
+      if (selected && ImGui::IsWindowAppearing())
+      {
+        ImGui::SetScrollHereY(0.5f);
+      }
       if (!joint.parent.empty())
       {
         ImGui::SameLine();
         ImGui::TextColored(dim_color(), "< %s", joint.parent.c_str());
+      }
+      // A bind that reached no vertices is the failure this tab cannot
+      // otherwise show: the bone is in the file, it costs a palette entry,
+      // and it moves nothing.
+      if (!rig_.meshes.empty() && i < rigJointVertices_.size())
+      {
+        ImGui::SameLine();
+        if (rigJointVertices_[i] == 0)
+        {
+          ImGui::TextColored(warning_color(), ICON_FA_TRIANGLE_EXCLAMATION);
+          if (ImGui::IsItemHovered())
+          {
+            ImGui::SetTooltip("No vertex is weighted to this joint.");
+          }
+        }
+        else
+        {
+          ImGui::TextColored(dim_color(), "%zu", rigJointVertices_[i]);
+          if (ImGui::IsItemHovered())
+          {
+            ImGui::SetTooltip("%zu vertices weighted to this joint.", rigJointVertices_[i]);
+          }
+        }
       }
       ImGui::PopID();
     }
@@ -2659,6 +3351,22 @@ namespace hades
 
     ImGui::SameLine();
     ImGui::BeginChild("##rig-right", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders);
+
+    if (targetEntity_.has_value())
+    {
+      ImGui::TextColored(
+          dim_color(),
+          ICON_FA_HAND_POINTER "  Click a joint in the viewport to select it, then drag the gizmo "
+          "to place it. Rings are imported nodes: click one to parent the next joint there.");
+    }
+    else
+    {
+      ImGui::TextColored(
+          warning_color(),
+          ICON_FA_TRIANGLE_EXCLAMATION "  Nothing is drawn in the viewport for a workspace model. "
+          "Use \"Add to world\" in the target bar to place bones by hand.");
+    }
+    ImGui::Spacing();
 
     if (selectedRigJoint_ >= 0 && static_cast<std::size_t>(selectedRigJoint_) < rig_.joints.size())
     {
@@ -2725,18 +3433,23 @@ namespace hades
       ImGui::SetNextItemWidth(240.0f);
       if (ImGui::DragFloat3("Rest translation", &joint.translation.x, 0.01f))
       {
-        rigDirty_ = true;
+        // Recorded, not pushed: the baseline still holds the rig from before
+        // the drag started, so one drag across a field is one undo step.
+        push_rig_undo_recorded("Edit rest transform");
+        mark_rig_dirty();
       }
       ImGui::SetNextItemWidth(240.0f);
       if (ImGui::DragFloat3("Rest rotation", &euler.x, 0.5f))
       {
         joint.rotation = math::Quat::fromEulerDegrees(euler);
-        rigDirty_ = true;
+        push_rig_undo_recorded("Edit rest transform");
+        mark_rig_dirty();
       }
       ImGui::SetNextItemWidth(240.0f);
       if (ImGui::DragFloat3("Rest scale", &joint.scale.x, 0.01f))
       {
-        rigDirty_ = true;
+        push_rig_undo_recorded("Edit rest transform");
+        mark_rig_dirty();
       }
     }
     else
@@ -2790,16 +3503,60 @@ namespace hades
     ImGui::SameLine();
     if (tool_button(ICON_FA_LINK "  Bind selected mesh", "Recompute skin weights for one mesh", canBind))
     {
+      push_rig_undo("Bind mesh");
       compute_auto_weights_for_mesh(
           asset, rig_, static_cast<std::uint32_t>(selectedMeshIndex_), weightMode_, weightFalloff_,
           weightInfluences_);
-      rigDirty_ = true;
+      rigWeightStatsDirty_ = true;
+      mark_rig_dirty();
       statusMessage_ = "Bound mesh " + std::to_string(selectedMeshIndex_);
+    }
+
+    // What the bind actually reached. Binding is otherwise the one step on
+    // this tab with no visible result until the model is saved and
+    // re-imported, and the usual failure — a falloff too small for the
+    // model's units — looks exactly like success until the mesh deforms.
+    if (!rig_.meshes.empty())
+    {
+      std::size_t unusedJoints = 0;
+      for (const std::size_t vertices : rigJointVertices_)
+      {
+        unusedJoints += vertices == 0 ? 1u : 0u;
+      }
+
+      ImGui::TextColored(
+          dim_color(), "%zu vertices bound over %zu mesh(es).", rigBoundVertices_,
+          rig_.meshes.size());
+
+      if (unusedJoints > 0)
+      {
+        ImGui::TextColored(
+            warning_color(), ICON_FA_TRIANGLE_EXCLAMATION "  %zu joint(s) skin nothing.",
+            unusedJoints);
+      }
+
+      const bool distanceMode =
+          weightMode_ == AutoWeightMode::Envelope || weightMode_ == AutoWeightMode::Smooth;
+      if (distanceMode && rigBoundVertices_ > 0 &&
+          (rigSingleInfluenceVertices_ * 2) > rigBoundVertices_)
+      {
+        ImGui::TextColored(
+            warning_color(),
+            ICON_FA_TRIANGLE_EXCLAMATION "  %zu of %zu vertices carry a single influence — raise "
+            "Falloff if the mesh deforms rigidly in patches.",
+            rigSingleInfluenceVertices_, rigBoundVertices_);
+      }
     }
 
     if (ImGui::Checkbox("Replace imported skeleton", &rig_.replaceImportedSkeleton))
     {
-      rigDirty_ = true;
+      push_rig_undo_recorded("Replace imported skeleton");
+      mark_rig_dirty();
+    }
+
+    if (ImGui::CollapsingHeader(ICON_FA_EYE "  Viewport Overlay"))
+    {
+      draw_rig_overlay_options();
     }
 
     if (tool_button(

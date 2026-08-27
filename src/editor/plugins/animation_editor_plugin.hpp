@@ -62,6 +62,14 @@ namespace hades
 
     void render(EditorPluginContext &context) override;
 
+    /// Show this panel, switch it to the Animate tab and open `name` there.
+    ///
+    /// The Animator panel calls this from a state's clip field, so the clip a
+    /// state plays is one click from being keyed rather than a hunt through
+    /// the Clips tab. An unsaved working clip routes through the same
+    /// "discard changes?" modal a manual switch does.
+    void reveal_clip(EditorPluginContext &context, const std::string &name);
+
     // ---- Exposed for the headless smoke test ------------------------------
     // src/tools/animation_smoke.cpp renders this panel against Dear ImGui's
     // null backend, where no widget has a knowable screen rectangle. Every
@@ -83,6 +91,26 @@ namespace hades
     std::size_t clip_key_count() const { return clip_.total_key_count(); }
     const std::vector<TimelineRow> &timeline_rows() const { return rows_; }
     std::size_t undo_depth() const { return undoStack_.size(); }
+
+    /// Rig state, for the Rig tab's viewport coverage. The overlay is the
+    /// only way a rig joint can be picked or dragged, and none of it is
+    /// reachable through a widget the null backend can click.
+    std::size_t rig_joint_count() const { return rig_.joints.size(); }
+    int selected_rig_joint() const { return selectedRigJoint_; }
+    math::Vec3 rig_joint_translation(std::size_t index) const
+    {
+      return index < rig_.joints.size() ? rig_.joints[index].translation : math::Vec3{};
+    }
+    std::size_t rig_undo_depth() const { return rigUndoStack_.size(); }
+    /// Joints the Rig tab published to the viewport overlay on the last
+    /// frame it drew: imported nodes plus the rig's own.
+    std::size_t rig_overlay_joint_count() const { return overlayToRigJoint_.size(); }
+    /// Overlay slot of rig joint `index`, i.e. the value the viewport would
+    /// report as `pickedJoint` for it, or -1.
+    int rig_overlay_slot(std::size_t index) const
+    {
+      return index < rigJointToOverlay_.size() ? rigJointToOverlay_[index] : -1;
+    }
     /// Label of the most recent undo entry, or empty. Each editing surface
     /// labels its own edits, which is how the smoke test tells an edit made
     /// through the curve editor from one made through the dope sheet.
@@ -106,6 +134,7 @@ namespace hades
     void draw_events_editor();
     void draw_clip_properties();
     void draw_overlay_options();
+    void draw_rig_overlay_options();
     void draw_status_lines();
     void draw_clip_dialogs(EditorPluginContext &context, const ModelAsset &asset);
 
@@ -199,10 +228,13 @@ namespace hades
     /// without this the baseline stays one edit behind.
     void refresh_undo_baseline();
 
+    /// One snapshot on an undo stack. Serialised rather than a command
+    /// pattern: both documents this panel edits are small enough that a
+    /// snapshot is cheaper than an inverse operation, and it cannot drift.
     struct UndoEntry
     {
       std::string label;
-      nlohmann::json clip;
+      nlohmann::json document;
     };
 
     // ---- Rigging ---------------------------------------------------------
@@ -214,6 +246,43 @@ namespace hades
     void reparent_joint(int rigJoint, const std::string &newParent);
     void auto_weight(EditorPluginContext &context, const ModelAsset &asset);
     void rename_rig_joint(int rigJoint, const std::string &newName);
+
+    /// Publish the rig being AUTHORED — not the imported skeleton — into the
+    /// shared AnimationEditState, so the viewport draws joints that have not
+    /// been saved yet and the gizmo can place them. Without this the Rig tab
+    /// is authored blind: a new joint lands inside the mesh at its parent and
+    /// nothing shows it until "Save rig" re-imports the model.
+    void publish_rig_preview(const ModelAsset &asset);
+    /// Fill the AnimationEditState joint arrays with the imported nodes the
+    /// rig does not own, followed by the rig's own joints, and rebuild the
+    /// index maps between the two numberings.
+    void rebuild_rig_overlay(const ModelAsset &asset);
+    /// Consume a viewport pick or gizmo drag while the Rig tab owns the
+    /// overlay: a picked rig joint selects it, a picked imported node becomes
+    /// the parent the next "Add joint" attaches to, and a drag writes the
+    /// joint's rest TRS.
+    void consume_viewport_input_rig();
+    /// Model node `apply_rig` would merge `rigJoint` onto, or -1 when it
+    /// appends a new one. Mirrors apply_rig's own resolution so the overlay
+    /// draws what saving will actually produce.
+    int rig_joint_source_node(const ModelAsset &asset, std::size_t rigJoint,
+                              std::vector<bool> &nodeClaimed) const;
+    /// Vertices each rig joint owns across `rig_.meshes`, so the joint list
+    /// can say which bones a bind actually reached.
+    void refresh_rig_weight_stats();
+
+    // ---- Rig undo --------------------------------------------------------
+
+    /// Snapshot-based, exactly like the clip stack: placing bones with a
+    /// gizmo is a drag-heavy gesture and undoing it has to be one step, not
+    /// one per mouse-move.
+    void push_rig_undo(const std::string &label);
+    void push_rig_undo_recorded(const std::string &label);
+    void rig_undo();
+    void rig_redo();
+    void reset_rig_undo();
+    void refresh_rig_undo_baseline();
+    void mark_rig_dirty();
     /// True when `candidate` sits under `ancestor` in the rig hierarchy —
     /// the guard that keeps reparenting from making a cycle.
     bool rig_joint_is_descendant(int candidate, int ancestor) const;
@@ -278,6 +347,51 @@ namespace hades
     AutoWeightMode weightMode_ = AutoWeightMode::Envelope;
     float weightFalloff_ = 0.5f;
     int weightInfluences_ = 4;
+
+    // ---- Rig viewport overlay --------------------------------------------
+
+    /// Rest globals of `rig_` as it stands, model space, rebuilt every frame
+    /// the Rig tab draws — an unsaved edit has to move the overlay on the
+    /// same frame or the gizmo lags the bone it is dragging.
+    std::vector<math::Mat4> rigRestGlobals_;
+    /// Bind-pose globals of the imported nodes, held across frames so the
+    /// overlay does not allocate one Mat4 per node on every frame it draws.
+    std::vector<math::Mat4> rigNodeGlobals_;
+    /// Published joint index -> rig joint index, -1 for an imported node.
+    std::vector<int> overlayToRigJoint_;
+    /// Published joint index -> model node index, -1 for an authored joint.
+    std::vector<int> overlayToNode_;
+    /// Rig joint index -> published joint index.
+    std::vector<int> rigJointToOverlay_;
+    /// Model node index -> published joint index. A node the rig owns maps to
+    /// its rig joint's slot, so a parent link never has two places to land.
+    std::vector<int> nodeToOverlay_;
+    /// Vertices bound to each rig joint, parallel to `rig_.joints`.
+    std::vector<std::size_t> rigJointVertices_;
+    bool rigWeightStatsDirty_ = true;
+    /// Vertices carrying exactly one influence. In Envelope or Smooth mode a
+    /// high count is the symptom of a falloff too small for the model's
+    /// units — those vertices fell back to the nearest joint at weight 1 and
+    /// the mesh will deform rigidly in patches.
+    std::size_t rigSingleInfluenceVertices_ = 0;
+    std::size_t rigBoundVertices_ = 0;
+
+    std::deque<UndoEntry> rigUndoStack_;
+    std::deque<UndoEntry> rigRedoStack_;
+    nlohmann::json rigUndoBaseline_;
+    bool rigUndoBaselineStale_ = false;
+    /// True between the first frame of a viewport gizmo drag on a rig joint
+    /// and the frame it ends. The clip stack reads ImGui::IsAnyItemActive()
+    /// for this, but the gizmo is drawn on the viewport's draw list and is
+    /// not an ImGui item, so the drag has to say so itself — without it the
+    /// baseline advances mid-drag and Ctrl+Z only walks back the last frame
+    /// of mouse movement.
+    bool rigGizmoDragging_ = false;
+
+    /// Tab to force to the front on the next frame that draws, or -1. The
+    /// tab bar owns which tab is active, so a cross-panel request has to be
+    /// queued for it rather than written into `activeTab_`.
+    int pendingTabSelect_ = -1;
 
     std::array<char, 128> newClipNameBuffer_{};
     std::array<char, 128> newJointNameBuffer_{};

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "../../engine/animation/animator_graph.hpp"
+#include "../../engine/animation/animator_instance.hpp"
 #include "../../engine/core/ecs/entity.hpp"
 #include "editor_plugin.hpp"
 
@@ -48,6 +49,8 @@ namespace hades
 
     void activate(Editor &editor) override { set_visible(editor, true); }
 
+    ~AnimatorGraphPlugin() override;
+
     void render(EditorPluginContext &context) override;
 
     // ---- Exposed for the headless smoke test ------------------------------
@@ -75,6 +78,14 @@ namespace hades
     /// Parameter rows the rail drew from the running instance instead of from
     /// the authored graph, on the last frame.
     int live_parameter_rows() const { return liveParameterRows_; }
+    /// True while the panel is driving its own animator over an entity in
+    /// edit mode. Distinct from debug_overlay_active(), which reports the
+    /// play-mode instance: the two feed the same canvas highlight and have to
+    /// be separable in a test.
+    bool preview_active() const { return publishedPreviewEntity_ != Entity::INVALID; }
+    void set_preview_enabled(bool enabled) { previewEnabled_ = enabled; }
+    std::string preview_state_name() const { return previewInstance_.current_state(activeLayer_); }
+    float preview_normalized_time() const { return previewInstance_.normalized_time(activeLayer_); }
     std::size_t state_node_count() const { return nodeRects_.size(); }
     std::size_t undo_depth() const { return undoStack_.size(); }
     std::size_t redo_depth() const { return redoStack_.size(); }
@@ -160,6 +171,32 @@ namespace hades
     void add_state_of_kind(float x, float y, AnimStateKind kind);
     void capture_debug_state(EditorPluginContext &context);
 
+    // ---- Edit-mode preview -------------------------------------------------
+
+    /// Advance the panel's own animator by one frame and publish its palette,
+    /// or tear the preview down when it cannot run.
+    ///
+    /// This is what makes the graph mean something before play mode: without
+    /// it a state machine is a diagram, and the only way to see a transition
+    /// fire is to press Play, select the right entity and hope.
+    void update_preview(EditorPluginContext &context);
+    /// Drop the published palette and the staged graph. Idempotent, and
+    /// called from every path that stops rendering the panel.
+    void release_preview();
+    void draw_preview_bar(EditorPluginContext &context);
+    /// Resolve "follow selection", drop a target that has gone away, and fall
+    /// back to the first model in the world.
+    void resolve_preview_target(EditorPluginContext &context);
+    /// Re-list the animation inside the target character's model, so a state
+    /// can name one without it being baked into `.hades/animations` first.
+    void refresh_imported_clip_list(EditorPluginContext &context);
+    /// Point `entity`'s AnimatorComponent at the open graph, adding the
+    /// component when it has none.
+    void assign_graph_to_entity(EditorPluginContext &context, Entity::EntityId entity);
+    /// The instance the parameter rail and the canvas highlight read: the
+    /// live one in play mode, the panel's own while previewing, or null.
+    AnimatorInstance *active_instance(EditorPluginContext &context);
+
     struct UndoEntry
     {
       std::string label;
@@ -185,6 +222,10 @@ namespace hades
     bool graphDirty_ = false;
     std::vector<std::string> graphList_;
     std::vector<std::string> clipList_;
+    /// "model.fbx#Walk" references for the target character's own model, and
+    /// the model path they were listed for.
+    std::vector<std::string> importedClipList_;
+    std::string importedClipModel_;
 
     int activeLayer_ = 0;
     int selectedState_ = -1;
@@ -227,6 +268,25 @@ namespace hades
 
     AnimState clipboardState_;
     bool clipboardValid_ = false;
+
+    // ---- Edit-mode preview -------------------------------------------------
+
+    bool previewEnabled_ = false;
+    bool previewFollowSelection_ = true;
+    bool previewPlaying_ = true;
+    float previewSpeed_ = 1.0f;
+    Entity::EntityId previewEntity_ = Entity::INVALID;
+    /// Entity the published palette belongs to, so a target switch clears the
+    /// old one instead of leaving it frozen mid-blend.
+    Entity::EntityId publishedPreviewEntity_ = Entity::INVALID;
+    std::vector<Entity::EntityId> previewCandidates_;
+    std::string previewError_;
+    /// The panel's own player, deliberately NOT one of AnimationRuntime's:
+    /// those belong to play mode and carry the state a running game built up,
+    /// and driving one from the editor would hand the game back a character
+    /// mid-preview.
+    AnimatorInstance previewInstance_;
+    bool previewInstanceBound_ = false;
 
     // ---- Dialogs and buffers ----------------------------------------------
 

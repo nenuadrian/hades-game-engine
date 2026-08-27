@@ -118,7 +118,21 @@ namespace hades
           apply_parameter_override(instance, parameter);
         }
 
-        if (component.graphPath.empty() && !component.defaultClip.empty() &&
+        // With neither a graph nor a named clip, fall back to the model's own
+        // first animation. That is exactly what the superseded
+        // AnimationComponent did at clipIndex 0, and keeping it is what lets
+        // "drop in a character and it moves" survive that component's
+        // retirement — an animator that names nothing would otherwise sit on
+        // the bind pose with no indication why.
+        std::string startupClip = component.defaultClip;
+        if (component.graphPath.empty() && startupClip.empty() && !asset->clips.empty() &&
+            !asset->clips.front().name.empty())
+        {
+          startupClip = model.assetPath + AnimationClipCache::kImportedClipSeparator +
+                        asset->clips.front().name;
+        }
+
+        if (component.graphPath.empty() && !startupClip.empty() &&
             instance.layer_count() == 0)
         {
           // Clip mode, and nothing has played on this instance yet. Snap
@@ -134,7 +148,7 @@ namespace hades
           // means nobody has played anything (a fresh instance, or one that
           // AnimationRuntime::reset_all dropped playback state on), so the
           // authored clip is what should start.
-          instance.play_clip(component.defaultClip, 0.0f, component.looping, 0);
+          instance.play_clip(startupClip, 0.0f, component.looping, 0);
         }
 
         authored_[entity] = AuthoredPlayback{component.speed, component.playOnStart};

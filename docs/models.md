@@ -22,13 +22,11 @@ Imported materials (base color, metallic/roughness, opacity) are used per mesh b
 
 ## Animation
 
-Add an **Animation** component (the *Model* entity preset includes one already). If the model asset has clips you can:
+Add an **Animator** component (the *Model* entity preset includes one already). With neither a **Graph** nor a **Default Clip** set it plays the model's own first animation, so a freshly imported character moves as soon as it is in the scene. To choose a different one, pick it from **Default Clip** — animation that came inside the model file is listed there under *In this model* as `model.fbx#Walk`, alongside any clips you have authored.
 
-- pick the **Clip** from a dropdown,
-- toggle **Playing** / **Looping** and set **Speed** (negative plays in reverse),
-- scrub **Time** to preview a pose in the editor without entering play mode.
+From there, **Speed**, **Looping** and **Play On Start** cover simple playback, and a **Graph** takes over when you want a state machine. Nothing has to be baked or converted first.
 
-During play mode the `AnimationSystem` advances the clip time each frame; one-shot clips clamp at the end and stop, looping clips wrap.
+**Animation** is the superseded predecessor: it plays a clip by *index*, so re-exporting a model with its clips reordered silently changes what plays. It still loads and still runs for existing scenes, but **Add Component** no longer offers it, and its inspector section has a **Convert to Animator** button that carries the clip and playback flags across in one click.
 
 Authoring your own clips, driving them from an animator state machine, and rigging a model that arrived without a skeleton are covered in [Animation](animation.md).
 
@@ -36,5 +34,6 @@ Authoring your own clips, driving them from an animator state machine, and riggi
 
 - `ModelAssetCache` loads each file once (lazily, on first use) into a CPU-side `ModelAsset`: meshes with per-vertex bone indices/weights, the node hierarchy, a bone palette, and animation clips with TRS keyframes.
 - Every imported mesh renders through the skinned pipeline. Rigid meshes are bound to a single pseudo-bone for the node that references them, so one vertex format and one shader path covers everything.
-- Each frame, `SceneRenderer` samples the entity's clip time into a bone palette (`ModelAsset::samplePose`), which the Vulkan mesh pipeline uploads to a dynamic-offset uniform buffer — up to 128 bones per model, skinned on the GPU (4 weights per vertex).
-- Serialization uses the standard component registry: `model` stores the asset path, `animation` stores clip index, playing/looping flags and speed.
+- Each frame the bone palette comes from `AnimationRuntime::palette_for` — the editor's pose preview if one is published, otherwise the animator's own output — and falls back to `ModelAsset::samplePose` for a legacy `AnimationComponent` and then to the bind pose. The Vulkan mesh pipeline uploads it to a dynamic-offset uniform buffer — up to 128 bones per model, skinned on the GPU (4 weights per vertex).
+- An animation living inside a model file is named `model.fbx#Walk` and baked into a playable clip on demand by `AnimationClipCache`, so the animator needs no copy on disk to play it. See [Animation](animation.md).
+- Serialization uses the standard component registry: `model` stores the asset path, `animator` stores the graph, default clip and playback flags, and `animation` still round-trips clip index, playing/looping flags and speed for scenes that carry it.

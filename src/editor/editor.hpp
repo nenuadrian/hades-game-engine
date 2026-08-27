@@ -127,6 +127,14 @@ namespace hades
 
     void show_plugin(std::string_view pluginId);
     bool is_plugin_visible(std::string_view pluginId) const;
+    /// The registered plugin with this id, or nullptr.
+    ///
+    /// Public because panels legitimately hand work to one another — the
+    /// Animator panel opens a state's clip in the Animation panel — and
+    /// show_plugin() alone can only make a panel visible, not tell it what to
+    /// show. Callers static_cast to the concrete plugin type, so the id and
+    /// the type have to agree.
+    EditorPlugin *find_plugin(std::string_view pluginId);
     void log_message(DebugMessageLevel level, const std::string &text);
     void log_info(const std::string &text);
     void log_warning(const std::string &text);
@@ -289,7 +297,6 @@ namespace hades
 
     void register_builtin_plugins();
     void register_plugin(std::unique_ptr<EditorPlugin> plugin);
-    EditorPlugin *find_plugin(std::string_view pluginId);
     const EditorPlugin *find_plugin(std::string_view pluginId) const;
     bool should_expose_plugin_setting(const EditorPlugin &plugin) const;
     WorkspaceEditorSettings capture_workspace_settings() const;

@@ -1,6 +1,7 @@
 #include "entity_factory.hpp"
 
 #include "../../components/animation_component.hpp"
+#include "../../components/animator_component.hpp"
 #include "../../components/audio_listener_component.hpp"
 #include "../../components/light_component.hpp"
 #include "../../components/audio_source_component.hpp"
@@ -110,7 +111,11 @@ namespace hades
   {
     const auto entity = createBaseEntity(entityManager, componentManager, "Model", parent);
     componentManager.addComponent(entity, ModelComponent{});
-    componentManager.addComponent(entity, AnimationComponent{});
+    // The animator, not the superseded clip player: with neither a graph nor a
+    // default clip it starts the model's own first animation, which is what
+    // AnimationComponent used to do here, and it can be grown into a state
+    // machine without swapping components.
+    componentManager.addComponent(entity, AnimatorComponent{});
     componentManager.addComponent(entity, RotationComponent3D{});
     componentManager.addComponent(entity, ScaleComponent3D{});
     return entity;

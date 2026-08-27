@@ -34,14 +34,39 @@ namespace hades
     static std::filesystem::path clips_directory(const std::filesystem::path &assetRoot);
     static std::filesystem::path graphs_directory(const std::filesystem::path &assetRoot);
 
+    /// Separator between a model reference and a clip name in an imported
+    /// clip reference: "character.fbx#Walk".
+    static constexpr char kImportedClipSeparator = '#';
+
+    /// Split "model#clip" into its halves. False when `reference` names an
+    /// authored clip, in which case the outputs are untouched.
+    static bool split_imported_reference(const std::string &reference, std::string &outModel,
+                                         std::string &outClip);
+
     /// Resolve a clip reference. Accepts a bare name ("run"), a
-    /// workspace-relative path, or an absolute path.
+    /// workspace-relative path, an absolute path, or an imported reference
+    /// ("character.fbx#Walk"), which resolves to the model file that holds
+    /// the clip.
     std::filesystem::path resolveClipPath(const std::string &reference) const;
     std::filesystem::path resolveGraphPath(const std::string &reference) const;
 
     /// Load-on-demand accessors. Return nullptr when the reference is empty
     /// or the file failed to parse — see errorFor().
+    ///
+    /// A reference of the form "character.fbx#Walk" names an animation that
+    /// came *inside* a model file. It is baked through
+    /// `AnimationClipAsset::bake_from_model` on first use and memoised like
+    /// any other clip, so an animator can crossfade, blend and fire events on
+    /// imported animation without it first being copied into
+    /// `.hades/animations/`. The bake is redone when the model is re-imported
+    /// underneath it. Clip names inside one model are matched first-wins,
+    /// the same rule the importer's own channel binding uses.
     const AnimationClipAsset *clip(const std::string &reference);
+
+    /// Imported clip references ("<modelReference>#<name>") for every
+    /// animation inside `modelReference`, in file order. Empty when the model
+    /// cannot be loaded or carries no animation.
+    std::vector<std::string> listImportedClips(const std::string &modelReference);
     const AnimatorGraph *graph(const std::string &reference);
 
     std::string errorFor(const std::string &reference) const;
@@ -62,6 +87,17 @@ namespace hades
     std::vector<std::string> listClips() const;
     std::vector<std::string> listGraphs() const;
 
+    /// Install an in-memory graph under `reference`, replacing whatever is
+    /// cached, without touching disk.
+    ///
+    /// This is how the Animator panel previews a graph it has not saved:
+    /// AnimatorInstance resolves its graph through this cache every frame, so
+    /// the only way to run an unsaved edit is to make the cache answer with
+    /// it. The panel stages under a reference of its own rather than the
+    /// graph's real name, so nothing else in the editor or a running game
+    /// ever sees the working copy.
+    void stageGraph(const std::string &reference, const AnimatorGraph &graph);
+
     /// Forget one entry so the next access re-reads it from disk.
     void invalidate(const std::string &reference);
     void clear();
@@ -73,7 +109,20 @@ namespace hades
     {
       std::unique_ptr<AnimationClipAsset> asset;
       std::string error;
+      /// Imported entries only: the ModelAsset the bake was taken from, so a
+      /// re-import can be noticed. ModelAssetCache *retires* rather than
+      /// destroys, so a replacement never lands on this address while the
+      /// pointer is still worth comparing — but the node count is compared
+      /// too, because "never" resting on an allocator is not a guarantee.
+      const ModelAsset *sourceAsset = nullptr;
+      std::size_t sourceNodeCount = 0;
     };
+
+    /// Bake — or return the memoised bake of — a clip that lives inside a
+    /// model file.
+    const AnimationClipAsset *imported_clip(const std::string &reference,
+                                            const std::string &modelReference,
+                                            const std::string &clipName);
 
     struct GraphEntry
     {

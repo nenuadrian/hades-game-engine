@@ -164,7 +164,13 @@ namespace hades
     }
     {
       static int selectedComponentType = 0;
-      const char *componentTypes[] = {"Script Component", "Rigid Body", "Mesh Renderer", "Model", "Animation", "Animator", "Blueprint", "UI Canvas"};
+      // "Animation" is deliberately absent: AnimatorComponent now plays a
+      // clip that lives inside a model file directly ("model.fbx#Walk"), so
+      // the legacy index-addressed player has nothing left that it alone can
+      // do. Existing scenes still load and edit it — see the Animation
+      // section below, which offers a one-click conversion — but nothing new
+      // should be created with it.
+      const char *componentTypes[] = {"Script Component", "Rigid Body", "Mesh Renderer", "Model", "Animator", "Blueprint", "UI Canvas"};
       ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.65f);
       ImGui::Combo("##AddComponentType", &selectedComponentType, componentTypes, IM_ARRAYSIZE(componentTypes));
       ImGui::SameLine();
@@ -214,19 +220,12 @@ namespace hades
         }
         else if (selectedComponentType == 4)
         {
-          if (!componentManager.hasComponent<AnimationComponent>(entity))
-          {
-            componentManager.addComponent(entity, AnimationComponent{});
-          }
-        }
-        else if (selectedComponentType == 5)
-        {
           if (!componentManager.hasComponent<AnimatorComponent>(entity))
           {
             componentManager.addComponent(entity, AnimatorComponent{});
           }
         }
-        else if (selectedComponentType == 6)
+        else if (selectedComponentType == 5)
         {
           if (!componentManager.hasComponent<BlueprintComponent>(entity))
           {
@@ -239,7 +238,7 @@ namespace hades
             componentManager.getComponent<BlueprintComponent>(entity).attachments.push_back(BlueprintAttachment());
           }
         }
-        else if (selectedComponentType == 7)
+        else if (selectedComponentType == 6)
         {
           if (!componentManager.hasComponent<UICanvasComponent>(entity))
           {
@@ -519,12 +518,23 @@ namespace hades
         ImGui::TextDisabled("An Animator component is attached; it supersedes this clip player.");
       }
 
+      std::string animationModelPath;
       const ModelAsset *asset = nullptr;
       if (componentManager.hasComponent<ModelComponent>(entity))
       {
-        asset = ModelAssetCache::instance().get(
-            componentManager.getComponent<ModelComponent>(entity).assetPath);
+        animationModelPath = componentManager.getComponent<ModelComponent>(entity).assetPath;
+        asset = ModelAssetCache::instance().get(animationModelPath);
       }
+
+      // This component addresses its clip by INDEX into the model's own
+      // animation list, so re-exporting the mesh with the clips reordered
+      // silently plays a different one. The Animator addresses the same clip
+      // by name — "model.fbx#Walk" — and brings crossfading, events, layers
+      // and graphs with it, so there is nothing left to stay here for.
+      ImGui::TextColored(
+          ImVec4(0.88f, 0.72f, 0.34f, 1.0f),
+          "Legacy: plays a clip by index, so a re-export that reorders clips\n"
+          "changes what plays. The Animator names the same clip instead.");
 
       if (asset == nullptr)
       {
@@ -563,6 +573,43 @@ namespace hades
         ImGui::DragFloat("Speed", &anim.speed, 0.01f, -4.0f, 4.0f);
         ImGui::SliderFloat("Time", &anim.time, 0.0f, activeClip.duration, "%.2f s");
         ImGui::TextDisabled("Playback advances in play mode; scrub Time to preview here.");
+
+        ImGui::Separator();
+        const bool convertible = !activeClip.name.empty() && !animationModelPath.empty();
+        ImGui::BeginDisabled(!convertible);
+        if (ImGui::Button(ICON_FA_RIGHT_LEFT "  Convert to Animator"))
+        {
+          AnimatorComponent animator;
+          if (componentManager.hasComponent<AnimatorComponent>(entity))
+          {
+            // Keep whatever is already authored there; only the clip and the
+            // playback flags come across.
+            animator = componentManager.getComponent<AnimatorComponent>(entity);
+          }
+          animator.defaultClip =
+              animationModelPath + AnimationClipCache::kImportedClipSeparator + activeClip.name;
+          animator.looping = anim.looping;
+          animator.speed = anim.speed;
+          animator.playOnStart = anim.playing;
+
+          if (componentManager.hasComponent<AnimatorComponent>(entity))
+          {
+            componentManager.getComponent<AnimatorComponent>(entity) = animator;
+          }
+          else
+          {
+            componentManager.addComponent(entity, animator);
+          }
+          componentManager.removeComponent<AnimationComponent>(entity);
+        }
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        {
+          ImGui::SetTooltip(
+              convertible
+                  ? "Replace this with an Animator playing the same clip by name."
+                  : "The active clip has no name, so it cannot be addressed by reference.");
+        }
       }
 
       ImGui::PopID();
@@ -667,6 +714,35 @@ namespace hades
         if (noneSelected)
         {
           ImGui::SetItemDefaultFocus();
+        }
+
+        // Animation that came inside the model file, addressable directly
+        // rather than only after a bake into .hades/animations.
+        std::vector<std::string> importedClips;
+        if (componentManager.hasComponent<ModelComponent>(entity))
+        {
+          importedClips = animationCache.listImportedClips(
+              componentManager.getComponent<ModelComponent>(entity).assetPath);
+        }
+        if (!importedClips.empty())
+        {
+          ImGui::TextDisabled("In this model");
+          for (const auto &clipName : importedClips)
+          {
+            ImGui::PushID(clipName.c_str());
+            const bool selected = (animator.defaultClip == clipName);
+            if (ImGui::Selectable(clipName.c_str(), selected))
+            {
+              animator.defaultClip = clipName;
+            }
+            if (selected)
+            {
+              ImGui::SetItemDefaultFocus();
+            }
+            ImGui::PopID();
+          }
+          ImGui::Separator();
+          ImGui::TextDisabled("Authored clips");
         }
 
         for (const auto &clipName : animationCache.listClips())
